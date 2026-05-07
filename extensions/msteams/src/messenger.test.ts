@@ -554,6 +554,71 @@ describe("msteams messenger", () => {
       expect(reference.conversation?.id).toBe("19:abc@thread.tacv2;messageid=legacy-activity-id");
     });
 
+    it("sends no-context thread replies proactively with the channel thread root", async () => {
+      const sent: string[] = [];
+      const channelRef: StoredConversationReference = {
+        activityId: "current-msg",
+        user: { id: "user123", name: "User" },
+        agent: { id: "bot123", name: "Bot" },
+        conversation: {
+          id: "19:abc@thread.tacv2",
+          conversationType: "channel",
+        },
+        channelId: "msteams",
+        serviceUrl: "https://service.example.com",
+        threadId: "thread-root-msg-id",
+      };
+
+      let capturedConversationId: string | undefined;
+      const ids = await sendMSTeamsMessages({
+        replyStyle: "thread",
+        app: createMockApp({
+          createFn: createRecordedSendActivity(sent),
+          onClientCreated: (_serviceUrl, conversationId) => {
+            capturedConversationId = conversationId;
+          },
+        }),
+        appId: "app123",
+        conversationRef: channelRef,
+        messages: [{ text: "hello" }],
+      });
+      expect(sent).toEqual(["hello"]);
+      expect(ids).toEqual(["id:hello"]);
+      expect(capturedConversationId).toBe("19:abc@thread.tacv2;messageid=thread-root-msg-id");
+    });
+
+    it("uses activityId for no-context thread replies when threadId is absent", async () => {
+      const sent: string[] = [];
+      const channelRef: StoredConversationReference = {
+        activityId: "legacy-activity-id",
+        user: { id: "user123", name: "User" },
+        agent: { id: "bot123", name: "Bot" },
+        conversation: {
+          id: "19:abc@thread.tacv2",
+          conversationType: "channel",
+        },
+        channelId: "msteams",
+        serviceUrl: "https://service.example.com",
+      };
+
+      let capturedConversationId: string | undefined;
+      await sendMSTeamsMessages({
+        replyStyle: "thread",
+        app: createMockApp({
+          createFn: createRecordedSendActivity(sent),
+          onClientCreated: (_serviceUrl, conversationId) => {
+            capturedConversationId = conversationId;
+          },
+        }),
+        appId: "app123",
+        conversationRef: channelRef,
+        messages: [{ text: "hello" }],
+      });
+
+      expect(sent).toEqual(["hello"]);
+      expect(capturedConversationId).toBe("19:abc@thread.tacv2;messageid=legacy-activity-id");
+    });
+
     it("does not add thread suffix for top-level replyStyle even with threadId set", async () => {
       const sent: string[] = [];
       let capturedConversationId: string | undefined;

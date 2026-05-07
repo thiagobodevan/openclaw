@@ -370,13 +370,22 @@ async function sendTextWithMedia(
   text: string,
   mediaUrl: string | undefined,
 ): Promise<SendMSTeamsMessageResult> {
-  const { app, appId, conversationId, ref, log, tokenProvider, sharePointSiteId, mediaMaxBytes } =
-    ctx;
+  const {
+    app,
+    appId,
+    conversationId,
+    ref,
+    log,
+    tokenProvider,
+    sharePointSiteId,
+    mediaMaxBytes,
+    replyStyle,
+  } = ctx;
 
   let platformMessageIds: string[];
   try {
     platformMessageIds = await sendMSTeamsMessages({
-      replyStyle: "top-level",
+      replyStyle,
       app,
       appId,
       conversationRef: ref,
