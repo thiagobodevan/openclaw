@@ -6,7 +6,7 @@ import {
   capturePluginRegistration,
   registerSingleProviderPlugin,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { readClaudeCliCredentialsForSetupMock, readClaudeCliCredentialsForRuntimeMock } = vi.hoisted(
   () => ({
@@ -24,6 +24,16 @@ vi.mock("./cli-auth-seam.js", () => {
 
 import anthropicPlugin from "./index.js";
 
+beforeEach(() => {
+  readClaudeCliCredentialsForSetupMock.mockReset();
+  readClaudeCliCredentialsForRuntimeMock.mockReset();
+});
+
+afterAll(() => {
+  vi.doUnmock("./cli-auth-seam.js");
+  vi.resetModules();
+});
+
 function createModelRegistry(models: ProviderRuntimeModel[]) {
   return {
     find(providerId: string, modelId: string) {
@@ -38,7 +48,7 @@ function createModelRegistry(models: ProviderRuntimeModel[]) {
 }
 
 describe("anthropic provider replay hooks", () => {
-  it("registers the claude-cli backend", async () => {
+  it("registers the claude-cli backend", () => {
     const captured = capturePluginRegistration({ register: anthropicPlugin.register });
 
     expect(captured.cliBackends).toContainEqual(
@@ -373,9 +383,11 @@ describe("anthropic provider replay hooks", () => {
     const provider = await registerSingleProviderPlugin(anthropicPlugin);
     const cliAuth = provider.auth.find((entry) => entry.id === "cli");
 
-    expect(cliAuth).toBeDefined();
+    if (!cliAuth) {
+      throw new Error("expected Anthropic CLI auth method");
+    }
 
-    const result = await cliAuth?.run({
+    const result = await cliAuth.run({
       config: {},
     } as never);
 

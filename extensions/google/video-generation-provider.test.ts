@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 const { createGoogleGenAIMock, downloadMock, generateVideosMock, getVideosOperationMock } =
   vi.hoisted(() => {
@@ -39,6 +39,11 @@ describe("google video generation provider", () => {
     generateVideosMock.mockReset();
     getVideosOperationMock.mockReset();
     createGoogleGenAIMock.mockClear();
+  });
+
+  afterAll(() => {
+    vi.doUnmock("./google-genai-runtime.js");
+    vi.resetModules();
   });
 
   it("declares explicit mode capabilities", () => {
@@ -230,7 +235,9 @@ describe("google video generation provider", () => {
     });
 
     const [{ downloadPath }] = downloadMock.mock.calls[0] ?? [{}];
-    expect(path.basename(String(downloadPath))).toBe("video-1.mp4");
+    const downloadBaseName = path.basename(String(downloadPath));
+    expect(downloadBaseName).toContain("video-1.mp4");
+    expect(downloadBaseName).toMatch(/\.part$/);
     expect(result.videos[0]?.buffer).toEqual(Buffer.from("sdk-video"));
     expect(result.videos[0]?.fileName).toBe("video-1.mp4");
   });

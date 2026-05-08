@@ -383,7 +383,7 @@ describe("createMSTeamsReplyDispatcher", () => {
     expect(dispatcher.replyOptions.suppressDefaultToolProgressMessages).toBeUndefined();
   });
 
-  it("does not create a stream for channel conversations", async () => {
+  it("does not create a stream for channel conversations", () => {
     createDispatcher("channel");
 
     expect(lastStreamMock).toBeUndefined();

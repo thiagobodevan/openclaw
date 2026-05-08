@@ -1,5 +1,6 @@
 import {
   createChannelProgressDraftGate,
+  type ChannelProgressDraftLine,
   formatChannelProgressDraftText,
   isChannelProgressDraftWorkToolName,
   resolveChannelPreviewStreamMode,
@@ -204,7 +205,10 @@ export function createTeamsReplyStreamController(params: {
      * preview card's informative status. Only takes effect in "progress" mode
      * with `streaming.previewToolProgress` enabled in config.
      */
-    async pushProgressLine(line?: string, options?: { toolName?: string }): Promise<void> {
+    async pushProgressLine(
+      line?: string | ChannelProgressDraftLine,
+      options?: { toolName?: string },
+    ): Promise<void> {
       if (!stream || streamMode !== "progress") {
         return;
       }
@@ -215,7 +219,10 @@ export function createTeamsReplyStreamController(params: {
         return;
       }
       if (shouldStreamPreviewToolProgress) {
-        const normalized = line?.replace(/\s+/g, " ").trim();
+        // Accept both plain strings and the structured `ChannelProgressDraftLine`
+        // shape that `buildChannelProgressDraftLine[ForEntry]` returns; normalize
+        // to the trimmed text so the dedupe + max-lines policy stays simple.
+        const normalized = normalizeProgressLineIdentity(line);
         if (normalized) {
           const previous = progressLines.at(-1);
           if (previous !== normalized) {
@@ -322,4 +329,11 @@ export function createTeamsReplyStreamController(params: {
 
     wasCanceled,
   };
+}
+
+function normalizeProgressLineIdentity(
+  line: string | ChannelProgressDraftLine | undefined,
+): string {
+  const text = typeof line === "string" ? line : line?.text;
+  return text?.replace(/\s+/g, " ").trim() ?? "";
 }

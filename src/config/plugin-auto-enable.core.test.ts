@@ -585,7 +585,7 @@ describe("applyPluginAutoEnable core", () => {
     expect(result.changes).toEqual([]);
   });
 
-  it("keeps OpenAI Codex OAuth model refs owned by the OpenAI plugin", () => {
+  it("keeps OpenAI Codex OAuth model refs provider-owned by OpenAI and runtime-owned by Codex", () => {
     const result = applyPluginAutoEnable({
       config: {
         agents: {
@@ -607,9 +607,10 @@ describe("applyPluginAutoEnable core", () => {
     });
 
     expect(result.config.plugins?.entries?.openai?.enabled).toBe(true);
-    expect(result.config.plugins?.entries?.codex).toBeUndefined();
+    expect(result.config.plugins?.entries?.codex?.enabled).toBe(true);
     expect(result.changes).toEqual([
       "openai-codex/gpt-5.5 model configured, enabled automatically.",
+      "codex agent runtime configured, enabled automatically.",
     ]);
   });
 
@@ -645,13 +646,46 @@ describe("applyPluginAutoEnable core", () => {
     ]);
   });
 
-  it("auto-enables an opt-in plugin when an agent runtime is configured", () => {
+  it("auto-enables Codex when OpenAI agent models use the implicit runtime default", () => {
     const result = applyPluginAutoEnable({
       config: {
         agents: {
           defaults: {
-            agentRuntime: {
-              id: "codex",
+            model: "openai/gpt-5.5",
+          },
+        },
+      },
+      env,
+      manifestRegistry: makeRegistry([
+        { id: "openai", channels: [], providers: ["openai", "openai-codex"] },
+        {
+          id: "codex",
+          channels: [],
+          providers: ["codex"],
+          activation: { onAgentHarnesses: ["codex"] },
+        },
+      ]),
+    });
+
+    expect(result.config.plugins?.entries?.openai?.enabled).toBe(true);
+    expect(result.config.plugins?.entries?.codex?.enabled).toBe(true);
+    expect(result.changes).toEqual([
+      "openai/gpt-5.5 model configured, enabled automatically.",
+      "codex agent runtime configured, enabled automatically.",
+    ]);
+  });
+
+  it("auto-enables an opt-in plugin when a provider runtime is configured", () => {
+    const result = applyPluginAutoEnable({
+      config: {
+        models: {
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.com/v1",
+              models: [],
+              agentRuntime: {
+                id: "codex",
+              },
             },
           },
         },
@@ -672,13 +706,17 @@ describe("applyPluginAutoEnable core", () => {
     expect(result.changes).toContain("codex agent runtime configured, enabled automatically.");
   });
 
-  it("auto-enables a CLI backend owner when an agent runtime is configured", () => {
+  it("auto-enables a CLI backend owner when a provider runtime is configured", () => {
     const result = applyPluginAutoEnable({
       config: {
-        agents: {
-          defaults: {
-            agentRuntime: {
-              id: "claude-cli",
+        models: {
+          providers: {
+            anthropic: {
+              baseUrl: "https://api.anthropic.com",
+              models: [],
+              agentRuntime: {
+                id: "claude-cli",
+              },
             },
           },
         },
@@ -702,7 +740,7 @@ describe("applyPluginAutoEnable core", () => {
     expect(result.changes).toContain("claude-cli agent runtime configured, enabled automatically.");
   });
 
-  it("auto-enables an opt-in plugin when an agent harness runtime is forced by env", () => {
+  it("ignores agent harness runtime env when auto-enabling plugins", () => {
     const result = applyPluginAutoEnable({
       config: {},
       env: makeIsolatedEnv({ OPENCLAW_AGENT_RUNTIME: "codex" }),
@@ -717,8 +755,8 @@ describe("applyPluginAutoEnable core", () => {
       ]),
     });
 
-    expect(result.config.plugins?.entries?.codex?.enabled).toBe(true);
-    expect(result.changes).toContain("codex agent runtime configured, enabled automatically.");
+    expect(result.config.plugins?.entries?.codex?.enabled).toBeUndefined();
+    expect(result.changes).not.toContain("codex agent runtime configured, enabled automatically.");
   });
 
   it("skips auto-enable work for configs without channel or plugin-owned surfaces", () => {

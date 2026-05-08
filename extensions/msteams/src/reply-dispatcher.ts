@@ -1,6 +1,6 @@
 import {
-  formatChannelProgressDraftLine,
-  formatChannelProgressDraftLineForEntry,
+  buildChannelProgressDraftLine,
+  buildChannelProgressDraftLineForEntry,
   resolveChannelPreviewStreamMode,
   resolveChannelStreamingBlockEnabled,
   resolveChannelStreamingPreviewToolProgress,
@@ -382,7 +382,7 @@ export function createMSTeamsReplyDispatcher(params: {
           const detailMode =
             typeof payload?.detailMode === "string" ? payload.detailMode : undefined;
           await streamController.pushProgressLine(
-            formatChannelProgressDraftLineForEntry(
+            buildChannelProgressDraftLineForEntry(
               msteamsCfg,
               {
                 event: "tool",
@@ -399,7 +399,7 @@ export function createMSTeamsReplyDispatcher(params: {
         },
         onItemEvent: async (payload: PipelinePayload) => {
           await streamController.pushProgressLine(
-            formatChannelProgressDraftLineForEntry(msteamsCfg, {
+            buildChannelProgressDraftLineForEntry(msteamsCfg, {
               event: "item",
               ...(typeof payload?.kind === "string" ? { itemKind: payload.kind } : {}),
               ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
@@ -419,7 +419,7 @@ export function createMSTeamsReplyDispatcher(params: {
             return;
           }
           await streamController.pushProgressLine(
-            formatChannelProgressDraftLine({
+            buildChannelProgressDraftLine({
               event: "plan",
               phase: payload.phase as string,
               ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
@@ -438,7 +438,7 @@ export function createMSTeamsReplyDispatcher(params: {
             return;
           }
           await streamController.pushProgressLine(
-            formatChannelProgressDraftLine({
+            buildChannelProgressDraftLine({
               event: "approval",
               phase: payload.phase as string,
               ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
@@ -453,7 +453,7 @@ export function createMSTeamsReplyDispatcher(params: {
             return;
           }
           await streamController.pushProgressLine(
-            formatChannelProgressDraftLine({
+            buildChannelProgressDraftLine({
               event: "command-output",
               phase: payload.phase as string,
               ...(typeof payload?.title === "string" ? { title: payload.title } : {}),
