@@ -384,15 +384,15 @@ describe("monitorMSTeamsProvider lifecycle", () => {
     expect(app.on).not.toHaveBeenCalledWith("signin.verify-state", expect.any(Function));
     expect(app.event).toHaveBeenCalledWith("signin", expect.any(Function));
 
-    const signinHandler = app.event.mock.calls.find(([name]) => name === "signin")?.[1] as
-      | ((ctx: {
-          activity: { from?: { id?: string; aadObjectId?: string } };
-          token: { connectionName: string; token: string; expiration: string };
-        }) => void)
-      | undefined;
-    expect(signinHandler).toBeDefined();
+    const signinHandler = app.event.mock.calls.find(
+      (call: [string, unknown]) => call[0] === "signin",
+    )?.[1];
+    expect(typeof signinHandler).toBe("function");
+    if (typeof signinHandler !== "function") {
+      throw new Error("expected signin event handler");
+    }
 
-    signinHandler?.({
+    signinHandler({
       activity: { from: { id: "29:user", aadObjectId: "aad-user" } },
       token: {
         connectionName: "graph",
