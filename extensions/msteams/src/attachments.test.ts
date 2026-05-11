@@ -660,6 +660,7 @@ describe("msteams attachments", () => {
         );
 
         expectAttachmentMediaLength(media, 0);
+
         // Migration inlines host + error into the message text — the structured
         // meta object was being dropped by the logger formatter pre-migration.
         expect(logger.warn).toHaveBeenCalledWith(

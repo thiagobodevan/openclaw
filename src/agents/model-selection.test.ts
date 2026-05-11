@@ -224,6 +224,8 @@ describe("model-selection", () => {
       expect(normalizeProviderId("qwen")).toBe("qwen");
       expect(normalizeProviderId("kimi-code")).toBe("kimi");
       expect(normalizeProviderId("kimi-coding")).toBe("kimi");
+      expect(normalizeProviderId("MoonshotAI")).toBe("moonshot");
+      expect(normalizeProviderId("moonshot-ai")).toBe("moonshot");
       expect(normalizeProviderId("anthropic-cli")).toBe("claude-cli");
       expect(normalizeProviderId("bedrock")).toBe("amazon-bedrock");
       expect(normalizeProviderId("aws-bedrock")).toBe("amazon-bedrock");
@@ -1583,7 +1585,7 @@ describe("model-selection", () => {
 
         expect(result).toEqual({ provider: "google", model: "claude-3-5-sonnet" });
         expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Falling back to "google/claude-3-5-sonnet"'),
+          '[model-selection] Model "claude-3-5-sonnet" specified without provider. Falling back to "google/claude-3-5-sonnet". Please use "google/claude-3-5-sonnet" in your config.',
         );
       } finally {
         warnSpy.mockRestore();
@@ -1810,7 +1812,7 @@ describe("model-selection", () => {
 
         expect(result).toEqual({ provider: "openai", model: "gpt-5.4" });
         expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Falling back to default "openai/gpt-5.4"'),
+          '[model-selection] Model "openai/" could not be resolved. Falling back to default "openai/gpt-5.4".',
         );
       } finally {
         warnSpy.mockRestore();

@@ -1216,6 +1216,19 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       {},
     ],
     [
+      "default model runtime policy",
+      {
+        agents: {
+          defaults: {
+            models: {
+              "openai/gpt-5.5": { agentRuntime: { id: "codex" } },
+            },
+          },
+        },
+      },
+      {},
+    ],
+    [
       "agent model runtime policy",
       {
         agents: {
@@ -1628,6 +1641,73 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       env: {},
     });
     expect(result.changes).toEqual(['Repaired missing configured plugin "demo".']);
+  });
+
+  it("repairs a broken managed package entry from its attributed registry diagnostic", async () => {
+    const records = {
+      demo: {
+        source: "npm",
+        spec: "@openclaw/plugin-demo@1.0.0",
+        resolvedName: "@openclaw/plugin-demo",
+        resolvedSpec: "@openclaw/plugin-demo@1.0.0",
+        resolvedVersion: "1.0.0",
+        integrity: "sha512-demo",
+        installPath: "/tmp/openclaw-plugins/demo",
+      },
+    };
+    mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue(records);
+    mocks.loadPluginMetadataSnapshot.mockReturnValue({
+      plugins: [],
+      diagnostics: [
+        {
+          level: "error",
+          pluginId: "demo",
+          message: "extension entry escapes package directory: ./index.ts",
+        },
+      ],
+    });
+    mocks.updateNpmInstalledPlugins.mockResolvedValue({
+      changed: true,
+      config: {
+        plugins: {
+          installs: {
+            demo: {
+              source: "npm",
+              spec: "@openclaw/plugin-demo@1.0.0",
+              installPath: "/tmp/openclaw-plugins/demo",
+            },
+          },
+        },
+      },
+      outcomes: [
+        {
+          pluginId: "demo",
+          status: "updated",
+          message: "Updated demo.",
+        },
+      ],
+    });
+
+    const { repairMissingConfiguredPluginInstalls } =
+      await import("./missing-configured-plugin-install.js");
+    const result = await repairMissingConfiguredPluginInstalls({
+      cfg: {},
+      env: {},
+    });
+
+    const updateArg = expectRecordFields(mockCallArg(mocks.updateNpmInstalledPlugins), {
+      pluginIds: ["demo"],
+    });
+    const updateConfig = updateArg.config as { plugins?: { installs?: Record<string, unknown> } };
+    const updateRecord = expectRecordFields(updateConfig.plugins?.installs?.demo, {
+      source: "npm",
+      spec: "@openclaw/plugin-demo@1.0.0",
+      integrity: "sha512-demo",
+      installPath: "/tmp/openclaw-plugins/demo",
+    });
+    expect(updateRecord.resolvedSpec).toBeUndefined();
+    expect(updateRecord.resolvedVersion).toBeUndefined();
+    expect(result.changes).toEqual(['Repaired broken installed plugin "demo".']);
   });
 
   it("reinstalls a known configured plugin from the catalog when its recorded install path is missing", async () => {

@@ -143,7 +143,7 @@ describe("createTeamsReplyStreamController", () => {
           mode: "progress",
           progress: {
             label: "Working",
-            maxLines: 1,
+            maxLines: 3,
           },
         },
       } as never,
@@ -152,7 +152,7 @@ describe("createTeamsReplyStreamController", () => {
     await ctrl.pushProgressLine("tool: search");
     await ctrl.pushProgressLine("tool: exec");
 
-    expect(stream.update).toHaveBeenLastCalledWith("- tool: exec");
+    expect(stream.update).toHaveBeenLastCalledWith("Working\n- tool: search\n- tool: exec");
   });
 
   it("does not close a canceled stream in finalize", async () => {

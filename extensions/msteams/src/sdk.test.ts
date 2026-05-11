@@ -51,6 +51,7 @@ describe("createMSTeamsApp", () => {
   it("creates app with secret credentials", async () => {
     const creds: MSTeamsCredentials = {
       type: "secret",
+
       appId: "test-app-id",
       appPassword: "test-secret",
       tenantId: "test-tenant",
@@ -91,8 +92,10 @@ describe("createMSTeamsApp", () => {
   it("creates app with managed identity credentials", async () => {
     const creds: MSTeamsFederatedCredentials = {
       type: "federated",
+
       appId: "test-app-id",
       tenantId: "test-tenant",
+
       useManagedIdentity: true,
     };
 

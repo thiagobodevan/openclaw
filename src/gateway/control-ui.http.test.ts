@@ -214,7 +214,7 @@ describe("handleControlUiHttpRequest", () => {
   }) {
     expect(params.handled).toBe(true);
     expect(params.res.statusCode).toBe(403);
-    expect(JSON.parse(String(params.end.mock.calls[0]?.[0] ?? ""))).toMatchObject({
+    expect(JSON.parse(String(params.end.mock.calls[0]?.[0] ?? ""))).toEqual({
       ok: false,
       error: {
         type: "forbidden",
@@ -311,6 +311,10 @@ describe("handleControlUiHttpRequest", () => {
         expect(typeof csp).toBe("string");
         expect(String(csp)).toContain("frame-ancestors 'none'");
         expect(String(csp)).toContain("script-src 'self'");
+        expect(String(csp)).toContain(
+          "connect-src 'self' ws: wss: https://api.openai.com https://tweakcn.com",
+        );
+        expect(String(csp)).not.toContain("https://*.tweakcn.com");
         expect(String(csp)).not.toContain("script-src 'self' 'unsafe-inline'");
       },
     });
@@ -373,7 +377,7 @@ describe("handleControlUiHttpRequest", () => {
         mediaTicket?: string;
         mediaTicketExpiresAt?: string;
       };
-      expect(payload).toMatchObject({ available: true });
+      expect(payload.available).toBe(true);
       expect(payload.mediaTicket).toMatch(/^v1\./);
       expect(Date.parse(payload.mediaTicketExpiresAt ?? "")).not.toBeNaN();
     } finally {
@@ -415,7 +419,7 @@ describe("handleControlUiHttpRequest", () => {
           mediaTicket?: string;
           mediaTicketExpiresAt?: string;
         };
-        expect(payload).toMatchObject({ available: true });
+        expect(payload.available).toBe(true);
         expect(payload.mediaTicket).toMatch(/^v1\./);
         expect(Date.parse(payload.mediaTicketExpiresAt ?? "")).not.toBeNaN();
       },

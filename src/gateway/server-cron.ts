@@ -9,6 +9,7 @@ import {
   resolveAgentMainSessionKey,
 } from "../config/sessions.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
+import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import {
@@ -58,6 +59,25 @@ function pickDefined<T extends Record<string, unknown>>(
     }
   }
   return result;
+}
+
+function omitExplicitHeartbeatDestination(
+  heartbeat: AgentDefaultsConfig["heartbeat"] | undefined,
+): AgentDefaultsConfig["heartbeat"] | undefined {
+  if (!heartbeat) {
+    return undefined;
+  }
+  return {
+    ...heartbeat,
+    to: undefined,
+    accountId: undefined,
+  };
+}
+
+function sanitizeCronHeartbeatOverride(
+  heartbeat: AgentDefaultsConfig["heartbeat"] | undefined,
+): AgentDefaultsConfig["heartbeat"] | undefined {
+  return heartbeat?.target === "last" ? omitExplicitHeartbeatDestination(heartbeat) : heartbeat;
 }
 
 /** Map internal CronJob to the public plugin SDK shape. */
@@ -203,6 +223,28 @@ export function buildGatewayCronService(params: {
     return { runtimeConfig, agentId, sessionKey };
   };
 
+  const resolveCronHeartbeatOverride = (params: {
+    runtimeConfig: OpenClawConfig;
+    agentId?: string;
+    heartbeat?: AgentDefaultsConfig["heartbeat"];
+  }) => {
+    if (!params.heartbeat) {
+      return undefined;
+    }
+    const agentEntry =
+      params.agentId !== undefined
+        ? findAgentEntry(params.runtimeConfig, params.agentId)
+        : undefined;
+    const agentHeartbeat =
+      agentEntry && typeof agentEntry === "object" ? agentEntry.heartbeat : undefined;
+    const baseHeartbeat = {
+      ...params.runtimeConfig.agents?.defaults?.heartbeat,
+      ...agentHeartbeat,
+    };
+    const heartbeatOverride = { ...baseHeartbeat, ...params.heartbeat };
+    return sanitizeCronHeartbeatOverride(heartbeatOverride);
+  };
+
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
   const runLogPrune = resolveCronRunLogPruneOptions(params.cfg.cron?.runLog);
   const resolveSessionStorePath = (agentId?: string) =>
@@ -257,30 +299,11 @@ export function buildGatewayCronService(params: {
         reason: opts?.reason,
         agentId,
         sessionKey,
-        heartbeat: opts?.heartbeat,
+        heartbeat: sanitizeCronHeartbeatOverride(opts?.heartbeat),
       });
     },
     runHeartbeatOnce: async (opts) => {
       const { runtimeConfig, agentId, sessionKey } = resolveCronWakeTarget(opts);
-      // Merge cron-supplied heartbeat overrides (e.g. target: "last") with the
-      // fully resolved agent heartbeat config so cron-triggered heartbeats
-      // respect agent-specific overrides (agents.list[].heartbeat) before
-      // falling back to agents.defaults.heartbeat.
-      const agentEntry =
-        Array.isArray(runtimeConfig.agents?.list) &&
-        runtimeConfig.agents.list.find(
-          (entry) =>
-            entry && typeof entry.id === "string" && normalizeAgentId(entry.id) === agentId,
-        );
-      const agentHeartbeat =
-        agentEntry && typeof agentEntry === "object" ? agentEntry.heartbeat : undefined;
-      const baseHeartbeat = {
-        ...runtimeConfig.agents?.defaults?.heartbeat,
-        ...agentHeartbeat,
-      };
-      const heartbeatOverride = opts?.heartbeat
-        ? { ...baseHeartbeat, ...opts.heartbeat }
-        : undefined;
       return await runHeartbeatOnce({
         cfg: runtimeConfig,
         source: opts?.source ?? "cron",
@@ -288,11 +311,21 @@ export function buildGatewayCronService(params: {
         reason: opts?.reason,
         agentId,
         sessionKey,
-        heartbeat: heartbeatOverride,
+        heartbeat: resolveCronHeartbeatOverride({
+          runtimeConfig,
+          agentId,
+          heartbeat: opts?.heartbeat,
+        }),
         deps: { ...params.deps, runtime: defaultRuntime },
       });
     },
-    runIsolatedAgentJob: async ({ job, message, abortSignal, onExecutionStarted }) => {
+    runIsolatedAgentJob: async ({
+      job,
+      message,
+      abortSignal,
+      onExecutionStarted,
+      onExecutionPhase,
+    }) => {
       const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
       const sessionKey = resolveCronSessionTargetSessionKey(job.sessionTarget) ?? `cron:${job.id}`;
       try {
@@ -303,6 +336,7 @@ export function buildGatewayCronService(params: {
           message,
           abortSignal,
           onExecutionStarted,
+          onExecutionPhase,
           agentId,
           sessionKey,
           lane: "cron",
