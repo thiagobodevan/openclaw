@@ -798,17 +798,21 @@ describe("TelegramPollingSession", () => {
         },
       });
 
-      await vi.waitFor(() => expect(createWorker).toHaveBeenCalledTimes(1));
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(events).toEqual([]);
-      expect(await pendingUpdateIds(tempDir)).toEqual([43]);
-      expect((await fs.readdir(tempDir)).toSorted()).toEqual([
-        "0000000000000042.json.processing",
-        "0000000000000043.json",
-      ]);
-      abort.abort();
-      stopWorker();
-      await runPromise;
+      try {
+        await vi.waitFor(() => expect(createWorker).toHaveBeenCalledTimes(1));
+        await vi.waitFor(async () =>
+          expect((await fs.readdir(tempDir)).toSorted()).toEqual([
+            "0000000000000042.json.processing",
+            "0000000000000043.json",
+          ]),
+        );
+        expect(events).toEqual([]);
+        expect(await pendingUpdateIds(tempDir)).toEqual([43]);
+      } finally {
+        abort.abort();
+        stopWorker();
+        await runPromise;
+      }
     });
   });
 
