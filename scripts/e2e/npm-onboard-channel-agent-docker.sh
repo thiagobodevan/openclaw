@@ -167,11 +167,7 @@ if (config.channels && Object.hasOwn(config.channels, "whatsapp")) {
 }
 NODE
 cp "$HOME/.openclaw/openclaw.json" /tmp/openclaw-config-before-missing-whatsapp-login.json
-set +e
-openclaw channels login --channel whatsapp >/tmp/openclaw-missing-whatsapp-login.log 2>&1
-missing_whatsapp_login_status=$?
-set -e
-if [ "$missing_whatsapp_login_status" -eq 0 ]; then
+if openclaw channels login --channel whatsapp >/tmp/openclaw-missing-whatsapp-login.log 2>&1; then
   echo "expected missing WhatsApp config login to fail" >&2
   cat /tmp/openclaw-missing-whatsapp-login.log >&2 || true
   exit 1
