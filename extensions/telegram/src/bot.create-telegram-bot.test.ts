@@ -988,6 +988,9 @@ describe("createTelegramBot", () => {
       });
 
       const flushFirst = extractLatestDebounceFlush();
+      const debounceCallCountAfterFirst = setTimeoutSpy.mock.calls.filter(
+        (call) => call[1] === DEBOUNCE_MS,
+      ).length;
 
       await runTelegramMiddlewareChain({
         ctx: {
@@ -1005,7 +1008,13 @@ describe("createTelegramBot", () => {
         finalHandler: messageHandler,
       });
 
-      await flushFirst?.();
+      expect(
+        setTimeoutSpy.mock.calls.filter((call) => call[1] === DEBOUNCE_MS).length,
+      ).toBeGreaterThan(debounceCallCountAfterFirst);
+      expect(startedBodies).toHaveLength(0);
+
+      const flushAfterStop = extractLatestDebounceFlush() ?? flushFirst;
+      await flushAfterStop?.();
       await vi.waitFor(() => {
         expect(startedBodies.some((body) => body.includes("first"))).toBe(true);
       });
