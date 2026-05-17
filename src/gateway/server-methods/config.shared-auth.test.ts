@@ -207,6 +207,54 @@ describe("config shared auth disconnects", () => {
     );
   });
 
+  it("preserves dotted channel policy keys when marking explicit writes", async () => {
+    const prevConfig: OpenClawConfig = {
+      channels: {
+        matrix: {
+          groups: {
+            "!room:example.org": { users: ["@old:example.org"] },
+          },
+        },
+      },
+    };
+    const nextConfig: OpenClawConfig = {
+      channels: {
+        matrix: {
+          groups: {
+            "!room:example.org": { users: ["@new:example.org"] },
+          },
+        },
+      },
+    };
+    readConfigFileSnapshotForWriteMock.mockResolvedValue(createConfigWriteSnapshot(prevConfig));
+
+    const { options } = createConfigHandlerHarness({
+      method: "config.patch",
+      params: {
+        baseHash: "base-hash",
+        raw: JSON.stringify({
+          channels: {
+            matrix: {
+              groups: {
+                "!room:example.org": { users: ["@new:example.org"] },
+              },
+            },
+          },
+        }),
+      },
+    });
+
+    await configHandlers["config.patch"](options);
+    await flushConfigHandlerMicrotasks();
+
+    expect(writeConfigFileMock).toHaveBeenCalledWith(
+      nextConfig,
+      expect.objectContaining({
+        explicitSetPaths: [["channels", "matrix", "groups", "!room:example.org", "users"]],
+      }),
+    );
+  });
+
   it("marks protected parent removals as explicit control-plane writes", async () => {
     const prevConfig: OpenClawConfig = {
       commands: {

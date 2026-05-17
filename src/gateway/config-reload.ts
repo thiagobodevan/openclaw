@@ -9,7 +9,7 @@ import {
   loadInstalledPluginIndexInstallRecords,
   loadInstalledPluginIndexInstallRecordsSync,
 } from "../plugins/installed-plugin-index-records.js";
-import { diffConfigPaths } from "./config-diff.js";
+import { diffConfigPathSegments, diffConfigPaths } from "./config-diff.js";
 import {
   applyNoopEnabledChannelActivationRestarts,
   buildGatewayReloadPlan,
@@ -21,6 +21,7 @@ import { resolveGatewayReloadSettings } from "./config-reload-settings.js";
 
 export {
   buildGatewayReloadPlan,
+  diffConfigPathSegments,
   diffConfigPaths,
   listPluginInstallTimestampMetadataPaths,
   listPluginInstallWholeRecordPaths,

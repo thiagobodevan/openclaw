@@ -22,7 +22,7 @@ import {
   prepareSecretsRuntimeSnapshot,
   type PreparedSecretsRuntimeSnapshot,
 } from "../../secrets/runtime.js";
-import { diffConfigPaths } from "../config-diff.js";
+import { diffConfigPathSegments, diffConfigPaths } from "../config-diff.js";
 import {
   formatControlPlaneActor,
   resolveControlPlaneActor,
@@ -60,33 +60,31 @@ let configSchemaResponseCache: {
 } | null = null;
 
 const PROTECTED_CONTROL_PLANE_CONFIG_PATHS = [
-  "commands.ownerAllowFrom",
-  "commands.allowFrom",
-  "tools.elevated.allowFrom",
-  "agents.list",
-  "channels",
+  ["commands", "ownerAllowFrom"],
+  ["commands", "allowFrom"],
+  ["tools", "elevated", "allowFrom"],
+  ["agents", "list"],
+  ["channels"],
 ] as const;
 
-function isProtectedControlPlaneConfigPath(path: string): boolean {
-  return PROTECTED_CONTROL_PLANE_CONFIG_PATHS.some(
-    (protectedPath) =>
-      path === protectedPath ||
-      path.startsWith(`${protectedPath}.`) ||
-      protectedPath.startsWith(`${path}.`),
-  );
+function startsWithConfigPath(path: readonly string[], prefix: readonly string[]): boolean {
+  return prefix.every((segment, index) => path[index] === segment);
 }
 
-function splitConfigPath(path: string): string[] {
-  return path === "<root>" ? [] : path.split(".");
+function isProtectedControlPlaneConfigPath(path: readonly string[]): boolean {
+  return PROTECTED_CONTROL_PLANE_CONFIG_PATHS.some(
+    (protectedPath) =>
+      startsWithConfigPath(path, protectedPath) || startsWithConfigPath(protectedPath, path),
+  );
 }
 
 function withExplicitProtectedControlPlanePaths(
   writeOptions: Awaited<ReturnType<typeof readConfigFileSnapshotForWrite>>["writeOptions"],
-  changedPaths: readonly string[],
+  changedPaths: readonly (readonly string[])[],
 ): Awaited<ReturnType<typeof readConfigFileSnapshotForWrite>>["writeOptions"] {
   const explicitSetPaths = changedPaths
     .filter(isProtectedControlPlaneConfigPath)
-    .map(splitConfigPath);
+    .map((path) => [...path]);
   if (explicitSetPaths.length === 0) {
     return writeOptions;
   }
@@ -390,10 +388,10 @@ export const configHandlers: GatewayRequestHandlers = {
     if (!(await ensureResolvableSecretRefsOrRespond({ config: parsed.config, respond }))) {
       return;
     }
-    const changedPaths = diffConfigPaths(snapshot.config, parsed.config);
+    const changedPathSegments = diffConfigPathSegments(snapshot.config, parsed.config);
     const writeResult = await commitGatewayConfigWrite({
       snapshot,
-      writeOptions: withExplicitProtectedControlPlanePaths(writeOptions, changedPaths),
+      writeOptions: withExplicitProtectedControlPlanePaths(writeOptions, changedPathSegments),
       nextConfig: parsed.config,
       context,
     });
@@ -489,6 +487,7 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const changedPaths = diffConfigPaths(snapshot.config, validated.config);
+    const changedPathSegments = diffConfigPathSegments(snapshot.config, validated.config);
     const actor = resolveControlPlaneActor(client);
 
     // No-op: if the validated config is identical to the current config,
@@ -525,7 +524,7 @@ export const configHandlers: GatewayRequestHandlers = {
       });
     const writeResult = await commitGatewayConfigWrite({
       snapshot,
-      writeOptions: withExplicitProtectedControlPlanePaths(writeOptions, changedPaths),
+      writeOptions: withExplicitProtectedControlPlanePaths(writeOptions, changedPathSegments),
       nextConfig: validated.config,
       context,
       disconnectSharedAuthClients,
@@ -579,6 +578,7 @@ export const configHandlers: GatewayRequestHandlers = {
       return;
     }
     const changedPaths = diffConfigPaths(snapshot.config, parsed.config);
+    const changedPathSegments = diffConfigPathSegments(snapshot.config, parsed.config);
     const actor = resolveControlPlaneActor(client);
     context?.logGateway?.info(
       `config.apply write ${formatControlPlaneActor(actor)} changedPaths=${summarizeChangedPaths(changedPaths)} restartReason=config.apply`,
@@ -593,7 +593,7 @@ export const configHandlers: GatewayRequestHandlers = {
       });
     const writeResult = await commitGatewayConfigWrite({
       snapshot,
-      writeOptions: withExplicitProtectedControlPlanePaths(writeOptions, changedPaths),
+      writeOptions: withExplicitProtectedControlPlanePaths(writeOptions, changedPathSegments),
       nextConfig: parsed.config,
       context,
       disconnectSharedAuthClients,

@@ -20,6 +20,7 @@ import {
 import { createTestRegistry } from "../test-utils/channel-plugins.js";
 import {
   buildGatewayReloadPlan,
+  diffConfigPathSegments,
   diffConfigPaths,
   type GatewayReloadPlan,
   listPluginInstallTimestampMetadataPaths,
@@ -122,6 +123,32 @@ describe("diffConfigPaths", () => {
       "plugins.installs.lossless.resolvedAt",
       "plugins.installs.lossless.resolvedAt",
     ]);
+  });
+
+  it("preserves path segment boundaries for dotted keys", () => {
+    const prev = {
+      channels: {
+        matrix: {
+          groups: {
+            "!room:example.org": { users: ["@old:example.org"] },
+          },
+        },
+      },
+    };
+    const next = {
+      channels: {
+        matrix: {
+          groups: {
+            "!room:example.org": { users: ["@new:example.org"] },
+          },
+        },
+      },
+    };
+
+    expect(diffConfigPathSegments(prev, next)).toEqual([
+      ["channels", "matrix", "groups", "!room:example.org", "users"],
+    ]);
+    expect(diffConfigPaths(prev, next)).toEqual(["channels.matrix.groups.!room:example.org.users"]);
   });
 });
 
