@@ -95,7 +95,6 @@ export function shouldSuppressLocalDiscordExecApprovalPrompt(params: {
   const config = resolveDiscordAccount(params).config.execApprovals;
   return (
     params.hint?.kind === "approval-pending" &&
-    params.hint.nativeRouteActive === true &&
     isDiscordExecApprovalClientEnabled(params) &&
     metadata !== null &&
     matchesApprovalRequestFilters({

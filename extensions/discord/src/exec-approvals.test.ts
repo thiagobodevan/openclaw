@@ -4,6 +4,7 @@ import {
   getDiscordExecApprovalApprovers,
   isDiscordExecApprovalApprover,
   isDiscordExecApprovalClientEnabled,
+  shouldSuppressLocalDiscordExecApprovalPrompt,
 } from "./exec-approvals.js";
 
 function buildConfig(
@@ -84,5 +85,34 @@ describe("discord exec approvals", () => {
 
     expect(getDiscordExecApprovalApprovers({ cfg })).toEqual(["123", "456", "789"]);
     expect(isDiscordExecApprovalApprover({ cfg, senderId: "456" })).toBe(true);
+  });
+
+  it("suppresses local prompts when the Discord native client is enabled", () => {
+    const payload = {
+      channelData: {
+        execApproval: {
+          approvalId: "req-1",
+          approvalSlug: "req-1",
+          agentId: "main",
+          sessionKey: "agent:main:discord:channel:123",
+        },
+      },
+    };
+
+    expect(
+      shouldSuppressLocalDiscordExecApprovalPrompt({
+        cfg: buildConfig({ enabled: true, approvers: ["123"] }),
+        payload,
+        hint: { kind: "approval-pending", approvalKind: "exec", nativeRouteActive: false },
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldSuppressLocalDiscordExecApprovalPrompt({
+        cfg: buildConfig(),
+        payload,
+        hint: { kind: "approval-pending", approvalKind: "exec", nativeRouteActive: false },
+      }),
+    ).toBe(false);
   });
 });
