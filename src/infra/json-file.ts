@@ -1,10 +1,10 @@
 import "./fs-safe-defaults.js";
 import fs from "node:fs";
 import path from "node:path";
-import { tryReadJson } from "@openclaw/fs-safe/json";
-import { tryReadJsonSync, writeJsonSync } from "./json-files.js";
+import { tryReadJson, tryReadJsonSync as rawTryReadJsonSync } from "@openclaw/fs-safe/json";
+import { writeJsonSync } from "./json-files.js";
 
-export { tryReadJson, tryReadJsonSync, writeJsonSync };
+export { tryReadJson, writeJsonSync };
 export const readJsonFile = tryReadJson;
 
 function resolveJsonSymlinkTarget(pathname: string): string | undefined {
@@ -39,10 +39,10 @@ export function saveJsonFile(pathname: string, data: unknown): void {
 
 // oxlint-disable-next-line typescript-eslint/no-unnecessary-type-parameters -- legacy typed JSON loader alias.
 export function loadJsonFile<T = unknown>(pathname: string): T | undefined {
-  const direct = tryReadJsonSync<T>(pathname);
+  const direct = rawTryReadJsonSync<T>(pathname);
   if (direct !== null) {
     return direct;
   }
   const target = resolveJsonSymlinkTarget(pathname);
-  return target ? (tryReadJsonSync<T>(target) ?? undefined) : undefined;
+  return target ? (rawTryReadJsonSync<T>(target) ?? undefined) : undefined;
 }
