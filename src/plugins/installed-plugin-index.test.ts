@@ -1296,4 +1296,19 @@ describe("installed plugin index memo", () => {
 
     expect(second).not.toBe(first);
   });
+
+  it("caches multiple distinct input tuples without evicting each other", () => {
+    const workspaceA = makeTempDir();
+    const workspaceB = makeTempDir();
+    const env = hermeticEnv();
+
+    const indexA1 = loadInstalledPluginIndex({ workspaceDir: workspaceA, env });
+    const indexB1 = loadInstalledPluginIndex({ workspaceDir: workspaceB, env });
+    const indexA2 = loadInstalledPluginIndex({ workspaceDir: workspaceA, env });
+    const indexB2 = loadInstalledPluginIndex({ workspaceDir: workspaceB, env });
+
+    expect(indexA2).toBe(indexA1);
+    expect(indexB2).toBe(indexB1);
+    expect(indexA1).not.toBe(indexB1);
+  });
 });

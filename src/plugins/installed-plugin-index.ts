@@ -21,17 +21,17 @@ import {
   type RefreshInstalledPluginIndexParams,
 } from "./installed-plugin-index-types.js";
 
-let cached: {
+const cached: {
   policyHash: string | null;
   env: NodeJS.ProcessEnv;
   workspaceDir: string | undefined;
   stateDir: string | undefined;
   pluginIndexFilePath: string | undefined;
   value: InstalledPluginIndex;
-} | null = null;
+}[] = [];
 
 export function invalidateInstalledPluginIndexMemo(): void {
-  cached = null;
+  cached.length = 0;
 }
 
 export {
@@ -100,25 +100,26 @@ export function loadInstalledPluginIndex(
   }
   const env = params.env ?? process.env;
   const policyHash = params.config ? resolveInstalledPluginIndexPolicyHash(params.config) : null;
-  if (
-    cached &&
-    cached.env === env &&
-    cached.policyHash === policyHash &&
-    cached.workspaceDir === params.workspaceDir &&
-    cached.stateDir === params.stateDir &&
-    cached.pluginIndexFilePath === params.pluginIndexFilePath
-  ) {
-    return cached.value;
+  for (const entry of cached) {
+    if (
+      entry.env === env &&
+      entry.policyHash === policyHash &&
+      entry.workspaceDir === params.workspaceDir &&
+      entry.stateDir === params.stateDir &&
+      entry.pluginIndexFilePath === params.pluginIndexFilePath
+    ) {
+      return entry.value;
+    }
   }
   const value = buildInstalledPluginIndex(params);
-  cached = {
+  cached.push({
     policyHash,
     env,
     workspaceDir: params.workspaceDir,
     stateDir: params.stateDir,
     pluginIndexFilePath: params.pluginIndexFilePath,
     value,
-  };
+  });
   return value;
 }
 
