@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTeamsReplyStreamController } from "./reply-stream-controller.js";
 
+type StreamCloseResult = { id: string } | undefined;
+
 function makeStream() {
   return {
     emit: vi.fn(),
     update: vi.fn(),
-    close: vi.fn(async () => ({ id: "stream-final" })),
+    close: vi.fn<() => Promise<StreamCloseResult>>(async () => ({ id: "stream-final" })),
     canceled: false,
   };
 }
