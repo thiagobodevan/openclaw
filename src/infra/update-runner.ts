@@ -1516,6 +1516,9 @@ export async function runGatewayUpdate(opts: UpdateRunnerOptions = {}): Promise<
           timeoutMs,
           env: {
             OPENCLAW_UPDATE_IN_PROGRESS: "1",
+            ...(opts.deferConfiguredPluginInstallRepair
+              ? { [UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR_ENV]: "1" }
+              : {}),
             [UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE_ENV]: "1",
             ...(candidateHostVersion === null
               ? {}

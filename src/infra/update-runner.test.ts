@@ -1810,12 +1810,16 @@ describe("runGatewayUpdate", () => {
       return runCommand(argv, options);
     };
 
-    const result = await runWithCommand(runCommandWithDoctor, { cwd: pkgRoot });
+    const result = await runWithCommand(runCommandWithDoctor, {
+      cwd: pkgRoot,
+      deferConfiguredPluginInstallRepair: true,
+    });
 
     expect(result.status).toBe("ok");
     expect(calls).toContain(doctorCommand);
     expect(result.steps.map((step) => step.name)).toContain("openclaw doctor");
     expect(doctorEnv?.OPENCLAW_UPDATE_IN_PROGRESS).toBe("1");
+    expect(doctorEnv?.OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR).toBe("1");
     expect(doctorEnv?.OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE).toBe("1");
     expect(doctorEnv?.OPENCLAW_COMPATIBILITY_HOST_VERSION).toBe("2.0.0");
   });
