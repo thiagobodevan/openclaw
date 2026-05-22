@@ -701,6 +701,39 @@ EOF`,
     }
   });
 
+  it("requires approval for allowlisted mutable script operands", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-allowlisted-script-"));
+    try {
+      const scriptPath = path.join(tmp, "script.js");
+      fs.writeFileSync(scriptPath, 'console.log("reviewed");\n');
+      evaluateShellAllowlistMock.mockReturnValue({
+        allowlistMatches: [],
+        analysisOk: true,
+        allowlistSatisfied: true,
+        segments: [{ resolution: null, argv: ["node", scriptPath] }],
+        segmentAllowlistEntries: [{ pattern: "node *", source: "allow-always" }],
+      });
+      buildEnforcedShellCommandMock.mockReturnValue({
+        ok: true,
+        command: `node ${scriptPath}`,
+      });
+      hasDurableExecApprovalMock.mockReturnValue(true);
+      requiresExecApprovalMock.mockReturnValue(false);
+
+      const result = await runGatewayAllowlist({
+        command: `node ${scriptPath}`,
+        ask: "on-miss",
+        autoReview: true,
+      });
+
+      expect(defaultExecAutoReviewerMock).not.toHaveBeenCalled();
+      expect(createAndRegisterDefaultExecApprovalRequestMock).toHaveBeenCalledTimes(1);
+      expect(result.pendingResult?.details.status).toBe("approval-pending");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("keeps shell-wrapped mutable script operands on explicit approval in auto-review mode", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-auto-unbindable-"));
     try {

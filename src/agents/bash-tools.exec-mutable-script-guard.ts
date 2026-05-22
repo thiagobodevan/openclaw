@@ -8,13 +8,15 @@ export function commandRequiresMutableScriptApproval(params: {
   segments: Array<Pick<ExecCommandSegment, "argv" | "raw">>;
 }): boolean {
   return params.segments.some((segment) => {
-    const shellCommand =
-      extractShellWrapperInlineCommand(segment.argv) ?? segment.raw ?? params.command;
+    const shellCommand = extractShellWrapperInlineCommand(segment.argv);
     const snapshot = resolveMutableFileOperandSnapshotSync({
       argv: segment.argv,
       cwd: params.cwd,
       shellCommand,
     });
-    return !snapshot.ok || snapshot.snapshot !== null;
+    if (!snapshot.ok) {
+      return shellCommand !== null;
+    }
+    return snapshot.snapshot !== null;
   });
 }

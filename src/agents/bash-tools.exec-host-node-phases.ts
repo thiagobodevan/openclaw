@@ -328,12 +328,13 @@ export async function analyzeNodeApprovalRequirement(params: {
       segments: baseAllowlistEval.segments,
     }) && !(params.hostSecurity === "full" && params.hostAsk === "off");
   const requiresMutableScriptApproval =
-    params.prepared.plan.mutableFileOperand != null ||
-    commandRequiresMutableScriptApproval({
-      command: params.request.command,
-      cwd: params.prepared.cwd ?? params.request.workdir,
-      segments: baseAllowlistEval.segments,
-    });
+    (params.prepared.plan.mutableFileOperand != null ||
+      commandRequiresMutableScriptApproval({
+        command: params.request.command,
+        cwd: params.prepared.cwd ?? params.request.workdir,
+        segments: baseAllowlistEval.segments,
+      })) &&
+    !(params.hostSecurity === "full" && params.hostAsk === "off");
   if (inlineEvalHit) {
     params.request.warnings.push(
       `Warning: strict inline-eval mode requires explicit approval for ${describeInterpreterInlineEval(

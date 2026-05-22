@@ -380,11 +380,12 @@ export async function processGatewayAllowlist(
       env: params.env,
       segments: allowlistEval.segments,
     }) && !(hostSecurity === "full" && hostAsk === "off");
-  const requiresMutableScriptApproval = commandRequiresMutableScriptApproval({
-    command: params.command,
-    cwd: params.workdir,
-    segments: allowlistEval.segments,
-  });
+  const requiresMutableScriptApproval =
+    commandRequiresMutableScriptApproval({
+      command: params.command,
+      cwd: params.workdir,
+      segments: allowlistEval.segments,
+    }) && !(hostSecurity === "full" && hostAsk === "off");
   const requiresAsk =
     requiresExecApproval({
       ask: hostAsk,
@@ -396,7 +397,8 @@ export async function processGatewayAllowlist(
     requiresAllowlistPlanApproval ||
     requiresHeredocApproval ||
     requiresInlineEvalApproval ||
-    requiresSecurityAuditSuppressionApproval;
+    requiresSecurityAuditSuppressionApproval ||
+    requiresMutableScriptApproval;
   if (requiresHeredocApproval) {
     params.warnings.push(
       "Warning: heredoc execution requires explicit approval in allowlist mode.",
