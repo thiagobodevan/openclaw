@@ -90,7 +90,7 @@
       "kind": "object-property",
       "name": "description",
       "path": "ui/src/ui/chat/build-chat-items.ts",
-      "text": "Earlier turns are preserved in a compaction checkpoint. Open session checkpoints to branch or restore that pre-compaction view."
+      "text": "The compacted transcript is preserved as a checkpoint. Open session checkpoints to branch or restore from that compacted view."
     },
     {
       "count": 1,
@@ -4402,7 +4402,21 @@
       "kind": "html-text",
       "name": "text",
       "path": "ui/src/ui/views/skills.ts",
+      "text": "ClawHub link invalid"
+    },
+    {
+      "count": 2,
+      "kind": "html-text",
+      "name": "text",
+      "path": "ui/src/ui/views/skills.ts",
       "text": "Close"
+    },
+    {
+      "count": 1,
+      "kind": "html-text",
+      "name": "text",
+      "path": "ui/src/ui/views/skills.ts",
+      "text": "Full security report"
     },
     {
       "count": 1,
@@ -4437,6 +4451,20 @@
       "kind": "html-text",
       "name": "text",
       "path": "ui/src/ui/views/skills.ts",
+      "text": "Overview"
+    },
+    {
+      "count": 1,
+      "kind": "html-text",
+      "name": "text",
+      "path": "ui/src/ui/views/skills.ts",
+      "text": "Refreshing…"
+    },
+    {
+      "count": 1,
+      "kind": "html-text",
+      "name": "text",
+      "path": "ui/src/ui/views/skills.ts",
       "text": "Save key"
     },
     {
@@ -4452,6 +4480,13 @@
       "name": "text",
       "path": "ui/src/ui/views/skills.ts",
       "text": "Searching…"
+    },
+    {
+      "count": 1,
+      "kind": "html-text",
+      "name": "text",
+      "path": "ui/src/ui/views/skills.ts",
+      "text": "Skill Card"
     },
     {
       "count": 1,
