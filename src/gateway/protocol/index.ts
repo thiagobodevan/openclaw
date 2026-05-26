@@ -373,6 +373,14 @@ import {
   SkillsSearchParamsSchema,
   type SkillsSearchResult,
   SkillsSearchResultSchema,
+  type SkillsSecurityVerdictsParams,
+  SkillsSecurityVerdictsParamsSchema,
+  type SkillsSecurityVerdictsResult,
+  SkillsSecurityVerdictsResultSchema,
+  type SkillsSkillCardParams,
+  SkillsSkillCardParamsSchema,
+  type SkillsSkillCardResult,
+  SkillsSkillCardResultSchema,
   type SkillsStatusParams,
   SkillsStatusParamsSchema,
   type SkillsUploadBeginParams,
@@ -755,6 +763,12 @@ export const validateSkillsUploadCommitParams = lazyCompile<SkillsUploadCommitPa
 export const validateSkillsUpdateParams = lazyCompile<SkillsUpdateParams>(SkillsUpdateParamsSchema);
 export const validateSkillsSearchParams = lazyCompile<SkillsSearchParams>(SkillsSearchParamsSchema);
 export const validateSkillsDetailParams = lazyCompile<SkillsDetailParams>(SkillsDetailParamsSchema);
+export const validateSkillsSecurityVerdictsParams = lazyCompile<SkillsSecurityVerdictsParams>(
+  SkillsSecurityVerdictsParamsSchema,
+);
+export const validateSkillsSkillCardParams = lazyCompile<SkillsSkillCardParams>(
+  SkillsSkillCardParamsSchema,
+);
 export const validateCronListParams = lazyCompile<CronListParams>(CronListParamsSchema);
 export const validateCronStatusParams = lazyCompile<CronStatusParams>(CronStatusParamsSchema);
 export const validateCronGetParams = lazyCompile<CronGetParams>(CronGetParamsSchema);
@@ -1023,6 +1037,10 @@ export {
   SkillsSearchResultSchema,
   SkillsDetailParamsSchema,
   SkillsDetailResultSchema,
+  SkillsSecurityVerdictsParamsSchema,
+  SkillsSecurityVerdictsResultSchema,
+  SkillsSkillCardParamsSchema,
+  SkillsSkillCardResultSchema,
   SkillsUploadBeginParamsSchema,
   SkillsUploadChunkParamsSchema,
   SkillsUploadCommitParamsSchema,
@@ -1170,6 +1188,10 @@ export type {
   SkillsSearchResult,
   SkillsDetailParams,
   SkillsDetailResult,
+  SkillsSecurityVerdictsParams,
+  SkillsSecurityVerdictsResult,
+  SkillsSkillCardParams,
+  SkillsSkillCardResult,
   SkillsUploadBeginParams,
   SkillsUploadChunkParams,
   SkillsUploadCommitParams,

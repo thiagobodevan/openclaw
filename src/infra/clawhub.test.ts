@@ -8,6 +8,7 @@ import {
   downloadClawHubPackageArchive,
   downloadClawHubSkillArchive,
   fetchClawHubSkillCard,
+  fetchClawHubSkillSecurityVerdicts,
   fetchClawHubPackageArtifact,
   fetchClawHubPackageReadiness,
   fetchClawHubPackageSecurity,
@@ -343,6 +344,73 @@ describe("clawhub helpers", () => {
     expect(url.pathname).toBe("/api/v1/skills/agentreceipt/verify");
     expect(url.searchParams.get("version")).toBe("1.2.3");
     expect(url.searchParams.has("tag")).toBe(false);
+  });
+
+  it("posts bulk skill security verdict requests", async () => {
+    let requestedUrl = "";
+    let requestedInit: RequestInit | undefined;
+    const envelope = {
+      schema: "clawhub.skill.security-verdicts.v1",
+      items: [
+        {
+          ok: true,
+          decision: "pass",
+          reasons: [],
+          requestedSlug: "agentreceipt",
+          slug: "agentreceipt",
+          requestedVersion: "1.2.3",
+          version: "1.2.3",
+          security: { status: "clean", passed: true },
+        },
+      ],
+    };
+
+    await expect(
+      fetchClawHubSkillSecurityVerdicts({
+        items: [{ slug: "agentreceipt", version: "1.2.3" }],
+        fetchImpl: async (input, init) => {
+          requestedUrl = input instanceof Request ? input.url : String(input);
+          requestedInit = init;
+          return new Response(JSON.stringify(envelope), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+    ).resolves.toEqual(envelope);
+
+    const url = new URL(requestedUrl);
+    expect(url.pathname).toBe("/api/v1/skills/-/security-verdicts");
+    expect(requestedInit?.method).toBe("POST");
+    expect(requestedInit?.headers).toMatchObject({ "Content-Type": "application/json" });
+    expect(requestedInit?.body).toBe(
+      JSON.stringify({ items: [{ slug: "agentreceipt", version: "1.2.3" }] }),
+    );
+  });
+
+  it("can post bulk skill security verdict requests without resolved auth", async () => {
+    process.env.OPENCLAW_CLAWHUB_TOKEN = "env-token-123";
+    let requestedInit: RequestInit | undefined;
+    const envelope = {
+      schema: "clawhub.skill.security-verdicts.v1",
+      items: [],
+    };
+
+    await expect(
+      fetchClawHubSkillSecurityVerdicts({
+        items: [{ slug: "agentreceipt", version: "1.2.3" }],
+        skipAuth: true,
+        fetchImpl: async (_input, init) => {
+          requestedInit = init;
+          return new Response(JSON.stringify(envelope), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+    ).resolves.toEqual(envelope);
+
+    expect(new Headers(requestedInit?.headers).get("Authorization")).toBeNull();
   });
 
   it("returns failed skill verification reports with missing card reasons", async () => {

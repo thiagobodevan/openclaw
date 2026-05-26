@@ -321,6 +321,38 @@ export type ClawHubSkillVerificationResponse = {
   signature: unknown;
 };
 
+export type ClawHubSkillSecurityVerdictRequestItem = {
+  slug: string;
+  version: string;
+};
+
+export type ClawHubSkillSecurityVerdictItem = {
+  ok: boolean;
+  decision: ClawHubSkillVerificationDecision;
+  reasons: string[];
+  requestedSlug: string;
+  requestedVersion: string;
+  slug?: string | null;
+  version?: string | null;
+  displayName?: string | null;
+  publisherHandle?: string | null;
+  publisherDisplayName?: string | null;
+  createdAt?: number | null;
+  checkedAt?: number | null;
+  skillUrl?: string | null;
+  securityAuditUrl?: string | null;
+  security?: unknown;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+};
+
+export type ClawHubSkillSecurityVerdictsResponse = {
+  schema: "clawhub.skill.security-verdicts.v1";
+  items: ClawHubSkillSecurityVerdictItem[];
+};
+
 export type ClawHubSkillListResponse = {
   items: Array<{
     slug: string;
@@ -361,6 +393,8 @@ type ClawHubRequestParams = {
   baseUrl?: string;
   path?: string;
   url?: string;
+  method?: "GET" | "POST";
+  json?: unknown;
   token?: string;
   timeoutMs?: number;
   search?: Record<string, string | undefined>;
@@ -612,10 +646,21 @@ async function clawhubRequest(
     params.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
   );
   try {
-    const response = await (params.fetchImpl ?? fetch)(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      signal: controller.signal,
-    });
+    const headers = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(params.json === undefined ? {} : { "Content-Type": "application/json" }),
+    };
+    const init: RequestInit = { signal: controller.signal };
+    if (params.method) {
+      init.method = params.method;
+    }
+    if (Object.keys(headers).length > 0) {
+      init.headers = headers;
+    }
+    if (params.json !== undefined) {
+      init.body = JSON.stringify(params.json);
+    }
+    const response = await (params.fetchImpl ?? fetch)(url, init);
     return { response, url, hasToken: Boolean(token) };
   } finally {
     clearTimeout(timeout);
@@ -943,6 +988,26 @@ export async function fetchClawHubSkillVerification(params: {
     timeoutMs: params.timeoutMs,
     fetchImpl: params.fetchImpl,
     search: buildVersionOrTagSearch(params),
+  });
+}
+
+export async function fetchClawHubSkillSecurityVerdicts(params: {
+  items: ClawHubSkillSecurityVerdictRequestItem[];
+  baseUrl?: string;
+  token?: string;
+  skipAuth?: boolean;
+  timeoutMs?: number;
+  fetchImpl?: FetchLike;
+}): Promise<ClawHubSkillSecurityVerdictsResponse> {
+  return await fetchJson<ClawHubSkillSecurityVerdictsResponse>({
+    baseUrl: params.baseUrl,
+    path: "/api/v1/skills/-/security-verdicts",
+    method: "POST",
+    json: { items: params.items },
+    token: params.token,
+    skipAuth: params.skipAuth,
+    timeoutMs: params.timeoutMs,
+    fetchImpl: params.fetchImpl,
   });
 }
 

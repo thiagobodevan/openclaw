@@ -119,6 +119,7 @@ import {
 import {
   closeClawHubDetail,
   installFromClawHub,
+  loadSkillCard,
   installSkill,
   loadClawHubDetail,
   loadSkills,
@@ -2615,6 +2616,13 @@ export function renderApp(state: AppViewState) {
                 messages: state.skillMessages,
                 busyKey: state.skillsBusyKey,
                 detailKey: state.skillsDetailKey,
+                detailTab: state.skillsDetailTab,
+                clawhubVerdicts: state.clawhubVerdicts,
+                clawhubVerdictsLoading: state.clawhubVerdictsLoading,
+                clawhubVerdictsError: state.clawhubVerdictsError,
+                skillCardContents: state.skillCardContents,
+                skillCardLoadingKey: state.skillCardLoadingKey,
+                skillCardErrors: state.skillCardErrors,
                 clawhubQuery: state.clawhubSearchQuery,
                 clawhubResults: state.clawhubSearchResults,
                 clawhubSearchLoading: state.clawhubSearchLoading,
@@ -2633,8 +2641,17 @@ export function renderApp(state: AppViewState) {
                 onSaveKey: (key) => saveSkillApiKey(state, key),
                 onInstall: (skillKey, name, installId) =>
                   installSkill(state, skillKey, name, installId),
-                onDetailOpen: (key) => (state.skillsDetailKey = key),
+                onDetailOpen: (key) => {
+                  state.skillsDetailKey = key;
+                  state.skillsDetailTab = "overview";
+                },
                 onDetailClose: () => (state.skillsDetailKey = null),
+                onDetailTabChange: (tab) => {
+                  state.skillsDetailTab = tab;
+                  if (tab === "card" && state.skillsDetailKey) {
+                    void loadSkillCard(state, state.skillsDetailKey);
+                  }
+                },
                 onClawHubQueryChange: (query) => {
                   setClawHubSearchQuery(state, query);
                   if (clawhubSearchTimer) {
