@@ -1,15 +1,15 @@
 import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
-import {
-  onInternalDiagnosticEvent,
-  waitForDiagnosticEventsDrained,
-  type DiagnosticEventPayload,
-} from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { AnyAgentTool } from "openclaw/plugin-sdk/agent-harness";
 import {
   HEARTBEAT_RESPONSE_TOOL_NAME,
   embeddedAgentLog,
   wrapToolWithBeforeToolCallHook,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import {
+  onInternalDiagnosticEvent,
+  waitForDiagnosticEventsDrained,
+  type DiagnosticEventPayload,
+} from "openclaw/plugin-sdk/diagnostic-runtime";
 import {
   initializeGlobalHookRunner,
   resetGlobalHookRunner,
@@ -309,7 +309,7 @@ describe("createCodexDynamicToolBridge", () => {
         tools: [
           createTool({ name: "message" }),
           createTool({
-            name: "dofbot_move_angles",
+            name: "fuzz_move_array",
             parameters: { type: "array", items: { type: "number" } },
             execute: badExecute,
           }),
@@ -330,25 +330,23 @@ describe("createCodexDynamicToolBridge", () => {
     expect(bridge.specs.map((tool) => tool.name)).toEqual(["message"]);
     expect(bridge.telemetry.quarantinedTools).toEqual([
       {
-        tool: "dofbot_move_angles",
-        violations: ['dofbot_move_angles.inputSchema.type must be "object"'],
+        tool: "fuzz_move_array",
+        violations: ['fuzz_move_array.inputSchema.type must be "object"'],
       },
     ]);
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("dofbot_move_angles"),
+      expect.stringContaining("fuzz_move_array"),
       expect.objectContaining({
         tools: [
           {
-            tool: "dofbot_move_angles",
-            violations: ['dofbot_move_angles.inputSchema.type must be "object"'],
+            tool: "fuzz_move_array",
+            violations: ['fuzz_move_array.inputSchema.type must be "object"'],
           },
         ],
       }),
     );
     const blockedEvents = diagnosticEvents.filter(
-      (
-        event,
-      ): event is Extract<DiagnosticEventPayload, { type: "tool.execution.blocked" }> =>
+      (event): event is Extract<DiagnosticEventPayload, { type: "tool.execution.blocked" }> =>
         event.type === "tool.execution.blocked",
     );
     expect(blockedEvents).toContainEqual(
@@ -357,9 +355,9 @@ describe("createCodexDynamicToolBridge", () => {
         runId: "run-1",
         sessionId: "session-1",
         sessionKey: "agent:main:session-1",
-        toolName: "dofbot_move_angles",
+        toolName: "fuzz_move_array",
         deniedReason: "unsupported_tool_schema",
-        reason: 'dofbot_move_angles.inputSchema.type must be "object"',
+        reason: 'fuzz_move_array.inputSchema.type must be "object"',
       }),
     );
 
@@ -368,13 +366,18 @@ describe("createCodexDynamicToolBridge", () => {
       turnId: "turn-1",
       callId: "call-1",
       namespace: null,
-      tool: "dofbot_move_angles",
+      tool: "fuzz_move_array",
       arguments: {},
     });
 
     expect(result).toEqual({
       success: false,
-      contentItems: [{ type: "inputText", text: "Unknown OpenClaw tool: dofbot_move_angles" }],
+      contentItems: [
+        {
+          type: "inputText",
+          text: "OpenClaw tool is disabled because its Codex dynamic tool schema is unsupported: fuzz_move_array",
+        },
+      ],
     });
     expect(badExecute).not.toHaveBeenCalled();
   });
@@ -391,6 +394,96 @@ describe("createCodexDynamicToolBridge", () => {
     expectDynamicSpec(bridge.specs[1], { name: "message" });
     expectNoNamespace(bridge.specs[0]);
     expectNoNamespace(bridge.specs[1]);
+  });
+
+  it("quarantines tools with schemas Codex cannot project", async () => {
+    const bridge = createCodexDynamicToolBridge({
+      tools: [
+        createTool({ name: "message" }),
+        createTool({
+          name: "fuzz_move_angles",
+          parameters: {
+            type: "object",
+            properties: {
+              angle: null,
+            },
+          } as never,
+        }),
+      ],
+      signal: new AbortController().signal,
+    });
+
+    expect(bridge.availableSpecs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.specs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.telemetry.quarantinedTools).toEqual([
+      {
+        tool: "fuzz_move_angles",
+        violations: [
+          "fuzz_move_angles.inputSchema.properties.angle must be a JSON Schema object or boolean",
+        ],
+      },
+    ]);
+
+    await expect(
+      bridge.handleToolCall({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        callId: "call-1",
+        namespace: null,
+        tool: "fuzz_move_angles",
+        arguments: {},
+      }),
+    ).resolves.toEqual({
+      success: false,
+      contentItems: [
+        {
+          type: "inputText",
+          text: "OpenClaw tool is disabled because its Codex dynamic tool schema is unsupported: fuzz_move_angles",
+        },
+      ],
+    });
+  });
+
+  it("does not quarantine executable tools from registered-only schema diagnostics", async () => {
+    const execute = vi.fn(async () => textToolResult("sent"));
+    const bridge = createCodexDynamicToolBridge({
+      tools: [
+        createTool({
+          name: "message",
+          execute,
+        }),
+      ],
+      registeredTools: [
+        createTool({
+          name: "message",
+          parameters: {
+            type: "object",
+            properties: null,
+          } as never,
+        }),
+      ],
+      signal: new AbortController().signal,
+    });
+
+    expect(bridge.availableSpecs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.specs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.telemetry.quarantinedTools).toEqual([
+      {
+        tool: "message",
+        violations: ["message.inputSchema.properties must be a schema map object"],
+      },
+    ]);
+    await expect(
+      bridge.handleToolCall({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        callId: "call-1",
+        namespace: null,
+        tool: "message",
+        arguments: {},
+      }),
+    ).resolves.toEqual(expectInputText("sent"));
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("truncates configured text tool results before returning them to Codex", async () => {
