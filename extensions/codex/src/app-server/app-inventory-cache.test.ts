@@ -110,6 +110,29 @@ describe("Codex app inventory cache", () => {
     );
   });
 
+  it("redacts unreadable synthetic app/list error data fields", () => {
+    const data: Record<string, unknown> = {
+      plugin: "fuzzplugin",
+      apiKey: "secret-value",
+    };
+    Object.defineProperty(data, "unreadable", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin inventory error data read failed");
+      },
+    });
+    const error = Object.assign(new Error("app list failed"), { data });
+
+    expect(() => serializeCodexAppInventoryError(error)).not.toThrow();
+    expect(serializeCodexAppInventoryError(error)).toMatchObject({
+      message: "app list failed",
+      data: {
+        plugin: "fuzzplugin",
+        apiKey: "<redacted>",
+      },
+    });
+  });
+
   it("forces a post-install refresh past an older in-flight app/list", async () => {
     const cache = new CodexAppInventoryCache({ ttlMs: 1_000 });
     const key = "runtime";

@@ -203,16 +203,13 @@ export class CodexAppInventoryCache {
 
 export function serializeCodexAppInventoryError(error: unknown): Record<string, unknown> {
   const record = isRecord(error) ? error : undefined;
-  const data = record && "data" in record ? redactErrorData(record.data) : undefined;
+  const data = record ? redactErrorData(readRecordValue(record, "data")) : undefined;
+  const name = readRecordValue(record, "name");
+  const code = readRecordValue(record, "code");
   return {
-    name:
-      error instanceof Error
-        ? error.name
-        : typeof record?.name === "string"
-          ? record.name
-          : undefined,
+    name: error instanceof Error ? error.name : typeof name === "string" ? name : undefined,
     message: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-    ...(typeof record?.code === "number" ? { code: record.code } : {}),
+    ...(typeof code === "number" ? { code } : {}),
     ...(data !== undefined ? { data } : {}),
   };
 }
@@ -261,6 +258,33 @@ function fingerprintInventoryCacheKey(key: string): string {
   return hash.toString(16).padStart(8, "0");
 }
 
+function readRecordValue(record: Record<string, unknown> | undefined, key: string): unknown {
+  try {
+    return record?.[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function readableRecordEntries(record: Record<string, unknown>): Array<[string, unknown]> {
+  let keys: string[];
+  try {
+    keys = Object.keys(record);
+  } catch {
+    return [];
+  }
+  const entries: Array<[string, unknown]> = [];
+  for (const key of keys) {
+    try {
+      entries.push([key, record[key]]);
+    } catch {
+      // Error payloads come from app-server/plugin boundaries. Keep logging
+      // the readable data even when synthetic fields throw during redaction.
+    }
+  }
+  return entries;
+}
+
 function redactErrorData(value: unknown, depth = 0): JsonValue | undefined {
   if (value === undefined) {
     return undefined;
@@ -276,7 +300,7 @@ function redactErrorData(value: unknown, depth = 0): JsonValue | undefined {
   }
   if (isRecord(value)) {
     const redacted: Record<string, JsonValue> = {};
-    for (const [key, entry] of Object.entries(value)) {
+    for (const [key, entry] of readableRecordEntries(value)) {
       redacted[key] = isSensitiveErrorDataKey(key)
         ? "<redacted>"
         : (redactErrorData(entry, depth + 1) ?? null);
