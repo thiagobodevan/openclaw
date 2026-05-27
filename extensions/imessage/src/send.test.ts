@@ -32,9 +32,19 @@ function createRejectingClient(error: Error): IMessageRpcClient {
   } as unknown as IMessageRpcClient;
 }
 
+function createApprovalText(id = "approval-123"): string {
+  return [
+    "Exec approval required",
+    `ID: ${id}`,
+    "",
+    `Reply with: /approve ${id} allow-once|deny`,
+  ].join("\n");
+}
+
 describe("sendMessageIMessage receipts", () => {
   afterEach(() => {
     clearIMessageApprovalReactionTargetsForTest();
+    vi.unstubAllEnvs();
   });
 
   it("attaches a text receipt for native send ids", async () => {
@@ -333,13 +343,14 @@ describe("sendMessageIMessage receipts", () => {
     expect(result.guid).toBeUndefined();
   });
 
-  it("falls back to one-shot imsg send when rpc text send times out", async () => {
+  it("recovers approval prompt GUID without resending when rpc send times out", async () => {
     const client = createRejectingClient(new Error("imsg rpc timeout (send)"));
     const createClient = vi.fn(async () => client);
-    const runCliJson = vi.fn(async () => ({ status: "sent" }));
+    const runCliJson = vi.fn();
     const resolveSentMessageGuidImpl = vi.fn(async () => "p:0/fallback-guid");
+    const approvalText = createApprovalText();
 
-    const result = await sendMessageIMessage("chat_id:42", "hello", {
+    const result = await sendMessageIMessage("chat_id:42", approvalText, {
       config: IMESSAGE_TEST_CFG,
       createClient,
       runCliJson,
@@ -348,29 +359,111 @@ describe("sendMessageIMessage receipts", () => {
       resolveSentMessageGuidImpl,
     });
 
-    expect(result.messageId).toBe("ok");
+    expect(result.messageId).toBe("p:0/fallback-guid");
     expect(result.guid).toBe("p:0/fallback-guid");
     expect(client.stop).toHaveBeenCalledOnce();
-    expect(runCliJson.mock.calls).toEqual([
-      [["send", "--text", "hello", "--service", "sms", "--region", "US", "--chat-id", "42"]],
-    ]);
+    expect(runCliJson).not.toHaveBeenCalled();
     expect(resolveSentMessageGuidImpl).toHaveBeenCalledWith({
       dbPath: "/Users/me/Library/Messages/chat.db",
       target: expect.objectContaining({ kind: "chat_id", chatId: 42 }),
-      text: "hello",
+      text: expect.stringContaining("ID: approval-123"),
       sentAfterMs: expect.any(Number),
     });
+  });
+
+  it("uses the default local chat.db path for timeout GUID recovery", async () => {
+    vi.stubEnv("HOME", "/Users/me");
+    const client = createRejectingClient(new Error("imsg rpc timeout (send)"));
+    const runCliJson = vi.fn();
+    const resolveSentMessageGuidImpl = vi.fn(async () => "p:0/default-db-guid");
+    const approvalText = createApprovalText("approval-default");
+
+    const result = await sendMessageIMessage("chat_id:42", approvalText, {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      runCliJson,
+      resolveSentMessageGuidImpl,
+    });
+
+    expect(result.messageId).toBe("p:0/default-db-guid");
+    expect(runCliJson).not.toHaveBeenCalled();
+    expect(resolveSentMessageGuidImpl).toHaveBeenCalledWith({
+      dbPath: "/Users/me/Library/Messages/chat.db",
+      target: expect.objectContaining({ kind: "chat_id", chatId: 42 }),
+      text: expect.stringContaining("ID: approval-default"),
+      sentAfterMs: expect.any(Number),
+    });
+  });
+
+  it("does not use the local default chat.db path for custom cliPath wrappers", async () => {
+    vi.stubEnv("HOME", "/Users/me");
+    const client = createRejectingClient(new Error("imsg rpc timeout (send)"));
+    const runCliJson = vi.fn();
+    const resolveSentMessageGuidImpl = vi.fn(async () => null);
+    const approvalText = createApprovalText("approval-remote");
+
+    await expect(
+      sendMessageIMessage("chat_id:42", approvalText, {
+        config: IMESSAGE_TEST_CFG,
+        client,
+        cliPath: "/usr/local/bin/imsg-remote",
+        runCliJson,
+        resolveSentMessageGuidImpl,
+      }),
+    ).rejects.toThrow("imsg rpc timeout (send)");
+
+    expect(runCliJson).not.toHaveBeenCalled();
+    expect(resolveSentMessageGuidImpl).toHaveBeenCalledWith({
+      dbPath: undefined,
+      target: expect.objectContaining({ kind: "chat_id", chatId: 42 }),
+      text: expect.stringContaining("ID: approval-remote"),
+      sentAfterMs: expect.any(Number),
+    });
+  });
+
+  it("throws the rpc timeout without resending for generic text", async () => {
+    const client = createRejectingClient(new Error("imsg rpc timeout (send)"));
+    const runCliJson = vi.fn();
+    const resolveSentMessageGuidImpl = vi.fn(async () => "p:0/stale-guid");
+
+    await expect(
+      sendMessageIMessage("chat_id:42", "hello", {
+        config: IMESSAGE_TEST_CFG,
+        client,
+        runCliJson,
+        dbPath: "/Users/me/Library/Messages/chat.db",
+        resolveSentMessageGuidImpl,
+      }),
+    ).rejects.toThrow("imsg rpc timeout (send)");
+
+    expect(runCliJson).not.toHaveBeenCalled();
+    expect(resolveSentMessageGuidImpl).not.toHaveBeenCalled();
+  });
+
+  it("throws the rpc timeout without resending when approval GUID recovery misses", async () => {
+    const client = createRejectingClient(new Error("imsg rpc timeout (send)"));
+    const runCliJson = vi.fn();
+    const resolveSentMessageGuidImpl = vi.fn(async () => null);
+    const approvalText = createApprovalText();
+
+    await expect(
+      sendMessageIMessage("chat_id:42", approvalText, {
+        config: IMESSAGE_TEST_CFG,
+        client,
+        runCliJson,
+        dbPath: "/Users/me/Library/Messages/chat.db",
+        resolveSentMessageGuidImpl,
+      }),
+    ).rejects.toThrow("imsg rpc timeout (send)");
+
+    expect(runCliJson).not.toHaveBeenCalled();
+    expect(resolveSentMessageGuidImpl).toHaveBeenCalled();
   });
 
   it("recovers a GUID for approval prompts when rpc send returns only sent status", async () => {
     const client = createClient({ status: "sent" });
     const resolveSentMessageGuidImpl = vi.fn(async () => "p:0/recovered-guid");
-    const approvalText = [
-      "Exec approval required",
-      "ID: approval-123",
-      "",
-      "Reply with: /approve approval-123 allow-once|deny",
-    ].join("\n");
+    const approvalText = createApprovalText();
 
     const result = await sendMessageIMessage("chat_id:42", approvalText, {
       config: IMESSAGE_TEST_CFG,
@@ -402,12 +495,7 @@ describe("sendMessageIMessage receipts", () => {
 
   it("does not poll for approval prompt GUIDs when chat.db is unavailable", async () => {
     const client = createClient({ status: "sent" });
-    const approvalText = [
-      "Exec approval required",
-      "ID: approval-123",
-      "",
-      "Reply with: /approve approval-123 allow-once|deny",
-    ].join("\n");
+    const approvalText = createApprovalText();
     const startedAt = performance.now();
 
     const result = await sendMessageIMessage("chat_id:42", approvalText, {

@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { constants, accessSync } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
 import {
   createMessageReceiptFromOutboundResults,
   type MessageReceipt,
@@ -94,6 +96,35 @@ export type IMessageSendResult = {
 };
 
 const MAX_REPLY_TO_ID_LENGTH = 256;
+
+function safeHomeDir(): string | undefined {
+  const home = process.env.HOME?.trim();
+  if (home) {
+    return home;
+  }
+  try {
+    return os.homedir().trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLocalIMessageCliPath(cliPath: string): boolean {
+  const trimmed = cliPath.trim();
+  return trimmed === "imsg" || path.basename(trimmed) === "imsg";
+}
+
+function resolveChatDbLookupPath(params: { cliPath: string; dbPath?: string }): string | undefined {
+  const configured = params.dbPath?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (!isLocalIMessageCliPath(params.cliPath)) {
+    return undefined;
+  }
+  const home = safeHomeDir();
+  return home ? path.join(home, "Library", "Messages", "chat.db") : undefined;
+}
 
 function stripUnsafeReplyTagChars(value: string): string {
   let next = "";
@@ -468,33 +499,6 @@ function isIMessageRpcSendTimeout(error: unknown): boolean {
   return /imsg rpc timeout \(send\)/i.test(message);
 }
 
-function buildTextSendCliArgs(params: {
-  target: ParsedIMessageTarget;
-  message: string;
-  service: IMessageService | undefined;
-  region: string;
-}): string[] {
-  const args = [
-    "send",
-    "--text",
-    params.message,
-    "--service",
-    params.service || "auto",
-    "--region",
-    params.region,
-  ];
-  if (params.target.kind === "chat_id") {
-    args.push("--chat-id", String(params.target.chatId));
-  } else if (params.target.kind === "chat_guid") {
-    args.push("--chat-guid", params.target.chatGuid);
-  } else if (params.target.kind === "chat_identifier") {
-    args.push("--chat-identifier", params.target.chatIdentifier);
-  } else {
-    args.push("--to", params.target.to);
-  }
-  return args;
-}
-
 async function runIMessageCliJson(
   cliPath: string,
   dbPath: string | undefined,
@@ -713,6 +717,7 @@ export async function sendMessageIMessage(
     });
   const cliPath = opts.cliPath?.trim() || account.config.cliPath?.trim() || "imsg";
   const dbPath = opts.dbPath?.trim() || account.config.dbPath?.trim();
+  const chatDbLookupPath = resolveChatDbLookupPath({ cliPath, dbPath });
   const target = parseIMessageTarget(opts.chatId ? formatIMessageChatTarget(opts.chatId) : to);
   const service =
     opts.service ??
@@ -774,7 +779,7 @@ export async function sendMessageIMessage(
   if (filePath && !message.trim() && !resolvedReplyToId) {
     const attachmentResult = await trySendAttachmentForExplicitChat({
       accountId: account.accountId,
-      dbPath,
+      dbPath: chatDbLookupPath,
       target,
       filePath,
       echoText,
@@ -817,7 +822,6 @@ export async function sendMessageIMessage(
       : await createIMessageRpcClient({ cliPath, dbPath }));
   let shouldClose = !opts.client;
   let result: Record<string, unknown>;
-  let usedCliFallback = false;
   let sendStartedAtMs = Date.now();
   try {
     try {
@@ -828,20 +832,26 @@ export async function sendMessageIMessage(
       if (filePath || resolvedReplyToId || !isIMessageRpcSendTimeout(error)) {
         throw error;
       }
-      if (shouldClose) {
-        await client.stop();
-        shouldClose = false;
-      }
-      sendStartedAtMs = Date.now();
-      result = await runCliJson(
-        buildTextSendCliArgs({
-          target,
+      if (
+        !shouldRecoverApprovalPromptGuid({
           message,
-          service,
-          region,
-        }),
-      );
-      usedCliFallback = true;
+          filePath,
+          replyToId: resolvedReplyToId,
+        })
+      ) {
+        throw error;
+      }
+      const recoveredGuid = await resolveFallbackSentMessageGuid({
+        dbPath: chatDbLookupPath,
+        target,
+        text: message,
+        sentAfterMs: sendStartedAtMs,
+        resolveSentMessageGuidImpl: opts.resolveSentMessageGuidImpl,
+      });
+      if (!recoveredGuid) {
+        throw error;
+      }
+      result = { guid: recoveredGuid, status: "sent" };
     }
     const resolvedId = resolveMessageId(result);
     const messageId =
@@ -852,22 +862,21 @@ export async function sendMessageIMessage(
     // resolved through chat.db when available so chat_id sends can still bind
     // to the stable GUID surfaced by inbound tapbacks.
     let approvalBindingMessageId = await resolveApprovalBindingMessageGuid({
-      dbPath,
+      dbPath: chatDbLookupPath,
       messageId: resolvedId,
       result,
       resolveMessageGuidImpl: opts.resolveMessageGuidImpl,
     });
     if (
       !approvalBindingMessageId &&
-      (usedCliFallback ||
-        shouldRecoverApprovalPromptGuid({
-          message,
-          filePath,
-          replyToId: resolvedReplyToId,
-        }))
+      shouldRecoverApprovalPromptGuid({
+        message,
+        filePath,
+        replyToId: resolvedReplyToId,
+      })
     ) {
       approvalBindingMessageId = await resolveFallbackSentMessageGuid({
-        dbPath,
+        dbPath: chatDbLookupPath,
         target,
         text: message,
         sentAfterMs: sendStartedAtMs,
