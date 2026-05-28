@@ -88,6 +88,7 @@ export function collectTopLevelPublicSurfaceEntries(pluginDir) {
       if (
         normalizedName.endsWith(".d.ts") ||
         /^config-api\.(?:[cm]?[jt]s)$/u.test(normalizedName) ||
+        /^test-support\.(?:[cm]?[jt]s)$/u.test(normalizedName) ||
         normalizedName.includes(".test.") ||
         normalizedName.includes(".spec.") ||
         normalizedName.includes(".fixture.") ||
@@ -117,6 +118,7 @@ function collectTopLevelPublicSurfaceEntriesFromFiles(relativeFiles) {
       if (
         normalizedName.endsWith(".d.ts") ||
         /^config-api\.(?:[cm]?[jt]s)$/u.test(normalizedName) ||
+        /^test-support\.(?:[cm]?[jt]s)$/u.test(normalizedName) ||
         normalizedName.includes(".test.") ||
         normalizedName.includes(".spec.") ||
         normalizedName.includes(".fixture.") ||

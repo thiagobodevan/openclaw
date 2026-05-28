@@ -103,6 +103,14 @@ describe("bundled plugin build entries", () => {
     expect(entries["extensions/telegram/telegram-ingress-worker.runtime"]).toBeUndefined();
   });
 
+  it("keeps top-level test support out of bundled plugin public-surface entries", () => {
+    const entries = listBundledPluginBuildEntries();
+    const artifacts = listBundledPluginPackArtifacts();
+
+    expect(entries["extensions/browser/test-support"]).toBeUndefined();
+    expect(artifacts).not.toContain("dist/extensions/browser/test-support.js");
+  });
+
   it("discovers repo plugin build entries without directory scans", () => {
     const payload = expectNoNodeFsScans<{
       artifacts: number;
