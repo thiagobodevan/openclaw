@@ -636,6 +636,104 @@ describe("host-hook fixture plugin contract", () => {
     expect(command.calls).toBe(1);
   });
 
+  it("fails closed on unreadable command metadata without retaining plugin state", () => {
+    const { config, registry } = createPluginRegistryFixture();
+    const revokedNativeNames = Proxy.revocable({ telegram: "fuzzplugin-native" }, {});
+    revokedNativeNames.revoke();
+    const revokedGuidanceEntry = Proxy.revocable({ text: "bad" }, {});
+    revokedGuidanceEntry.revoke();
+    const revokedGuidanceSurfaces = Proxy.revocable(["openclaw_main"], {});
+    revokedGuidanceSurfaces.revoke();
+    const nativeNames = { telegram: "mockplugin-native" };
+    const nativeProgressMessages = { telegram: "working" };
+    const descriptionLocalizations = { en: "Localized mock command" };
+    const channels = ["telegram"];
+    const requiredScopes = [READ_SCOPE];
+    const guidanceSurfaces = ["openclaw_main"];
+    const agentPromptGuidance = [{ text: "Use mockplugin command", surfaces: guidanceSurfaces }];
+    const command = Object.defineProperty(
+      {
+        name: "mockplugin-rich-command",
+        description: "Rich command",
+        nativeNames,
+        nativeProgressMessages,
+        descriptionLocalizations,
+        channels,
+        requiredScopes,
+        agentPromptGuidance,
+        handler: async () => ({ text: "ok" }),
+      },
+      "extraCrash",
+      {
+        enumerable: true,
+        get() {
+          throw new Error("mockplugin command extra getter should not be enumerated");
+        },
+      },
+    );
+
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({
+        id: "fuzzplugin",
+        name: "Fuzz Plugin",
+        origin: "workspace",
+      }),
+      register(api) {
+        api.registerCommand({
+          name: "fuzzplugin-native-names",
+          description: "Bad native names",
+          nativeNames: revokedNativeNames.proxy,
+          handler: async () => ({ text: "bad" }),
+        } as never);
+        api.registerCommand({
+          name: "fuzzplugin-guidance-entry",
+          description: "Bad prompt guidance entry",
+          agentPromptGuidance: [revokedGuidanceEntry.proxy],
+          handler: async () => ({ text: "bad" }),
+        } as never);
+        api.registerCommand({
+          name: "fuzzplugin-guidance",
+          description: "Bad prompt guidance",
+          agentPromptGuidance: [{ text: "bad", surfaces: revokedGuidanceSurfaces.proxy }],
+          handler: async () => ({ text: "bad" }),
+        } as never);
+        api.registerCommand(command);
+      },
+    });
+
+    nativeNames.telegram = "changed";
+    nativeProgressMessages.telegram = "changed";
+    descriptionLocalizations.en = "changed";
+    channels.push("discord");
+    requiredScopes.push(WRITE_SCOPE);
+    guidanceSurfaces.push("subagent");
+    agentPromptGuidance[0].text = "changed";
+
+    expect(registry.registry.commands).toHaveLength(1);
+    const registeredCommand = registry.registry.commands[0]?.command;
+    expect(Object.hasOwn(registeredCommand ?? {}, "extraCrash")).toBe(false);
+    expect(registeredCommand).toMatchObject({
+      name: "mockplugin-rich-command",
+      description: "Rich command",
+      nativeNames: { telegram: "mockplugin-native" },
+      nativeProgressMessages: { telegram: "working" },
+      descriptionLocalizations: { en: "Localized mock command" },
+      channels: ["telegram"],
+      requiredScopes: [READ_SCOPE],
+      agentPromptGuidance: [{ text: "Use mockplugin command", surfaces: ["openclaw_main"] }],
+    });
+    expect(diagnosticSummaries(registry.registry.diagnostics)).toContainEqual({
+      pluginId: "fuzzplugin",
+      message: "command registration has unreadable field: nativeNames",
+    });
+    expect(diagnosticSummaries(registry.registry.diagnostics)).toContainEqual({
+      pluginId: "fuzzplugin",
+      message: "command registration has unreadable field: agentPromptGuidance",
+    });
+  });
+
   it("rejects external plugins from trusted policy and reserved command ownership", () => {
     const { config, registry } = createPluginRegistryFixture();
     registerTestPlugin({

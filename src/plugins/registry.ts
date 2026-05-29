@@ -2489,6 +2489,230 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     });
   };
 
+  type CommandFieldNormalization<T> =
+    | { ok: true; value: T | undefined }
+    | {
+        ok: false;
+        reason: "unreadable" | "validation";
+        field: keyof OpenClawPluginCommandDefinition;
+        message?: string;
+      };
+
+  const readCommandRecordEntries = (
+    value: unknown,
+    field: keyof OpenClawPluginCommandDefinition,
+    validationMessage: string,
+  ): CommandFieldNormalization<Array<[string, unknown]>> => {
+    if (value === undefined) {
+      return { ok: true, value: undefined };
+    }
+    try {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ok: false, reason: "validation", field, message: validationMessage };
+      }
+      return { ok: true, value: Object.entries(value as Record<string, unknown>) };
+    } catch {
+      return { ok: false, reason: "unreadable", field };
+    }
+  };
+
+  const readCommandArrayEntries = (
+    value: unknown,
+    field: keyof OpenClawPluginCommandDefinition,
+    validationMessage: string,
+  ): CommandFieldNormalization<unknown[]> => {
+    if (value === undefined) {
+      return { ok: true, value: undefined };
+    }
+    try {
+      if (!Array.isArray(value)) {
+        return { ok: false, reason: "validation", field, message: validationMessage };
+      }
+      return { ok: true, value: Array.from(value as readonly unknown[]) };
+    } catch {
+      return { ok: false, reason: "unreadable", field };
+    }
+  };
+
+  const normalizeCommandNativeNames = (
+    value: unknown,
+  ): CommandFieldNormalization<NonNullable<OpenClawPluginCommandDefinition["nativeNames"]>> => {
+    const entries = readCommandRecordEntries(
+      value,
+      "nativeNames",
+      "Command nativeNames must be an object",
+    );
+    if (!entries.ok) {
+      return entries;
+    }
+    if (!entries.value) {
+      return { ok: true, value: undefined };
+    }
+    const nativeNames: NonNullable<OpenClawPluginCommandDefinition["nativeNames"]> = {};
+    for (const [label, alias] of entries.value) {
+      if (typeof alias === "string") {
+        nativeNames[label] = alias;
+      }
+    }
+    return { ok: true, value: nativeNames };
+  };
+
+  const normalizeCommandStringRecord = (
+    value: unknown,
+    field: "nativeProgressMessages" | "descriptionLocalizations",
+    invalidObjectMessage: string,
+    invalidValueMessage: (label: string) => string,
+  ): CommandFieldNormalization<Record<string, string>> => {
+    const entries = readCommandRecordEntries(value, field, invalidObjectMessage);
+    if (!entries.ok) {
+      return entries;
+    }
+    if (!entries.value) {
+      return { ok: true, value: undefined };
+    }
+    const recordValue: Record<string, string> = {};
+    for (const [label, entry] of entries.value) {
+      if (typeof entry !== "string" || !entry.trim()) {
+        return { ok: false, reason: "validation", field, message: invalidValueMessage(label) };
+      }
+      recordValue[label] = entry;
+    }
+    return { ok: true, value: recordValue };
+  };
+
+  const normalizeCommandChannels = (
+    value: unknown,
+  ): CommandFieldNormalization<NonNullable<OpenClawPluginCommandDefinition["channels"]>> => {
+    const entries = readCommandArrayEntries(
+      value,
+      "channels",
+      "Command channels must be an array of channel ids",
+    );
+    if (!entries.ok) {
+      return entries;
+    }
+    if (!entries.value) {
+      return { ok: true, value: undefined };
+    }
+    const channels: string[] = [];
+    for (const [index, entry] of entries.value.entries()) {
+      if (typeof entry !== "string") {
+        return {
+          ok: false,
+          reason: "validation",
+          field: "channels",
+          message: `Command channel ${index + 1} must be a string`,
+        };
+      }
+      if (!entry.trim()) {
+        return {
+          ok: false,
+          reason: "validation",
+          field: "channels",
+          message: `Command channel ${index + 1} cannot be empty`,
+        };
+      }
+      channels.push(entry);
+    }
+    return { ok: true, value: channels };
+  };
+
+  const normalizeCommandRequiredScopes = (
+    value: unknown,
+  ): CommandFieldNormalization<NonNullable<OpenClawPluginCommandDefinition["requiredScopes"]>> => {
+    const entries = readCommandArrayEntries(
+      value,
+      "requiredScopes",
+      "Command requiredScopes must be an array of operator scopes",
+    );
+    if (!entries.ok) {
+      return entries;
+    }
+    if (!entries.value) {
+      return { ok: true, value: undefined };
+    }
+    const scopes: OperatorScope[] = [];
+    for (const entry of entries.value) {
+      if (!isOperatorScope(entry)) {
+        return {
+          ok: false,
+          reason: "validation",
+          field: "requiredScopes",
+          message:
+            typeof entry === "string"
+              ? `Command requiredScopes contains unknown operator scope: ${entry}`
+              : "Command requiredScopes contains unknown operator scope",
+        };
+      }
+      scopes.push(entry);
+    }
+    return { ok: true, value: scopes };
+  };
+
+  const normalizeCommandAgentPromptGuidance = (
+    value: unknown,
+  ): CommandFieldNormalization<
+    NonNullable<OpenClawPluginCommandDefinition["agentPromptGuidance"]>
+  > => {
+    const entries = readCommandArrayEntries(
+      value,
+      "agentPromptGuidance",
+      "Agent prompt guidance must be an array of strings or objects",
+    );
+    if (!entries.ok) {
+      return entries;
+    }
+    if (!entries.value) {
+      return { ok: true, value: undefined };
+    }
+    const guidance: Array<
+      NonNullable<OpenClawPluginCommandDefinition["agentPromptGuidance"]>[number]
+    > = [];
+    for (const [index, entry] of entries.value.entries()) {
+      if (typeof entry === "string") {
+        guidance.push(entry);
+        continue;
+      }
+      let isArrayEntry = false;
+      try {
+        isArrayEntry = Array.isArray(entry);
+      } catch {
+        return { ok: false, reason: "unreadable", field: "agentPromptGuidance" };
+      }
+      if (!entry || typeof entry !== "object" || isArrayEntry) {
+        return {
+          ok: false,
+          reason: "validation",
+          field: "agentPromptGuidance",
+          message: `Agent prompt guidance ${index + 1} must be a string or object`,
+        };
+      }
+      const textValue = readHostHookField(entry, "text");
+      const surfacesValue = readHostHookField(entry, "surfaces");
+      if (!textValue.ok || !surfacesValue.ok) {
+        return { ok: false, reason: "unreadable", field: "agentPromptGuidance" };
+      }
+      const guidanceEntry: NonNullable<
+        OpenClawPluginCommandDefinition["agentPromptGuidance"]
+      >[number] = {
+        text: textValue.value as never,
+      };
+      if (surfacesValue.value !== undefined) {
+        const surfaces = readCommandArrayEntries(
+          surfacesValue.value,
+          "agentPromptGuidance",
+          `Agent prompt guidance ${index + 1} surfaces must be an array of prompt surface ids`,
+        );
+        if (!surfaces.ok) {
+          return surfaces;
+        }
+        guidanceEntry.surfaces = surfaces.value as never;
+      }
+      guidance.push(guidanceEntry);
+    }
+    return { ok: true, value: guidance };
+  };
+
   const registerCommand = (record: PluginRecord, command: OpenClawPluginCommandDefinition) => {
     const nameValue = readHostHookField(command, "name");
     const nativeNamesValue = readHostHookField(command, "nativeNames");
@@ -2594,35 +2818,60 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       });
       return;
     }
+    const normalizedNativeNames = normalizeCommandNativeNames(nativeNamesValue.value);
+    const normalizedNativeProgressMessages = normalizeCommandStringRecord(
+      nativeProgressMessagesValue.value,
+      "nativeProgressMessages",
+      "Command nativeProgressMessages must be an object",
+      (label) => `Native progress message "${label}" must be a string`,
+    );
+    const normalizedDescriptionLocalizations = normalizeCommandStringRecord(
+      descriptionLocalizationsValue.value,
+      "descriptionLocalizations",
+      "Command descriptionLocalizations must be an object",
+      (label) => `Description localization "${label}" must be a string`,
+    );
+    const normalizedChannels = normalizeCommandChannels(channelsValue.value);
+    const normalizedAgentPromptGuidance = normalizeCommandAgentPromptGuidance(
+      agentPromptGuidanceValue.value,
+    );
+    const normalizedRequiredScopes = normalizeCommandRequiredScopes(requiredScopesValue.value);
+    const invalidOptionalField = [
+      normalizedNativeNames,
+      normalizedNativeProgressMessages,
+      normalizedDescriptionLocalizations,
+      normalizedChannels,
+      normalizedAgentPromptGuidance,
+      normalizedRequiredScopes,
+    ].find((entry) => !entry.ok);
+    if (invalidOptionalField && !invalidOptionalField.ok) {
+      if (invalidOptionalField.reason === "unreadable") {
+        pushUnreadableDiagnostic(invalidOptionalField.field);
+      } else {
+        pushValidationDiagnostic(invalidOptionalField.message ?? "Command field is invalid");
+      }
+      return;
+    }
     const sanitizedCommand: OpenClawPluginCommandDefinition = {
       name,
       description: descriptionValue.value.trim(),
       handler: (ctx) => handler.call(command, ctx),
-      ...(nativeNamesValue.value !== undefined
-        ? {
-            nativeNames: nativeNamesValue.value as OpenClawPluginCommandDefinition["nativeNames"],
-          }
+      ...(normalizedNativeNames.ok && normalizedNativeNames.value !== undefined
+        ? { nativeNames: normalizedNativeNames.value }
         : {}),
-      ...(nativeProgressMessagesValue.value !== undefined
-        ? {
-            nativeProgressMessages:
-              nativeProgressMessagesValue.value as OpenClawPluginCommandDefinition["nativeProgressMessages"],
-          }
+      ...(normalizedNativeProgressMessages.ok &&
+      normalizedNativeProgressMessages.value !== undefined
+        ? { nativeProgressMessages: normalizedNativeProgressMessages.value }
         : {}),
-      ...(descriptionLocalizationsValue.value !== undefined
-        ? {
-            descriptionLocalizations:
-              descriptionLocalizationsValue.value as OpenClawPluginCommandDefinition["descriptionLocalizations"],
-          }
+      ...(normalizedDescriptionLocalizations.ok &&
+      normalizedDescriptionLocalizations.value !== undefined
+        ? { descriptionLocalizations: normalizedDescriptionLocalizations.value }
         : {}),
-      ...(channelsValue.value !== undefined
-        ? { channels: channelsValue.value as OpenClawPluginCommandDefinition["channels"] }
+      ...(normalizedChannels.ok && normalizedChannels.value !== undefined
+        ? { channels: normalizedChannels.value }
         : {}),
-      ...(agentPromptGuidanceValue.value !== undefined
-        ? {
-            agentPromptGuidance:
-              agentPromptGuidanceValue.value as OpenClawPluginCommandDefinition["agentPromptGuidance"],
-          }
+      ...(normalizedAgentPromptGuidance.ok && normalizedAgentPromptGuidance.value !== undefined
+        ? { agentPromptGuidance: normalizedAgentPromptGuidance.value }
         : {}),
       ...(typeof acceptsArgsValue.value === "boolean"
         ? { acceptsArgs: acceptsArgsValue.value }
@@ -2630,11 +2879,8 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       ...(typeof requireAuthValue.value === "boolean"
         ? { requireAuth: requireAuthValue.value }
         : {}),
-      ...(requiredScopesValue.value !== undefined
-        ? {
-            requiredScopes:
-              requiredScopesValue.value as OpenClawPluginCommandDefinition["requiredScopes"],
-          }
+      ...(normalizedRequiredScopes.ok && normalizedRequiredScopes.value !== undefined
+        ? { requiredScopes: normalizedRequiredScopes.value }
         : {}),
       ...(typeof exposeSenderIsOwnerValue.value === "boolean"
         ? { exposeSenderIsOwner: exposeSenderIsOwnerValue.value }
