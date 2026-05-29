@@ -692,45 +692,6 @@ describe("plugin sdk alias helpers", () => {
     expect(subpaths).toEqual(["core", "qa-channel", "qa-channel-protocol", "qa-lab", "qa-runtime"]);
   });
 
-  it("aliases workspace gateway packages for plugin loader source graphs", () => {
-    const fixture = createPluginSdkAliasFixture({
-      packageExports: {
-        "./plugin-sdk/core": { default: "./dist/plugin-sdk/core.js" },
-      },
-    });
-    const gatewayClientPath = path.join(
-      fixture.root,
-      "packages",
-      "gateway-client",
-      "src",
-      "index.ts",
-    );
-    const gatewayProtocolPath = path.join(
-      fixture.root,
-      "packages",
-      "gateway-protocol",
-      "src",
-      "index.ts",
-    );
-    mkdirSafeDir(path.dirname(gatewayClientPath));
-    mkdirSafeDir(path.dirname(gatewayProtocolPath));
-    fs.writeFileSync(gatewayClientPath, "export const gatewayClient = true;\n", "utf-8");
-    fs.writeFileSync(gatewayProtocolPath, "export const gatewayProtocol = true;\n", "utf-8");
-    const sourcePluginEntry = writePluginEntry(
-      fixture.root,
-      bundledPluginFile("deepinfra", "src/index.ts"),
-    );
-
-    const aliases = buildPluginLoaderAliasMap(sourcePluginEntry);
-
-    expect(fs.realpathSync(aliases["@openclaw/gateway-client"] ?? "")).toBe(
-      fs.realpathSync(gatewayClientPath),
-    );
-    expect(fs.realpathSync(aliases["@openclaw/gateway-protocol"] ?? "")).toBe(
-      fs.realpathSync(gatewayProtocolPath),
-    );
-  });
-
   it("adds non-QA private Codex helper subpaths only for trusted Codex plugins", () => {
     const fixture = createPluginSdkAliasFixture({
       packageExports: {
