@@ -1960,7 +1960,101 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
   };
 
   const registerCommand = (record: PluginRecord, command: OpenClawPluginCommandDefinition) => {
-    const name = command.name.trim();
+    const nameValue = readHostHookField(command, "name");
+    const nativeNamesValue = readHostHookField(command, "nativeNames");
+    const nativeProgressMessagesValue = readHostHookField(command, "nativeProgressMessages");
+    const descriptionValue = readHostHookField(command, "description");
+    const descriptionLocalizationsValue = readHostHookField(command, "descriptionLocalizations");
+    const channelsValue = readHostHookField(command, "channels");
+    const agentPromptGuidanceValue = readHostHookField(command, "agentPromptGuidance");
+    const acceptsArgsValue = readHostHookField(command, "acceptsArgs");
+    const requireAuthValue = readHostHookField(command, "requireAuth");
+    const requiredScopesValue = readHostHookField(command, "requiredScopes");
+    const exposeSenderIsOwnerValue = readHostHookField(command, "exposeSenderIsOwner");
+    const ownershipValue = readHostHookField(command, "ownership");
+    const handlerValue = readHostHookField(command, "handler");
+    const pushUnreadableDiagnostic = (field: keyof OpenClawPluginCommandDefinition) => {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `command registration has unreadable field: ${field}`,
+      });
+    };
+    const pushValidationDiagnostic = (message: string) => {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `command registration failed: ${message}`,
+      });
+    };
+    if (!nameValue.ok) {
+      pushUnreadableDiagnostic("name");
+      return;
+    }
+    if (!nativeNamesValue.ok) {
+      pushUnreadableDiagnostic("nativeNames");
+      return;
+    }
+    if (!nativeProgressMessagesValue.ok) {
+      pushUnreadableDiagnostic("nativeProgressMessages");
+      return;
+    }
+    if (!descriptionValue.ok) {
+      pushUnreadableDiagnostic("description");
+      return;
+    }
+    if (!descriptionLocalizationsValue.ok) {
+      pushUnreadableDiagnostic("descriptionLocalizations");
+      return;
+    }
+    if (!channelsValue.ok) {
+      pushUnreadableDiagnostic("channels");
+      return;
+    }
+    if (!agentPromptGuidanceValue.ok) {
+      pushUnreadableDiagnostic("agentPromptGuidance");
+      return;
+    }
+    if (!acceptsArgsValue.ok) {
+      pushUnreadableDiagnostic("acceptsArgs");
+      return;
+    }
+    if (!requireAuthValue.ok) {
+      pushUnreadableDiagnostic("requireAuth");
+      return;
+    }
+    if (!requiredScopesValue.ok) {
+      pushUnreadableDiagnostic("requiredScopes");
+      return;
+    }
+    if (!exposeSenderIsOwnerValue.ok) {
+      pushUnreadableDiagnostic("exposeSenderIsOwner");
+      return;
+    }
+    if (!ownershipValue.ok) {
+      pushUnreadableDiagnostic("ownership");
+      return;
+    }
+    if (!handlerValue.ok) {
+      pushUnreadableDiagnostic("handler");
+      return;
+    }
+    const handler = handlerValue.value;
+    if (typeof handler !== "function") {
+      pushValidationDiagnostic("Command handler must be a function");
+      return;
+    }
+    if (typeof nameValue.value !== "string") {
+      pushValidationDiagnostic("Command name must be a string");
+      return;
+    }
+    if (typeof descriptionValue.value !== "string") {
+      pushValidationDiagnostic("Command description must be a string");
+      return;
+    }
+    const name = nameValue.value.trim();
     if (!name) {
       pushDiagnostic({
         level: "error",
@@ -1970,7 +2064,56 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       });
       return;
     }
-    const allowReservedCommandNames = command.ownership === "reserved";
+    const sanitizedCommand: OpenClawPluginCommandDefinition = {
+      name,
+      description: descriptionValue.value.trim(),
+      handler: (ctx) => handler.call(command, ctx),
+      ...(nativeNamesValue.value !== undefined
+        ? {
+            nativeNames: nativeNamesValue.value as OpenClawPluginCommandDefinition["nativeNames"],
+          }
+        : {}),
+      ...(nativeProgressMessagesValue.value !== undefined
+        ? {
+            nativeProgressMessages:
+              nativeProgressMessagesValue.value as OpenClawPluginCommandDefinition["nativeProgressMessages"],
+          }
+        : {}),
+      ...(descriptionLocalizationsValue.value !== undefined
+        ? {
+            descriptionLocalizations:
+              descriptionLocalizationsValue.value as OpenClawPluginCommandDefinition["descriptionLocalizations"],
+          }
+        : {}),
+      ...(channelsValue.value !== undefined
+        ? { channels: channelsValue.value as OpenClawPluginCommandDefinition["channels"] }
+        : {}),
+      ...(agentPromptGuidanceValue.value !== undefined
+        ? {
+            agentPromptGuidance:
+              agentPromptGuidanceValue.value as OpenClawPluginCommandDefinition["agentPromptGuidance"],
+          }
+        : {}),
+      ...(typeof acceptsArgsValue.value === "boolean"
+        ? { acceptsArgs: acceptsArgsValue.value }
+        : {}),
+      ...(typeof requireAuthValue.value === "boolean"
+        ? { requireAuth: requireAuthValue.value }
+        : {}),
+      ...(requiredScopesValue.value !== undefined
+        ? {
+            requiredScopes:
+              requiredScopesValue.value as OpenClawPluginCommandDefinition["requiredScopes"],
+          }
+        : {}),
+      ...(typeof exposeSenderIsOwnerValue.value === "boolean"
+        ? { exposeSenderIsOwner: exposeSenderIsOwnerValue.value }
+        : {}),
+      ...(ownershipValue.value === "reserved" || ownershipValue.value === "plugin"
+        ? { ownership: ownershipValue.value }
+        : {}),
+    };
+    const allowReservedCommandNames = sanitizedCommand.ownership === "reserved";
     if (allowReservedCommandNames && !canClaimReservedCommandOwnership(record)) {
       pushDiagnostic({
         level: "error",
@@ -2006,7 +2149,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     // snapshot registries are isolated and never write to the global command table. Conflicts
     // will surface when the plugin is loaded via the normal activation path at gateway startup.
     if (!registryParams.activateGlobalSideEffects) {
-      const validationError = validatePluginCommandDefinition(command, {
+      const validationError = validatePluginCommandDefinition(sanitizedCommand, {
         allowReservedCommandNames,
       });
       if (validationError) {
@@ -2019,11 +2162,11 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
         return;
       }
     } else {
-      const { ownership: _ownership, ...commandForRegistration } = command;
+      const { ownership: _ownership, ...commandForRegistration } = sanitizedCommand;
       void _ownership;
       const result = registerPluginCommand(
         record.id,
-        allowReservedCommandNames ? commandForRegistration : command,
+        allowReservedCommandNames ? commandForRegistration : sanitizedCommand,
         {
           pluginName: record.name,
           pluginRoot: record.rootDir,
@@ -2052,7 +2195,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     registry.commands.push({
       pluginId: record.id,
       pluginName: record.name,
-      command,
+      command: sanitizedCommand,
       source: record.source,
       rootDir: record.rootDir,
     });

@@ -560,6 +560,82 @@ describe("host-hook fixture plugin contract", () => {
     expect(discovery.advertises).toBe(1);
   });
 
+  it("fails closed on unreadable command registrations without aborting plugin registration", () => {
+    const { config, registry } = createPluginRegistryFixture();
+    const command: Record<string, unknown> = {
+      name: "mockplugin-bad",
+      handler: async () => ({ text: "bad" }),
+    };
+    Object.defineProperty(command, "description", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin command description is unreadable");
+      },
+    });
+
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({
+        id: "fuzzplugin",
+        name: "Fuzz Plugin",
+        origin: "workspace",
+      }),
+      register(api) {
+        api.registerCommand(command as never);
+        api.registerCommand({
+          name: "mockplugin-command",
+          description: "Healthy command sibling",
+          handler: async () => ({ text: "ok" }),
+        });
+      },
+    });
+
+    expect(registry.registry.commands.map((entry) => entry.command.name)).toEqual([
+      "mockplugin-command",
+    ]);
+    expect(diagnosticSummaries(registry.registry.diagnostics)).toContainEqual({
+      pluginId: "fuzzplugin",
+      message: "command registration has unreadable field: description",
+    });
+  });
+
+  it("preserves original command receivers while storing sanitized registrations", async () => {
+    const { config, registry } = createPluginRegistryFixture();
+    const command = {
+      name: "mockplugin-command",
+      description: "Receiver preserving command",
+      calls: 0,
+      handler() {
+        this.calls += 1;
+        return { text: "ok" };
+      },
+    };
+
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({
+        id: "fuzzplugin",
+        name: "Fuzz Plugin",
+        origin: "workspace",
+      }),
+      register(api) {
+        api.registerCommand(command);
+      },
+    });
+
+    const registeredCommand = registry.registry.commands[0]?.command;
+    expect(registeredCommand).toMatchObject({
+      name: "mockplugin-command",
+      description: "Receiver preserving command",
+    });
+
+    await registeredCommand?.handler({} as never);
+
+    expect(command.calls).toBe(1);
+  });
+
   it("rejects external plugins from trusted policy and reserved command ownership", () => {
     const { config, registry } = createPluginRegistryFixture();
     registerTestPlugin({
