@@ -163,6 +163,70 @@ describe("agent tool definition adapter", () => {
     });
     expect(JSON.stringify(result)).not.toContain("fuzzplugin details getter exploded");
   });
+
+  it("omits unreadable tool names while preserving healthy sibling tools", () => {
+    const unreadableTool = {
+      name: "fuzzplugin_unreadable",
+      label: "Unreadable",
+      description: "unreadable name",
+      parameters: Type.Object({}),
+      execute: async () => ({ content: [{ type: "text", text: "unreachable" }] }),
+    } satisfies AgentTool;
+    Object.defineProperty(unreadableTool, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin name getter exploded");
+      },
+    });
+    const healthyTool = {
+      name: "mockplugin_healthy",
+      label: "Mock Plugin Healthy",
+      description: "healthy sibling",
+      parameters: Type.Object({}),
+      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    } satisfies AgentTool;
+
+    const definitions = toToolDefinitions([unreadableTool, healthyTool]);
+
+    expect(definitions.map((definition) => definition.name)).toEqual(["mockplugin_healthy"]);
+  });
+
+  it("defaults unreadable optional tool definition fields", () => {
+    const tool = {
+      name: "mockplugin_optional_fields",
+      label: "Mock Plugin Optional Fields",
+      description: "optional fields",
+      parameters: Type.Object({ value: Type.String() }),
+      execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    } satisfies AgentTool;
+    Object.defineProperty(tool, "label", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin label getter exploded");
+      },
+    });
+    Object.defineProperty(tool, "description", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin description getter exploded");
+      },
+    });
+    Object.defineProperty(tool, "parameters", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin parameters getter exploded");
+      },
+    });
+
+    const [definition] = toToolDefinitions([tool]);
+
+    expect(definition).toMatchObject({
+      name: "mockplugin_optional_fields",
+      label: "mockplugin_optional_fields",
+      description: "",
+      parameters: { type: "object", properties: {} },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

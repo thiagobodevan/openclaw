@@ -48,6 +48,10 @@ const SENSITIVE_EXEC_ENV_VALUE = "[omitted exec env value]";
 const UNREADABLE_EXEC_ENV_VALUE = "[unreadable exec env]";
 const UNREADABLE_EXEC_PARAM_VALUE = "[unreadable exec param]";
 const EXEC_COMMAND_PARAM_KEYS = new Set(["command", "cmd"]);
+const DEFAULT_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {},
+} as ToolDefinition["parameters"];
 
 export type ClientToolCallRecorder =
   | ((toolName: string, params: Record<string, unknown>) => void)
@@ -152,6 +156,26 @@ function summarizeExecCommandForLog(command: unknown): Record<string, unknown> {
     value: command,
     reason: "exec command may contain credentials",
   });
+}
+
+function readToolStringField(tool: AnyAgentTool, field: "name" | "label" | "description") {
+  try {
+    const value = (tool as unknown as Record<typeof field, unknown>)[field];
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readToolParameters(tool: AnyAgentTool): ToolDefinition["parameters"] {
+  try {
+    return (
+      (tool as unknown as { parameters?: ToolDefinition["parameters"] }).parameters ??
+      DEFAULT_TOOL_PARAMETERS
+    );
+  } catch {
+    return DEFAULT_TOOL_PARAMETERS;
+  }
 }
 
 function summarizeUnreadableSensitiveValueForLog(params: {
@@ -377,15 +401,19 @@ export function toToolDefinitions(
   tools: AnyAgentTool[],
   hookContext?: HookContext,
 ): ToolDefinition[] {
-  return tools.map((tool) => {
-    const name = tool.name || "tool";
+  return tools.flatMap((tool) => {
+    const rawName = readToolStringField(tool, "name");
+    if (rawName === undefined) {
+      return [];
+    }
+    const name = rawName || "tool";
     const normalizedName = normalizeToolName(name);
     const beforeHookWrapped = isToolWrappedWithBeforeToolCallHook(tool);
     return {
       name,
-      label: tool.label ?? name,
-      description: tool.description ?? "",
-      parameters: tool.parameters,
+      label: readToolStringField(tool, "label") ?? name,
+      description: readToolStringField(tool, "description") ?? "",
+      parameters: readToolParameters(tool),
       execute: async (...args: ToolExecuteArgs): Promise<AgentToolResult<unknown>> => {
         const { toolCallId, params, onUpdate, signal } = splitToolExecuteArgs(args);
         let executeParams = params;
