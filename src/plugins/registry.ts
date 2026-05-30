@@ -268,6 +268,31 @@ function findRegisteredChannelEntryById<T extends RegisteredChannelEntry>(
   return undefined;
 }
 
+type RegisteredProviderEntry<T extends { id: string }> = { provider: T };
+
+function readRegisteredProviderEntryId<T extends { id: string }>(
+  entry: RegisteredProviderEntry<T>,
+): string | undefined {
+  try {
+    const id = entry.provider.id;
+    return typeof id === "string" ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function findRegisteredProviderEntryById<
+  T extends { id: string },
+  R extends RegisteredProviderEntry<T>,
+>(entries: readonly R[], id: string): R | undefined {
+  for (const entry of entries) {
+    if (readRegisteredProviderEntryId(entry) === id) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
 export type {
   PluginChannelRegistration,
   PluginChannelSetupRegistration,
@@ -1345,7 +1370,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       return;
     }
     const id = normalizedProvider.id;
-    const existing = registry.providers.find((entry) => entry.provider.id === id);
+    const existing = findRegisteredProviderEntryById(registry.providers, id);
     if (existing) {
       pushDiagnostic({
         level: "error",
@@ -2136,7 +2161,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       });
       return false;
     }
-    const existing = params.registrations.find((entry) => entry.provider.id === id);
+    const existing = findRegisteredProviderEntryById(params.registrations, id);
     if (existing) {
       pushDiagnostic({
         level: "error",

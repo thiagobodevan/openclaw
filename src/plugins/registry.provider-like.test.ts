@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createPluginRecord } from "./loader-records.js";
 import { createPluginRegistry } from "./registry.js";
 import type { PluginRuntime } from "./runtime/types.js";
+import type { ProviderPlugin, SpeechProviderPlugin } from "./types.js";
 
 function createTestRegistry() {
   return createPluginRegistry({
@@ -33,6 +34,44 @@ function diagnosticSummaries(diagnostics: readonly unknown[]) {
     const diagnostic = entry as { pluginId?: string; message?: string };
     return { pluginId: diagnostic.pluginId, message: diagnostic.message };
   });
+}
+
+function createUnreadableProviderId(message: string): ProviderPlugin {
+  return Object.defineProperty(
+    {
+      label: "Fuzz Plugin Provider",
+      auth: [],
+    },
+    "id",
+    {
+      get() {
+        throw new Error(message);
+      },
+    },
+  ) as ProviderPlugin;
+}
+
+function createUnreadableSpeechProviderId(message: string): SpeechProviderPlugin {
+  return Object.defineProperty(
+    {
+      label: "Fuzz Plugin Speech",
+      defaultModel: "fuzzplugin-voice",
+      models: ["fuzzplugin-voice"],
+      isConfigured: () => true,
+      synthesize: async () => ({
+        audioBuffer: Buffer.alloc(0),
+        fileExtension: "mp3",
+        outputFormat: "audio/mpeg",
+        voiceCompatible: true,
+      }),
+    },
+    "id",
+    {
+      get() {
+        throw new Error(message);
+      },
+    },
+  ) as SpeechProviderPlugin;
 }
 
 describe("plugin registry provider-like registrations", () => {
@@ -284,6 +323,59 @@ describe("plugin registry provider-like registrations", () => {
         source: "live",
       },
     ]);
+  });
+
+  it("skips unreadable existing provider registrations during duplicate checks", () => {
+    const pluginRegistry = createTestRegistry();
+    const mockRecord = createPluginRecord({
+      id: "mockplugin-provider-registration",
+      name: "Mock Plugin Provider Registration",
+      source: "/tmp/mockplugin-provider-registration/index.js",
+      origin: "global",
+      enabled: true,
+      configSchema: false,
+    });
+
+    pluginRegistry.registry.providers.push({
+      pluginId: "fuzzplugin-provider-registration",
+      pluginName: "Fuzz Plugin Provider Registration",
+      provider: createUnreadableProviderId("fuzzplugin provider id getter failed"),
+      source: "/tmp/fuzzplugin-provider-registration/index.js",
+    });
+    pluginRegistry.registry.speechProviders.push({
+      pluginId: "fuzzplugin-speech-registration",
+      pluginName: "Fuzz Plugin Speech Registration",
+      provider: createUnreadableSpeechProviderId("fuzzplugin speech provider id getter failed"),
+      source: "/tmp/fuzzplugin-speech-registration/index.js",
+    });
+
+    expect(() =>
+      pluginRegistry.registerProvider(mockRecord, {
+        id: "mockplugin-provider",
+        label: "Mock Plugin Provider",
+        auth: [],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      pluginRegistry.registerSpeechProvider(mockRecord, {
+        id: "mockplugin-speech",
+        label: "Mock Plugin Speech",
+        defaultModel: "mockplugin-voice",
+        models: ["mockplugin-voice"],
+        isConfigured: () => true,
+        synthesize: async () => ({
+          audioBuffer: Buffer.alloc(0),
+          fileExtension: "mp3",
+          outputFormat: "audio/mpeg",
+          voiceCompatible: true,
+        }),
+      }),
+    ).not.toThrow();
+
+    expect(mockRecord.providerIds).toEqual(["mockplugin-provider"]);
+    expect(mockRecord.speechProviderIds).toEqual(["mockplugin-speech"]);
+    expect(pluginRegistry.registry.providers.at(-1)?.provider.id).toBe("mockplugin-provider");
+    expect(pluginRegistry.registry.speechProviders.at(-1)?.provider.id).toBe("mockplugin-speech");
   });
 
   it("publishes synthesized media-generation catalog rows during provider registration", async () => {
