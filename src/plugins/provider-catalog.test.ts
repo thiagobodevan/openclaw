@@ -147,6 +147,46 @@ describe("buildSingleProviderApiKeyCatalog", () => {
       expected,
     });
   });
+
+  it("skips unreadable catalog template rows while preserving healthy matches", () => {
+    const unreadableEntry: Record<string, unknown> = {
+      id: "fuzz-model",
+    };
+    Object.defineProperty(unreadableEntry, "provider", {
+      get() {
+        throw new Error("fuzzplugin catalog provider failed");
+      },
+    });
+    const revokedEntry = Proxy.revocable(
+      {
+        provider: "fuzzprovider",
+        id: "fuzz-model",
+      },
+      {},
+    );
+    revokedEntry.revoke();
+
+    const healthyEntry = {
+      provider: "mock provider",
+      id: "mock-model",
+      api: "openai-completions",
+    };
+
+    expectCatalogTemplateMatch({
+      entries: [unreadableEntry as never, revokedEntry.proxy as never, healthyEntry],
+      providerId: "mock provider",
+      templateIds: ["missing", "mock-model"],
+      expected: healthyEntry,
+    });
+    expect(
+      findCatalogTemplate({
+        entries: [unreadableEntry as never, healthyEntry],
+        providerId: "mock provider",
+        templateIds: ["mock-model"],
+      }),
+    ).toBe(healthyEntry);
+  });
+
   it.each([
     {
       name: "returns null when api key is missing",
@@ -247,6 +287,22 @@ describe("buildSingleProviderApiKeyCatalog", () => {
       });
     },
   );
+
+  it("returns null when a single provider catalog entry is unreadable", async () => {
+    const unreadableProvider = new Proxy(createProviderConfig(), {
+      ownKeys() {
+        throw new Error("fuzzplugin single provider keys failed");
+      },
+    });
+
+    await expectSingleCatalogResult({
+      ctx: createCatalogContext({
+        apiKeys: { "test-provider": "secret-key" },
+      }),
+      buildProvider: () => unreadableProvider,
+      expected: null,
+    });
+  });
 
   it("adds api key to each paired provider", async () => {
     await expectPairedCatalogResult({

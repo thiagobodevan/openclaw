@@ -11,6 +11,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
 
+function readRecordValue(record: unknown, key: string): unknown {
+  if (!isRecord(record)) {
+    return undefined;
+  }
+  try {
+    return record[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function copyArrayEntries(value: unknown): unknown[] {
+  let isArray: boolean;
+  try {
+    isArray = Array.isArray(value);
+  } catch {
+    return [];
+  }
+  if (!isArray) {
+    return [];
+  }
+  const arrayValue = value as readonly unknown[];
+  let length: number;
+  try {
+    length = arrayValue.length;
+  } catch {
+    return [];
+  }
+  const entries: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    try {
+      entries.push(arrayValue[index]);
+    } catch {
+      continue;
+    }
+  }
+  return entries;
+}
+
 function copyProviderEntries(value: unknown): Array<[string, ModelProviderConfig]> {
   if (!isRecord(value)) {
     return [];
@@ -26,7 +65,7 @@ function copyProviderEntries(value: unknown): Array<[string, ModelProviderConfig
   const entries: Array<[string, ModelProviderConfig]> = [];
   for (const key of keys) {
     try {
-      const provider = value[key];
+      const provider = readRecordValue(value, key);
       if (isRecord(provider)) {
         entries.push([key, provider as ModelProviderConfig]);
       }
@@ -48,20 +87,61 @@ function addApiKeyToProvider(
   }
 }
 
+function addBaseUrlAndApiKeyToProvider(
+  provider: ModelProviderConfig,
+  apiKey: string,
+  explicitBaseUrl: string,
+): (ModelProviderConfig & { apiKey: string }) | undefined {
+  try {
+    return {
+      ...provider,
+      ...(explicitBaseUrl ? { baseUrl: explicitBaseUrl } : {}),
+      apiKey,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function readCatalogTemplateEntry(entry: unknown):
+  | {
+      provider: string;
+      id: string;
+      entry: { provider: string; id: string };
+    }
+  | undefined {
+  const provider = readRecordValue(entry, "provider");
+  const id = readRecordValue(entry, "id");
+  if (typeof provider !== "string" || typeof id !== "string") {
+    return undefined;
+  }
+  return { provider, id, entry: entry as { provider: string; id: string } };
+}
+
 export function findCatalogTemplate(params: {
   entries: ReadonlyArray<{ provider: string; id: string }>;
   providerId: string;
   templateIds: readonly string[];
 }) {
-  return params.templateIds
-    .map((templateId) =>
-      params.entries.find(
+  const normalizedProviderId = normalizeProviderId(params.providerId);
+  for (const templateId of copyArrayEntries(params.templateIds)) {
+    if (typeof templateId !== "string") {
+      continue;
+    }
+    const normalizedTemplateId = normalizeLowercaseStringOrEmpty(templateId);
+    const match = copyArrayEntries(params.entries)
+      .map(readCatalogTemplateEntry)
+      .find(
         (entry) =>
-          normalizeProviderId(entry.provider) === normalizeProviderId(params.providerId) &&
-          normalizeLowercaseStringOrEmpty(entry.id) === normalizeLowercaseStringOrEmpty(templateId),
-      ),
-    )
-    .find((entry) => entry !== undefined);
+          entry &&
+          normalizeProviderId(entry.provider) === normalizedProviderId &&
+          normalizeLowercaseStringOrEmpty(entry.id) === normalizedTemplateId,
+      );
+    if (match) {
+      return match.entry;
+    }
+  }
+  return undefined;
 }
 
 export async function buildSingleProviderApiKeyCatalog(params: {
@@ -81,13 +161,12 @@ export async function buildSingleProviderApiKeyCatalog(params: {
     : undefined;
   const explicitBaseUrl = normalizeOptionalString(explicitProvider?.baseUrl) ?? "";
 
-  return {
-    provider: {
-      ...(await params.buildProvider()),
-      ...(explicitBaseUrl ? { baseUrl: explicitBaseUrl } : {}),
-      apiKey,
-    },
-  };
+  const provider = addBaseUrlAndApiKeyToProvider(
+    await params.buildProvider(),
+    apiKey,
+    explicitBaseUrl,
+  );
+  return provider ? { provider } : null;
 }
 
 export async function buildPairedProviderApiKeyCatalog(params: {
