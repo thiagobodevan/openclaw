@@ -20,6 +20,7 @@ import type {
 } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { getActivePluginRegistry } from "../../plugins/runtime.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import {
   isDeliverableMessageChannel,
   normalizeMessageChannel,
@@ -105,15 +106,39 @@ function maybeBootstrapChannelPlugin(params: {
   bootstrapOutboundChannelPlugin(params);
 }
 
+function isObjectLike(value: unknown): value is Record<PropertyKey, unknown> {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
+}
+
+function readField(value: unknown, key: string): unknown {
+  if (!isObjectLike(value)) {
+    return undefined;
+  }
+  try {
+    return value[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function readActiveRegistryChannels(registry: unknown): unknown[] {
+  const channels = readField(registry, "channels");
+  return Array.isArray(channels) ? channels : [];
+}
+
 function resolveDirectFromActiveRegistry(channel: string): ChannelPlugin | undefined {
   const activeRegistry = getActivePluginRegistry();
   if (!activeRegistry) {
     return undefined;
   }
-  for (const entry of activeRegistry.channels) {
-    const plugin = entry?.plugin;
-    if (plugin?.id === channel) {
-      return plugin;
+  for (const entry of readActiveRegistryChannels(activeRegistry)) {
+    const plugin = readField(entry, "plugin");
+    if (!isObjectLike(plugin)) {
+      continue;
+    }
+    const id = normalizeOptionalString(readField(plugin, "id"));
+    if (id === channel) {
+      return plugin as ChannelPlugin;
     }
   }
   return undefined;

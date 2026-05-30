@@ -156,6 +156,43 @@ describe("outbound channel resolution", () => {
     ).toBe(plugin);
   });
 
+  it("skips unreadable active registry channel entries before healthy outbound fallbacks", async () => {
+    const plugin = { id: "alpha" };
+    const unreadableEntry = Object.defineProperty(
+      { pluginId: "fuzzplugin-entry", source: "test" },
+      "plugin",
+      {
+        enumerable: true,
+        get() {
+          throw new Error("fuzzplugin active channel entry unreadable");
+        },
+      },
+    );
+    const unreadablePluginId = Object.defineProperty({ meta: { id: "fuzzplugin-alpha" } }, "id", {
+      enumerable: true,
+      get() {
+        throw new Error("fuzzplugin active channel id unreadable");
+      },
+    });
+    getLoadedChannelPluginMock.mockReturnValue(undefined);
+    getChannelPluginMock.mockReturnValue(undefined);
+    getActivePluginRegistryMock.mockReturnValue({
+      channels: [
+        unreadableEntry,
+        { pluginId: "fuzzplugin-alpha", source: "test", plugin: unreadablePluginId },
+        { pluginId: "mockplugin-alpha", source: "test", plugin },
+      ],
+    });
+    const channelResolution = await importChannelResolution("direct-registry-unreadable");
+
+    expect(
+      channelResolution.resolveOutboundChannelPlugin({
+        channel: "alpha",
+        cfg: {} as never,
+      }),
+    ).toBe(plugin);
+  });
+
   it("bootstraps configured channel plugins when the active registry is missing the target", async () => {
     const plugin = { id: "alpha" };
     getLoadedChannelPluginMock.mockReturnValueOnce(undefined).mockReturnValueOnce(plugin);
