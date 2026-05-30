@@ -396,4 +396,64 @@ describe("provider flow install catalog contributions", () => {
       },
     ]);
   });
+
+  it("skips unreadable runtime model-picker rows while preserving healthy entries", () => {
+    const unreadableProvider = Object.defineProperty(
+      {
+        label: "Fuzz Provider",
+        docsPath: "/providers/fuzzplugin",
+        auth: [],
+      },
+      "id",
+      {
+        get() {
+          throw new Error("fuzzplugin provider id unavailable");
+        },
+      },
+    );
+    const unreadableEntry = Object.defineProperty(
+      {
+        label: "Fuzz Model",
+      },
+      "value",
+      {
+        get() {
+          throw new Error("fuzzplugin model-picker value unavailable");
+        },
+      },
+    );
+    resolvePluginProviders.mockReturnValue([
+      unreadableProvider as unknown as ReturnType<ResolvePluginProviders>[number],
+      {
+        id: "mockplugin",
+        label: "Mock Provider",
+        docsPath: "/providers/mockplugin",
+        auth: [],
+      },
+    ]);
+    resolveProviderModelPickerEntries.mockReturnValue([
+      unreadableEntry as unknown as ReturnType<ResolveProviderModelPickerEntries>[number],
+      {
+        value: "provider-plugin:mockplugin:mock-model",
+        label: "Mock Model",
+      },
+    ]);
+
+    expect(resolveProviderModelPickerFlowContributions()).toEqual([
+      {
+        id: "provider:model-picker:provider-plugin:mockplugin:mock-model",
+        kind: "provider",
+        surface: "model-picker",
+        providerId: "mockplugin",
+        option: {
+          value: "provider-plugin:mockplugin:mock-model",
+          label: "Mock Model",
+          docs: {
+            path: "/providers/mockplugin",
+          },
+        },
+        source: "runtime",
+      },
+    ]);
+  });
 });
