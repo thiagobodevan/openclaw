@@ -264,6 +264,48 @@ describe("defineSingleProviderPluginEntry", () => {
     expect(unifiedCatalog).toEqual([]);
   });
 
+  it("skips unreadable provider catalog entries while preserving healthy siblings", async () => {
+    const providers = Object.defineProperty(
+      {
+        mockplugin: {
+          api: "openai-completions" as const,
+          baseUrl: "https://mockplugin.test/v1",
+          models: [createModel("mock-model", "Mock Model")],
+        },
+      },
+      "fuzzplugin",
+      {
+        enumerable: true,
+        get() {
+          throw new Error("fuzzplugin provider catalog entry read failed");
+        },
+      },
+    );
+    const entry = defineSingleProviderPluginEntry({
+      id: "mockplugin",
+      name: "Mock Provider",
+      description: "Synthetic provider plugin",
+      provider: {
+        label: "Mock",
+        docsPath: "/providers/mockplugin",
+        catalog: {
+          run: async () => ({ providers }),
+        },
+      },
+    });
+
+    const { unifiedCatalog } = await captureProviderEntry({ entry });
+    expect(unifiedCatalog).toEqual([
+      {
+        kind: "text",
+        provider: "mockplugin",
+        model: "mock-model",
+        label: "Mock Model",
+        source: "live",
+      },
+    ]);
+  });
+
   it("projects readable provider catalog models without using source array methods", async () => {
     const models = Object.assign([createModel("fuzz-model", "Fuzz Model")], {
       map() {

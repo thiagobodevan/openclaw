@@ -42,13 +42,20 @@ function copyProviderCatalogEntries(value: unknown): Array<[string, ModelProvide
   if (!isRecord(value)) {
     return [];
   }
-  let entries: Array<[string, unknown]>;
+  let keys: string[];
   try {
-    entries = Object.entries(value);
+    keys = Object.keys(value);
   } catch {
     return [];
   }
-  return entries.filter((entry): entry is [string, ModelProviderConfig] => isRecord(entry[1]));
+  const entries: Array<[string, ModelProviderConfig]> = [];
+  for (const key of keys) {
+    const providerConfig = readRecordValue(value, key);
+    if (isRecord(providerConfig)) {
+      entries.push([key, providerConfig as ModelProviderConfig]);
+    }
+  }
+  return entries;
 }
 
 function copyProviderCatalogResultEntries(params: {
