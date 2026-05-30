@@ -17,6 +17,10 @@ type WebProviderSortEntry = {
   pluginId: string;
   autoDetectOrder?: number;
 };
+type RegistryProviderEntry = {
+  pluginId: string;
+  provider: unknown;
+};
 
 const REQUIRED_WEB_PROVIDER_METHODS = [
   "createTool",
@@ -115,6 +119,18 @@ function copyProviderWithPluginId<TProvider extends { id: string }>(
     }
   }
   return copy as TProvider & { pluginId: string };
+}
+
+function readRegistryProviderEntry(entry: unknown): RegistryProviderEntry | null {
+  const rawPluginId = readRecordValue(entry, "pluginId");
+  const pluginId = typeof rawPluginId === "string" ? rawPluginId.trim() : undefined;
+  if (!pluginId) {
+    return null;
+  }
+  return {
+    pluginId,
+    provider: readRecordValue(entry, "provider"),
+  };
 }
 
 function comparePluginProvidersAlphabetically(
@@ -289,9 +305,11 @@ export function mapRegistryProviders<TProvider extends { id: string }>(params: {
   const onlyPluginIdSet = createPluginIdScopeSet(normalizePluginIdScope(params.onlyPluginIds));
   return params.sortProviders(
     params.entries
+      .map(readRegistryProviderEntry)
+      .filter((entry): entry is RegistryProviderEntry => Boolean(entry))
       .filter((entry) => !onlyPluginIdSet || onlyPluginIdSet.has(entry.pluginId))
       .flatMap((entry) => {
-        const provider = copyProviderWithPluginId(entry.provider, entry.pluginId);
+        const provider = copyProviderWithPluginId(entry.provider as TProvider, entry.pluginId);
         return provider ? [provider] : [];
       }),
   );

@@ -230,6 +230,45 @@ describe("resolveManifestDeclaredWebProviderCandidatePluginIds", () => {
     ]);
   });
 
+  it("skips unreadable web provider registry entries while preserving healthy providers", () => {
+    const target = createMockWebProvider();
+    const { createTool, getCredentialValue, setCredentialValue } = target;
+    const unreadableEntry = {};
+    Object.defineProperty(unreadableEntry, "pluginId", {
+      get() {
+        throw new Error("fuzzplugin web provider pluginId failed");
+      },
+    });
+
+    expect(
+      mapRegistryProviders({
+        entries: [
+          unreadableEntry as never,
+          {
+            pluginId: "mockplugin",
+            provider: target,
+          },
+        ],
+        onlyPluginIds: ["mockplugin"],
+        sortProviders: sortPluginProviders,
+      }),
+    ).toEqual([
+      {
+        id: "mockprovider",
+        pluginId: "mockplugin",
+        label: "Mock Provider",
+        hint: "Mock web provider",
+        envVars: ["MOCK_API_KEY"],
+        placeholder: "mock-api-key",
+        signupUrl: "https://example.invalid/mockplugin",
+        credentialPath: "tools.web.search.apiKey",
+        createTool,
+        getCredentialValue,
+        setCredentialValue,
+      },
+    ]);
+  });
+
   it("skips web providers with unreadable required runtime methods", () => {
     const target = createMockWebProvider();
     const provider = new Proxy(target, {
