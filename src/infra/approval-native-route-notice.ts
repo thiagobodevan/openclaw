@@ -2,6 +2,7 @@ import { sortUniqueStrings } from "@openclaw/normalization-core/string-normaliza
 import { formatHumanList } from "../shared/human-list.js";
 import type { ChannelApprovalNativePlannedTarget } from "./approval-native-delivery.js";
 
+/** Summarize where a native approval was delivered for origin-chat notices. */
 export function describeApprovalDeliveryDestination(params: {
   channelLabel: string;
   deliveredTargets: readonly ChannelApprovalNativePlannedTarget[];
@@ -12,6 +13,7 @@ export function describeApprovalDeliveryDestination(params: {
     : params.channelLabel;
 }
 
+/** Build the notice shown in the origin chat when approval was routed elsewhere. */
 export function resolveApprovalRoutedElsewhereNoticeText(
   destinations: readonly string[],
 ): string | null {
@@ -26,6 +28,7 @@ export function resolveApprovalRoutedElsewhereNoticeText(
   )}, not this chat.`;
 }
 
+/** Build the manual /approve fallback notice when native delivery reaches no targets. */
 export function resolveApprovalDeliveryFailedNoticeText(params: {
   approvalId: string;
   approvalKind: "exec" | "plugin";

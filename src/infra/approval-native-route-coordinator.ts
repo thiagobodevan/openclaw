@@ -144,6 +144,8 @@ function didReportDeliverToOrigin(report: ApprovalRouteReport, originAccountId?:
     reportAccountId !== undefined &&
     reportAccountId !== originAccountId
   ) {
+    // Matching the same chat id from a different configured account is not enough to suppress
+    // the origin notice; approval controls may be scoped to account credentials.
     return false;
   }
   const originKey = buildChannelApprovalNativeTargetKey(originTarget);
@@ -266,6 +268,7 @@ function resolveApprovalRouteNotice(params: {
   };
 }
 
+/** Check whether a native route runtime is available for a kind/channel/account tuple. */
 export function hasActiveApprovalNativeRouteRuntime(params: {
   approvalKind: ChannelApprovalKind;
   channel?: string | null;
@@ -294,6 +297,8 @@ async function maybeFinalizeApprovalRouteNotice(approvalId: string): Promise<voi
   }
   for (const runtimeId of entry.expectedRuntimeIds) {
     if (!entry.reports.has(runtimeId)) {
+      // Wait for the startup-time runtime quorum so parallel native clients produce one notice
+      // based on the full delivery picture, not the first reporter to finish.
       return;
     }
   }
@@ -324,6 +329,7 @@ async function maybeFinalizeApprovalRouteNotice(approvalId: string): Promise<voi
   }
 }
 
+/** Register one native approval runtime as a participant in origin-route notice aggregation. */
 export function createApprovalNativeRouteReporter(params: {
   handledKinds: ReadonlySet<ChannelApprovalKind>;
   channel?: string;
@@ -431,12 +437,15 @@ export function createApprovalNativeRouteReporter(params: {
           clearPendingApprovalRouteNotice(entry.request.id);
           continue;
         }
+        // Stopping a runtime removes it from the quorum; remaining reports may now be enough to
+        // decide whether the origin chat needs a notice.
         await maybeFinalizeApprovalRouteNotice(entry.request.id);
       }
     },
   };
 }
 
+/** Reset module-scoped native route state between tests. */
 export function clearApprovalNativeRouteStateForTest(): void {
   for (const approvalId of Array.from(pendingApprovalRouteNotices.keys())) {
     clearPendingApprovalRouteNotice(approvalId);
