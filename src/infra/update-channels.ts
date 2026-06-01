@@ -11,8 +11,11 @@ export type UpdateChannelSource =
   | "installed-version"
   | "default";
 
+/** Package installs default to stable unless config or beta-version state says otherwise. */
 export const DEFAULT_PACKAGE_CHANNEL: UpdateChannel = "stable";
+/** Git checkouts default to dev because branch installs usually track unreleased code. */
 export const DEFAULT_GIT_CHANNEL: UpdateChannel = "dev";
+/** Branch name treated as the canonical development stream for git installs. */
 export const DEV_BRANCH = "main";
 
 /** Normalize user/config channel text to the supported update channels. */
@@ -70,11 +73,13 @@ export function resolveRegistryUpdateChannel(params: {
     params.configChannel !== "beta" &&
     params.configChannel !== "dev"
   ) {
+    // Beta installs should keep receiving beta-compatible plugin/package targets.
     return "beta";
   }
   return params.configChannel ?? DEFAULT_PACKAGE_CHANNEL;
 }
 
+/** Resolve the effective channel plus the evidence that selected it. */
 export function resolveEffectiveUpdateChannel(params: {
   configChannel?: UpdateChannel | null;
   currentVersion?: string | null;
@@ -98,6 +103,7 @@ export function resolveEffectiveUpdateChannel(params: {
   if (params.installKind === "git") {
     const tag = params.git?.tag;
     if (tag) {
+      // Git tags carry stronger release-channel evidence than detached branch state.
       return {
         channel: isBetaTag(tag) ? "beta" : isStableTag(tag) ? "stable" : "dev",
         source: "git-tag",
@@ -105,6 +111,7 @@ export function resolveEffectiveUpdateChannel(params: {
     }
     const branch = params.git?.branch;
     if (branch && branch !== "HEAD") {
+      // Any named branch is treated as dev because it can advance outside npm releases.
       return { channel: "dev", source: "git-branch" };
     }
     return { channel: DEFAULT_GIT_CHANNEL, source: "default" };
