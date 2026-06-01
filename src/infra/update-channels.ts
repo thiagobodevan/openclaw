@@ -13,6 +13,7 @@ export const DEFAULT_PACKAGE_CHANNEL: UpdateChannel = "stable";
 export const DEFAULT_GIT_CHANNEL: UpdateChannel = "dev";
 export const DEV_BRANCH = "main";
 
+/** Normalize user/config channel text to the supported update channels. */
 export function normalizeUpdateChannel(value?: string | null): UpdateChannel | null {
   const normalized = normalizeOptionalLowercaseString(value);
   if (!normalized) {
@@ -24,6 +25,7 @@ export function normalizeUpdateChannel(value?: string | null): UpdateChannel | n
   return null;
 }
 
+/** Map OpenClaw update channels onto npm dist-tags. */
 export function channelToNpmTag(channel: UpdateChannel): string {
   if (channel === "beta") {
     return "beta";
@@ -34,10 +36,12 @@ export function channelToNpmTag(channel: UpdateChannel): string {
   return "latest";
 }
 
+/** Detect OpenClaw beta tags without treating words like "alphabeta" as beta releases. */
 export function isBetaTag(tag: string): boolean {
   return /(?:^|[.-])beta(?:[.-]|$)/i.test(tag);
 }
 
+/** Classify semantic prereleases, with a regex fallback for legacy/non-semver tags. */
 export function isPrereleaseTag(tag: string): boolean {
   const parsed = parseComparableSemver(tag, { normalizeLegacyDotBeta: true });
   if (parsed) {
@@ -48,10 +52,12 @@ export function isPrereleaseTag(tag: string): boolean {
   );
 }
 
+/** True only for tags that should track the stable channel. */
 export function isStableTag(tag: string): boolean {
   return !isPrereleaseTag(tag);
 }
 
+/** Resolve the npm registry channel, preserving beta when the installed version is beta. */
 export function resolveRegistryUpdateChannel(params: {
   configChannel?: UpdateChannel | null;
   currentVersion?: string | null;
@@ -79,6 +85,7 @@ export function resolveEffectiveUpdateChannel(params: {
     params.configChannel !== "beta" &&
     params.configChannel !== "dev"
   ) {
+    // A beta install should not silently downgrade to stable because of stale config.
     return { channel: "beta", source: "installed-version" };
   }
 
@@ -108,6 +115,7 @@ export function resolveEffectiveUpdateChannel(params: {
   return { channel: DEFAULT_PACKAGE_CHANNEL, source: "default" };
 }
 
+/** Format channel/source pairs for user-facing status and diagnostics. */
 export function formatUpdateChannelLabel(params: {
   channel: UpdateChannel;
   source: UpdateChannelSource;
@@ -131,6 +139,7 @@ export function formatUpdateChannelLabel(params: {
   return `${params.channel} (default)`;
 }
 
+/** Resolve update channel, provenance, and display label in one call. */
 export function resolveUpdateChannelDisplay(params: {
   configChannel?: UpdateChannel | null;
   currentVersion?: string | null;
