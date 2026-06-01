@@ -164,6 +164,8 @@ export function resolveConfigWriteTargetFromPathShared<TChannelId extends string
     return { kind: "global" };
   }
   if (params.path.length < 2) {
+    // Replacing the whole channels map can affect multiple channel policies,
+    // so channel-originated writes need an explicit operator-admin bypass.
     return { kind: "ambiguous", scopes: [] };
   }
   const channelId = params.normalizeChannelId(params.path[1] ?? "");
@@ -171,12 +173,16 @@ export function resolveConfigWriteTargetFromPathShared<TChannelId extends string
     return { kind: "ambiguous", scopes: [] };
   }
   if (params.path.length === 2) {
+    // Replacing one channel root can drop nested account configWrites flags.
+    // Treat it as ambiguous instead of silently checking only the channel flag.
     return { kind: "ambiguous", scopes: [{ channelId }] };
   }
   if (params.path[2] !== "accounts") {
     return { kind: "channel", scope: { channelId } };
   }
   if (params.path.length < 4) {
+    // Replacing the accounts collection can affect accounts with different
+    // configWrites settings, so require a concrete account path.
     return { kind: "ambiguous", scopes: [{ channelId }] };
   }
   return resolveExplicitConfigWriteTargetShared({
