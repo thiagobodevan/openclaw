@@ -47,6 +47,7 @@ export function resolveExecApprovalInitiatingSurfaceState(params: {
   return resolveApprovalInitiatingSurfaceState({ ...params, approvalKind: "exec" });
 }
 
+/** Resolve whether the initiating channel can collect a native approval for this approval kind. */
 export function resolveApprovalInitiatingSurfaceState(params: {
   channel?: string | null;
   accountId?: string | null;
@@ -62,6 +63,8 @@ export function resolveApprovalInitiatingSurfaceState(params: {
 
   const cfg = params.cfg ?? getRuntimeConfig();
   const capability = resolveChannelApprovalCapability(getChannelPlugin(channel));
+  // Exec-specific availability predates the generic action hook; prefer it when present so
+  // existing plugins keep their narrower approval semantics.
   const state =
     (params.approvalKind === "exec"
       ? capability?.getExecInitiatingSurfaceState?.({
@@ -85,6 +88,7 @@ export function resolveApprovalInitiatingSurfaceState(params: {
   return { kind: "unsupported", channel, channelLabel, accountId };
 }
 
+/** Return whether a channel has native exec approval support or is a built-in UI surface. */
 export function supportsNativeExecApprovalClient(channel?: string | null): boolean {
   const normalized = normalizeMessageChannel(channel);
   if (!normalized || normalized === INTERNAL_MESSAGE_CHANNEL || normalized === "tui") {
@@ -93,6 +97,7 @@ export function supportsNativeExecApprovalClient(channel?: string | null): boole
   return hasNativeExecApprovalCapability(normalized);
 }
 
+/** List configured/native approval-capable channel labels for fallback guidance. */
 export function listNativeExecApprovalClientLabels(params?: {
   excludeChannel?: string | null;
 }): string[] {
@@ -105,6 +110,7 @@ export function listNativeExecApprovalClientLabels(params?: {
     .toSorted((a, b) => a.localeCompare(b));
 }
 
+/** Ask the channel plugin for setup guidance for native exec approvals, when available. */
 export function describeNativeExecApprovalClientSetup(params: {
   channel?: string | null;
   channelLabel?: string | null;

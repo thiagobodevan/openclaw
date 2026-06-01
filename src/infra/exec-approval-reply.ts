@@ -23,11 +23,14 @@ import {
 } from "./exec-approvals.js";
 
 export type ExecApprovalReplyDecision = ExecApprovalDecision;
+
+/** Why a channel cannot host an interactive approval reply for the current request. */
 export type ExecApprovalUnavailableReason =
   | "initiating-platform-disabled"
   | "initiating-platform-unsupported"
   | "no-approval-route";
 
+/** Stable metadata embedded in approval reply payloads so channels can recover callback state. */
 export type ExecApprovalReplyMetadata = {
   approvalId: string;
   approvalSlug: string;
@@ -37,6 +40,7 @@ export type ExecApprovalReplyMetadata = {
   sessionKey?: string;
 };
 
+/** One rendered approval action across text commands, interactive replies, and presentations. */
 export type ExecApprovalActionDescriptor = {
   decision: ExecApprovalReplyDecision;
   label: string;
@@ -44,6 +48,7 @@ export type ExecApprovalActionDescriptor = {
   command: string;
 };
 
+/** Inputs needed to render an exec approval request for a chat or UI surface. */
 export type ExecApprovalPendingReplyParams = {
   warningText?: string;
   approvalId: string;
@@ -61,6 +66,7 @@ export type ExecApprovalPendingReplyParams = {
   nowMs?: number;
 };
 
+/** Inputs needed to explain why the initiating surface cannot collect approval. */
 export type ExecApprovalUnavailableReplyParams = {
   warningText?: string;
   channel?: string;
@@ -110,6 +116,7 @@ export function buildExecApprovalCommandText(params: {
   return `/approve ${params.approvalCommandId} ${params.decision}`;
 }
 
+/** Build ordered approval actions, preserving the policy allowlist and command spelling. */
 export function buildExecApprovalActionDescriptors(params: {
   approvalCommandId: string;
   ask?: string | null;
@@ -261,6 +268,7 @@ export function getExecApprovalApproverDmNoticeText(): string {
   return "Approval required. I sent approval DMs to the approvers for this account.";
 }
 
+/** Parse human-entered /approve replies, including bot mentions and legacy "always" spelling. */
 export function parseExecApprovalCommandText(
   raw: string,
 ): { approvalId: string; decision: ExecApprovalReplyDecision } | null {
@@ -279,6 +287,7 @@ export function parseExecApprovalCommandText(
   };
 }
 
+/** Format the remaining approval lifetime for compact chat messages. */
 export function formatExecApprovalExpiresIn(expiresAtMs: number, nowMs: number): string {
   const totalSeconds = Math.max(0, Math.round((expiresAtMs - nowMs) / 1000));
   if (totalSeconds < 60) {
@@ -303,6 +312,7 @@ export function formatExecApprovalExpiresIn(expiresAtMs: number, nowMs: number):
 
 function buildFence(text: string, language?: string): string {
   let fence = "```";
+  // Grow the fence until arbitrary command text cannot prematurely close it.
   while (text.includes(fence)) {
     fence += "`";
   }
@@ -310,6 +320,7 @@ function buildFence(text: string, language?: string): string {
   return `${fence}${languagePrefix}\n${text}\n${fence}`;
 }
 
+/** Recover approval metadata from a rendered reply payload without trusting channelData shape. */
 export function getExecApprovalReplyMetadata(
   payload: ReplyPayload,
 ): ExecApprovalReplyMetadata | null {
@@ -346,6 +357,7 @@ export function getExecApprovalReplyMetadata(
   };
 }
 
+/** Render a pending exec approval with both text fallback commands and portable buttons. */
 export function buildExecApprovalPendingReplyPayload(
   params: ExecApprovalPendingReplyParams,
 ): ReplyPayload {
@@ -414,6 +426,7 @@ export function buildExecApprovalPendingReplyPayload(
   };
 }
 
+/** Render operator guidance when no interactive approval route can handle the request. */
 export function buildExecApprovalUnavailableReplyPayload(
   params: ExecApprovalUnavailableReplyParams,
 ): ReplyPayload {
