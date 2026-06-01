@@ -14,7 +14,9 @@ import {
 import type { ChannelId } from "./plugins/types.public.js";
 export type { AccessGroupMembershipResolver } from "../plugin-sdk/access-groups.js";
 
+/** Runtime callbacks needed by the legacy direct-DM authorizer bridge. */
 export type DirectDmCommandAuthorizationRuntime = {
+  /** Returns whether a raw body should run command authorization. */
   shouldComputeCommandAuthorized: (rawBody: string, cfg: OpenClawConfig) => boolean;
   /** @deprecated Command authorization is resolved by channel ingress. Kept for runtime injection compatibility. */
   resolveCommandAuthorizedFromAuthorizers?: (params: {
@@ -26,14 +28,18 @@ export type DirectDmCommandAuthorizationRuntime = {
 
 /** @deprecated Use `resolveChannelMessageIngress` from `openclaw/plugin-sdk/channel-ingress-runtime`. */
 export type ResolvedInboundDirectDmAccess = {
+  /** DM access decision after configured and pairing-store allowlists are merged. */
   access: {
     decision: "allow" | "block" | "pairing";
     reasonCode: DmGroupAccessReasonCode;
     reason: string;
     effectiveAllowFrom: string[];
   };
+  /** Whether command authorization was applicable to this inbound body. */
   shouldComputeAuth: boolean;
+  /** Whether the sender matched the effective DM allowlist used for command checks. */
   senderAllowedForCommands: boolean;
+  /** Command authorization result when applicable. */
   commandAuthorized: boolean | undefined;
 };
 
@@ -79,6 +85,8 @@ export async function resolveInboundDirectDmAccessWithRuntime(params: {
           readStore: params.readStoreAllowFrom,
         })
       : [];
+  // Expand configured and pairing-store allowlists independently so diagnostics and command
+  // authorization use the same effective entries as the legacy DM access decision.
   const [allowFrom, effectiveStoreAllowFrom] = await Promise.all([
     expandAllowFromWithAccessGroups({
       cfg: params.cfg,
@@ -163,6 +171,8 @@ export function createPreCryptoDirectDmAuthorizer(params: {
       return "allow";
     }
     if (access.decision === "pairing") {
+      // Pairing challenges are optional because some adapters only need to signal pairing state
+      // while another layer sends the challenge text.
       if (params.issuePairingChallenge) {
         await params.issuePairingChallenge({
           senderId: input.senderId,
