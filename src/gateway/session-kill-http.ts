@@ -25,9 +25,21 @@ import { loadSessionEntry } from "./session-utils.js";
 const REQUESTER_SESSION_KEY_HEADER = "x-openclaw-requester-session-key";
 
 type SessionKeyPathResolution =
-  | { matched: false }
-  | { matched: true; sessionKey: string }
-  | { error: "invalid-session-key"; matched: true };
+  | {
+      /** Request path is not owned by the session kill endpoint. */
+      matched: false;
+    }
+  | {
+      /** Request path matched and yielded a decoded session key. */
+      matched: true;
+      /** Decoded target session key from `/sessions/{sessionKey}/kill`. */
+      sessionKey: string;
+    }
+  | {
+      /** Request path matched but the session key segment was missing or malformed. */
+      error: "invalid-session-key";
+      matched: true;
+    };
 
 function resolveSessionKeyFromPath(pathname: string): SessionKeyPathResolution {
   const match = pathname.match(/^\/sessions\/([^/]+)\/kill$/);
@@ -45,6 +57,7 @@ function resolveSessionKeyFromPath(pathname: string): SessionKeyPathResolution {
   }
 }
 
+/** Handles authenticated `/sessions/{sessionKey}/kill` HTTP requests. */
 export async function handleSessionKillHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
