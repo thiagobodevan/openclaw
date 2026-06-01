@@ -2,6 +2,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { compileSafeRegex, testRegexWithBoundedInput } from "../security/safe-regex.js";
 
+/** Agent/session identity fields available when deciding whether to forward an approval request. */
 export type ApprovalRequestFilterInput = {
   agentId?: string | null;
   sessionKey?: string | null;
