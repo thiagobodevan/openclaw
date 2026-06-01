@@ -31,6 +31,7 @@ export interface VoiceCallProvider {
   /** Provider identifier */
   readonly name: ProviderName;
 
+  /** Publish the externally reachable webhook base URL after provider construction. */
   setPublicUrl?(url: string): void;
 
   /**
@@ -46,8 +47,10 @@ export interface VoiceCallProvider {
   parseWebhookEvent(ctx: WebhookContext, options?: WebhookParseOptions): ProviderWebhookParseResult;
 
   /**
-   * Consume one-time TwiML that must be served before shortcut handlers such as
-   * realtime media streams take over the webhook response.
+   * Consume one-time TwiML for a provider request.
+   *
+   * Implementations must return the TwiML at most once per provider call so a
+   * replayed webhook cannot repeat pre-connect DTMF or notification playback.
    */
   consumeInitialTwiML?: (ctx: WebhookContext) => string | null;
 
@@ -75,12 +78,12 @@ export interface VoiceCallProvider {
   playTts(input: PlayTtsInput): Promise<void>;
 
   /**
-   * Send DTMF digits to an active call.
+   * Send already-validated DTMF digits to an active call.
    */
   sendDtmf?: (input: SendDtmfInput) => Promise<void>;
 
   /**
-   * Start listening for user speech (activate STT).
+   * Start listening for user speech and echo `turnToken` in final transcript callbacks when provided.
    */
   startListening(input: StartListeningInput): Promise<void>;
 
