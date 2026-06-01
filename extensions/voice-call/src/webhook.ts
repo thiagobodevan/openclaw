@@ -202,10 +202,6 @@ function cloneWebhookResponsePayload(payload: WebhookResponsePayload): WebhookRe
   };
 }
 
-/**
- * HTTP server for receiving voice call webhooks from providers.
- * Supports WebSocket upgrades for media streams when streaming is enabled.
- */
 export class VoiceCallWebhookServer {
   private server: http.Server | null = null;
   private listeningUrl: string | null = null;
@@ -298,6 +294,8 @@ export class VoiceCallWebhookServer {
       this.config.webhookSecurity.trustForwardingHeaders && fromTrustedProxy;
 
     if (shouldTrustForwardingHeaders) {
+      // Media stream limits are keyed by client IP, so forwarded headers are
+      // accepted only from a configured trusted proxy, never from arbitrary callers.
       const forwardedIp = resolveForwardedClientIp(request, trustedProxyIPs);
       if (forwardedIp) {
         return forwardedIp;
@@ -478,6 +476,8 @@ export class VoiceCallWebhookServer {
         }
 
         this.clearPendingDisconnectHangup(callId);
+        // Twilio can reconnect a media stream for the same call; delay hangup
+        // briefly and re-check provider stream state before ending the call.
         const timer = setTimeout(() => {
           this.pendingDisconnectHangups.delete(callId);
           const disconnectedCall = this.manager.getCallByProviderCallId(callId);
@@ -743,6 +743,8 @@ export class VoiceCallWebhookServer {
         return { statusCode: 401, body: "Unauthorized" };
       }
       if (!verification.verifiedRequestKey) {
+        // Replay protection depends on a provider-stable request identity. Treat
+        // verification without a key as unauthenticated rather than best-effort.
         console.warn("[voice-call] Webhook verification succeeded without request identity key");
         return { statusCode: 401, body: "Unauthorized" };
       }
@@ -804,6 +806,8 @@ export class VoiceCallWebhookServer {
         return await buildResponse();
       }
 
+      // Twilio retries initial TwiML fetches; do not cache those responses here
+      // because replayed realtime requests must not mint fresh stream tokens.
       if (this.provider.name === "twilio") {
         return await buildResponse();
       }
@@ -864,6 +868,8 @@ export class VoiceCallWebhookServer {
         this.replayResponses.delete(key);
         throw err;
       });
+    // Store the in-flight promise so simultaneous duplicate provider retries
+    // share one parsed response and one set of manager side effects.
     if (expiresAt !== undefined) {
       this.replayResponses.set(key, {
         expiresAt,
