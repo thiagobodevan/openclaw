@@ -19,6 +19,7 @@ type OpenClawReleaseVersion = {
   correctionNumber?: number;
 };
 
+/** Parsed npm registry spec used by plugin install/update policy checks. */
 export type ParsedRegistryNpmSpec = {
   name: string;
   raw: string;
@@ -54,6 +55,8 @@ function parseRegistryNpmSpecInternal(
   const name = hasSelector ? spec.slice(0, at) : spec;
   const selector = hasSelector ? spec.slice(at + 1) : "";
 
+  // Keep package-name validation registry-shaped only; aliases and path-like
+  // names are rejected before installer code receives the spec.
   const unscopedName = /^[a-z0-9][a-z0-9-._~]*$/;
   const scopedName = /^@[a-z0-9][a-z0-9-._~]*\/[a-z0-9][a-z0-9-._~]*$/;
   const isValidName = name.startsWith("@") ? scopedName.test(name) : unscopedName.test(name);
@@ -167,6 +170,7 @@ function parseOpenClawReleaseVersion(value: string): OpenClawReleaseVersion | nu
     date.getUTCMonth() !== month - 1 ||
     date.getUTCDate() !== day
   ) {
+    // Date-based OpenClaw versions must be real UTC calendar dates.
     return null;
   }
 
@@ -256,6 +260,7 @@ export function isPrereleaseResolutionAllowed(params: {
   if (params.spec.selectorKind === "exact-version") {
     return params.spec.selectorIsPrerelease;
   }
+  // Any non-latest dist-tag is an explicit selector controlled by the caller.
   return normalizeLowercaseStringOrEmpty(params.spec.selector) !== "latest";
 }
 
