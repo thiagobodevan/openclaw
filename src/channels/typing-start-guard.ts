@@ -1,15 +1,25 @@
 type TypingStartGuard = {
+  /** Attempts to start typing and returns the guard outcome instead of throwing by default. */
   run: (start: () => Promise<void> | void) => Promise<"started" | "skipped" | "failed" | "tripped">;
+  /** Clears failure count and trip state after a successful recovery or test reset. */
   reset: () => void;
+  /** Returns whether repeated failures have permanently blocked starts until reset. */
   isTripped: () => boolean;
 };
 
+/** Creates a guard that prevents typing-start retries after seal, block, or repeated failure. */
 export function createTypingStartGuard(params: {
+  /** Returns true when the owning turn/session is sealed and typing should not start. */
   isSealed: () => boolean;
+  /** Optional dynamic block predicate for channel-specific state. */
   shouldBlock?: () => boolean;
+  /** Error sink for failed typing starts. */
   onStartError?: (err: unknown) => void;
+  /** Failure count that trips the guard; omitted means never trip by count. */
   maxConsecutiveFailures?: number;
+  /** Callback invoked once when the failure threshold trips. */
   onTrip?: () => void;
+  /** Whether start errors should propagate instead of being converted to "failed". */
   rethrowOnError?: boolean;
 }): TypingStartGuard {
   const maxConsecutiveFailures =
@@ -44,6 +54,7 @@ export function createTypingStartGuard(params: {
         throw err;
       }
       if (maxConsecutiveFailures && consecutiveFailures >= maxConsecutiveFailures) {
+        // Once tripped, future calls skip without touching the adapter until reset clears state.
         tripped = true;
         params.onTrip?.();
         return "tripped";
