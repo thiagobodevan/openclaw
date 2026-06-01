@@ -25,6 +25,8 @@ export function shouldDebounceTextInbound(params: {
     return false;
   }
   if (params.hasMedia) {
+    // Media events can carry upload/download side effects; dispatch them
+    // immediately so attachment processing is not delayed behind text batching.
     return false;
   }
   const text = normalizeOptionalString(params.text) ?? "";
@@ -56,6 +58,8 @@ export function createChannelInboundDebouncer<T>(
     channel: params.channel,
     overrideMs: params.debounceMsOverride,
   });
+  // Resolve timing once when the channel monitor is created; per-message checks
+  // only decide whether an event is debounceable, not what timer to use.
   const { cfg: _cfg, channel: _channel, debounceMsOverride: _override, ...rest } = params;
   const debouncer = createInboundDebouncer<T>({
     debounceMs,
