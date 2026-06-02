@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Context, Model } from "../types.js";
+import type { Context, Model, Tool } from "../types.js";
 
 const anthropicMockState = vi.hoisted(() => ({
   configs: [] as unknown[],
@@ -196,7 +196,7 @@ describe("Anthropic provider", () => {
 
   it("forwards simple stop sequences to Anthropic stop_sequences", async () => {
     let capturedPayload: unknown;
-    const stream = streamSimpleAnthropic(
+    const stream = streamAnthropic(
       makeAnthropicModel(),
       {
         messages: [{ role: "user", content: "hello", timestamp: 0 }],
@@ -215,5 +215,97 @@ describe("Anthropic provider", () => {
 
     expect(result.stopReason).toBe("error");
     expect((capturedPayload as { stop_sequences?: unknown }).stop_sequences).toEqual(["STOP"]);
+  });
+
+  it("quarantines unreadable Anthropic provider tools before payload projection", async () => {
+    let capturedPayload: unknown;
+    const unreadableTool = {
+      name: "bad_plugin_tool",
+      description: "bad schema",
+      get parameters(): Tool["parameters"] {
+        throw new Error("fuzz parameters getter exploded");
+      },
+    } as Tool;
+    const stream = streamAnthropic(
+      makeAnthropicModel(),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+        tools: [
+          unreadableTool,
+          {
+            name: "good_plugin_tool",
+            description: "good schema",
+            parameters: {
+              type: "object",
+              properties: {
+                query: { type: "string" },
+              },
+            },
+          } as Tool,
+        ],
+      },
+      {
+        apiKey: "sk-ant-provider",
+        toolChoice: { type: "tool", name: "bad_plugin_tool" },
+        onPayload: (payload) => {
+          capturedPayload = payload;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    const payload = capturedPayload as {
+      tools?: Array<{ name?: string; input_schema?: unknown }>;
+      tool_choice?: unknown;
+    };
+    expect(payload.tools?.map((tool) => tool.name)).toEqual(["good_plugin_tool"]);
+    expect(payload.tools?.[0]?.input_schema).toMatchObject({
+      properties: { query: { type: "string" } },
+    });
+    expect(payload.tool_choice).toEqual({ type: "none" });
+  });
+
+  it("preserves Anthropic provider OAuth pinned tool_choice against wire tool names", async () => {
+    let capturedPayload: unknown;
+    const stream = streamAnthropic(
+      makeAnthropicModel(),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+        tools: [
+          {
+            name: "read",
+            description: "Read a file",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+          } as Tool,
+        ],
+      },
+      {
+        apiKey: "sk-ant-oat-provider",
+        toolChoice: { type: "tool", name: "Read" },
+        onPayload: (payload) => {
+          capturedPayload = payload;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    const payload = capturedPayload as {
+      tools?: Array<{ name?: string }>;
+      tool_choice?: unknown;
+    };
+    expect(payload.tools?.map((tool) => tool.name)).toEqual(["Read"]);
+    expect(payload.tool_choice).toEqual({ type: "tool", name: "Read" });
   });
 });

@@ -672,6 +672,7 @@ describe("anthropic transport stream", () => {
         } as unknown as Parameters<typeof streamFn>[1],
         {
           apiKey: "sk-ant-oat-example",
+          toolChoice: { type: "tool", name: "Read" },
         } as Parameters<typeof streamFn>[2],
       ),
     );
@@ -700,6 +701,7 @@ describe("anthropic transport stream", () => {
         (item) => requireRecord(item, "tool").name === "Read",
       ),
     ).toBe(true);
+    expect(firstCallParams.tool_choice).toEqual({ type: "tool", name: "Read" });
     expect(result.stopReason).toBe("toolUse");
     expect(result.content.some((item) => item.type === "toolCall" && item.name === "read")).toBe(
       true,
@@ -1221,11 +1223,20 @@ describe("anthropic transport stream", () => {
   });
 
   it("skips malformed tools when building Anthropic payloads", async () => {
+    const unreadableTool = {
+      name: "unreadable_plugin_tool",
+      description: "unreadable schema",
+      get parameters(): unknown {
+        throw new Error("fuzz parameters getter exploded");
+      },
+    };
+
     await runTransportStream(
       makeAnthropicTransportModel(),
       {
         messages: [{ role: "user", content: "hello" }],
         tools: [
+          unreadableTool,
           {
             name: "bad_plugin_tool",
             description: "missing schema",
@@ -1256,6 +1267,70 @@ describe("anthropic transport stream", () => {
     expect(requireRecord(tool.input_schema, "input schema").properties).toEqual({
       query: { type: "string" },
     });
+  });
+
+  it("omits Anthropic tools and forced tool_choice when all tools are quarantined", async () => {
+    await runTransportStream(
+      makeAnthropicTransportModel(),
+      {
+        messages: [{ role: "user", content: "hello" }],
+        tools: [
+          {
+            name: "bad_plugin_tool",
+            description: "array schema",
+            parameters: { type: "array", items: { type: "number" } },
+          },
+        ],
+      } as unknown as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        toolChoice: "any",
+      } as AnthropicStreamOptions,
+    );
+
+    const payload = latestAnthropicRequest().payload;
+    expect(payload).not.toHaveProperty("tools");
+    expect(payload).not.toHaveProperty("tool_choice");
+  });
+
+  it("disables pinned Anthropic tool_choice when the pinned tool is quarantined", async () => {
+    await runTransportStream(
+      makeAnthropicTransportModel(),
+      {
+        messages: [{ role: "user", content: "hello" }],
+        tools: [
+          {
+            name: "bad_plugin_tool",
+            description: "dynamic schema",
+            parameters: {
+              type: "object",
+              properties: {
+                target: { $dynamicRef: "#target" },
+              },
+            },
+          },
+          {
+            name: "good_plugin_tool",
+            description: "valid schema",
+            parameters: {
+              type: "object",
+              properties: {
+                query: { type: "string" },
+              },
+            },
+          },
+        ],
+      } as unknown as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        toolChoice: { type: "tool", name: "bad_plugin_tool" },
+      } as AnthropicStreamOptions,
+    );
+
+    const payload = latestAnthropicRequest().payload;
+    const tools = requireArray(payload.tools, "tools");
+    expect(tools.map((tool) => requireRecord(tool, "tool").name)).toEqual(["good_plugin_tool"]);
+    expect(payload.tool_choice).toEqual({ type: "none" });
   });
 
   it("coerces replayed malformed tool-call args to an object for Anthropic payloads", async () => {

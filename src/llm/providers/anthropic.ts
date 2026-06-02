@@ -6,6 +6,10 @@ import type {
   MessageParam,
   RawMessageStreamEvent,
 } from "@anthropic-ai/sdk/resources/messages.js";
+import {
+  resolveAnthropicToolChoiceForProjectedTools,
+  snapshotAnthropicToolProjectionInputs,
+} from "../../agents/anthropic-tool-schema.js";
 import { getEnvApiKey } from "../env-api-keys.js";
 import { calculateCost, clampThinkingLevel } from "../model-utils.js";
 import type {
@@ -977,14 +981,19 @@ function buildParams(
     params.stop_sequences = options.stop;
   }
 
+  let projectedToolNames: string[] = [];
   if (context.tools && context.tools.length > 0) {
     const compat = getAnthropicCompat(model);
-    params.tools = convertTools(
+    const convertedTools = convertTools(
       context.tools,
       isOAuthTokenResult,
       compat.supportsEagerToolInputStreaming,
       compat.supportsCacheControlOnTools ? cacheControl : undefined,
     );
+    projectedToolNames = convertedTools.toolNames;
+    if (convertedTools.tools.length > 0) {
+      params.tools = convertedTools.tools;
+    }
   }
 
   // Configure thinking mode: adaptive (Opus 4.6+ and Sonnet 4.6),
@@ -1026,11 +1035,14 @@ function buildParams(
     }
   }
 
-  if (options?.toolChoice) {
-    if (typeof options.toolChoice === "string") {
-      params.tool_choice = { type: options.toolChoice };
+  const projectedToolChoice =
+    options?.toolChoice &&
+    resolveAnthropicToolChoiceForProjectedTools(options.toolChoice, projectedToolNames);
+  if (projectedToolChoice) {
+    if (typeof projectedToolChoice === "string") {
+      params.tool_choice = { type: projectedToolChoice };
     } else {
-      params.tool_choice = options.toolChoice;
+      params.tool_choice = projectedToolChoice;
     }
   }
 
@@ -1234,26 +1246,34 @@ function convertTools(
   isOAuthTokenLocal: boolean,
   supportsEagerToolInputStreaming: boolean,
   cacheControl?: CacheControlEphemeral,
-): Anthropic.Messages.Tool[] {
-  if (!tools) {
-    return [];
-  }
-
-  return tools.map((tool, index) => {
-    const schema = tool.parameters as { properties?: unknown; required?: string[] };
-
-    return {
+): {
+  tools: Anthropic.Messages.Tool[];
+  toolNames: string[];
+} {
+  const projection = snapshotAnthropicToolProjectionInputs(tools);
+  const convertedTools: Anthropic.Messages.Tool[] = [];
+  for (const [index, tool] of projection.tools.entries()) {
+    const convertedTool: Anthropic.Messages.Tool = {
       name: isOAuthTokenLocal ? toClaudeCodeName(tool.name) : tool.name,
       description: tool.description,
-      ...(supportsEagerToolInputStreaming ? { eager_input_streaming: true } : {}),
       input_schema: {
-        type: "object",
-        properties: schema.properties ?? {},
-        required: schema.required ?? [],
+        type: "object" as const,
+        properties: tool.parameters.properties ?? {},
+        required: tool.parameters.required ?? [],
       },
-      ...(cacheControl && index === tools.length - 1 ? { cache_control: cacheControl } : {}),
     };
-  });
+    if (supportsEagerToolInputStreaming) {
+      convertedTool.eager_input_streaming = true;
+    }
+    if (cacheControl && index === projection.tools.length - 1) {
+      convertedTool.cache_control = cacheControl;
+    }
+    convertedTools.push(convertedTool);
+  }
+  return {
+    tools: convertedTools,
+    toolNames: convertedTools.map((tool) => tool.name),
+  };
 }
 
 function mapStopReason(reason: string): StopReason {

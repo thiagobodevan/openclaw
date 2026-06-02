@@ -9,6 +9,10 @@ import {
   applyAnthropicPayloadPolicyToParams,
   resolveAnthropicPayloadPolicy,
 } from "./anthropic-payload-policy.js";
+import {
+  resolveAnthropicToolChoiceForProjectedTools,
+  snapshotAnthropicToolProjectionInputs,
+} from "./anthropic-tool-schema.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./copilot-dynamic-headers.js";
 import { parseJsonObjectPreservingUnsafeIntegers } from "./json-unsafe-integers.js";
 import { resolveProviderEndpoint } from "./provider-attribution.js";
@@ -475,9 +479,7 @@ function ensureNonEmptyAnthropicMessages(messages: Array<Record<string, unknown>
 }
 
 function convertAnthropicTools(tools: Context["tools"], isOAuthToken: boolean) {
-  if (!tools) {
-    return [];
-  }
+  const projection = snapshotAnthropicToolProjectionInputs(tools);
   const converted: Array<{
     name: string;
     description?: string;
@@ -487,27 +489,18 @@ function convertAnthropicTools(tools: Context["tools"], isOAuthToken: boolean) {
       required: unknown;
     };
   }> = [];
-  for (const tool of tools) {
-    // Main quarantine happens when plugin tools materialize; this keeps Anthropic
-    // safe for direct/custom tool arrays that bypass the plugin registry.
-    const parameters =
-      tool.parameters && typeof tool.parameters === "object" && !Array.isArray(tool.parameters)
-        ? (tool.parameters as Record<string, unknown>)
-        : undefined;
-    if (!parameters) {
-      continue;
-    }
+  for (const tool of projection.tools) {
     converted.push({
       name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
       description: tool.description,
       input_schema: {
         type: "object",
-        properties: parameters.properties || {},
-        required: parameters.required || [],
+        properties: tool.parameters.properties || {},
+        required: tool.parameters.required || [],
       },
     });
   }
-  return converted;
+  return { tools: converted, toolNames: converted.map((tool) => tool.name) };
 }
 
 function parseAnthropicToolCallArguments(inputJson: string): unknown {
@@ -860,8 +853,13 @@ function buildAnthropicParams(
   if (options?.stop !== undefined && options.stop.length > 0) {
     params.stop_sequences = options.stop;
   }
+  let projectedToolNames: string[] = [];
   if (context.tools) {
-    params.tools = convertAnthropicTools(context.tools, isOAuthToken);
+    const convertedTools = convertAnthropicTools(context.tools, isOAuthToken);
+    projectedToolNames = convertedTools.toolNames;
+    if (convertedTools.tools.length > 0) {
+      params.tools = convertedTools.tools;
+    }
   }
   if (model.reasoning) {
     if (options?.thinkingEnabled) {
@@ -883,9 +881,12 @@ function buildAnthropicParams(
   if (options?.metadata && typeof options.metadata.user_id === "string") {
     params.metadata = { user_id: options.metadata.user_id };
   }
-  if (options?.toolChoice) {
+  const projectedToolChoice =
+    options?.toolChoice &&
+    resolveAnthropicToolChoiceForProjectedTools(options.toolChoice, projectedToolNames);
+  if (projectedToolChoice) {
     params.tool_choice =
-      typeof options.toolChoice === "string" ? { type: options.toolChoice } : options.toolChoice;
+      typeof projectedToolChoice === "string" ? { type: projectedToolChoice } : projectedToolChoice;
   }
   applyAnthropicPayloadPolicyToParams(params, payloadPolicy);
   return params;
