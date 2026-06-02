@@ -25,18 +25,21 @@ export function setDefaultSecurityHeaders(
   }
 }
 
+/** Sends a JSON response with the Gateway-wide UTF-8 content type. */
 export function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
 }
 
+/** Sends a plain-text response for method and simple error handlers. */
 export function sendText(res: ServerResponse, status: number, body: string) {
   res.statusCode = status;
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.end(body);
 }
 
+/** Sends a 405 response and advertises the allowed method list. */
 export function sendMethodNotAllowed(res: ServerResponse, allow = "POST") {
   res.setHeader("Allow", allow);
   sendText(res, 405, "Method Not Allowed");
@@ -71,6 +74,7 @@ export function sendGatewayAuthFailure(res: ServerResponse, authResult: GatewayA
   sendUnauthorized(res);
 }
 
+/** Sends the OpenAI-compatible invalid_request_error envelope. */
 export function sendInvalidRequest(res: ServerResponse, message: string) {
   sendJson(res, 400, {
     error: { message, type: "invalid_request_error" },
