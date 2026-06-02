@@ -1,6 +1,7 @@
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { VoiceCallTtsConfig } from "./config.js";
 
+/** Reads the active provider's preferred speaker from modern and legacy TTS config keys. */
 function resolveProviderVoiceSetting(providerConfig: unknown): string | undefined {
   if (!providerConfig || typeof providerConfig !== "object") {
     return undefined;
@@ -23,6 +24,10 @@ function resolveProviderVoiceSetting(providerConfig: unknown): string | undefine
 
 /**
  * Resolves the active telephony TTS provider's speaker hint for call metadata.
+ *
+ * Only the selected provider block is inspected so fallback-provider config does
+ * not leak into the call's advertised/default voice.
+ *
  * Legacy `voice`/`voiceId` keys stay readable because provider configs predate
  * the voice-call-specific `speakerVoice` fields.
  */
