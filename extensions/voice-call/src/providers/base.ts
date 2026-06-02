@@ -16,33 +16,26 @@ import type {
   WebhookVerificationResult,
 } from "../types.js";
 
-/**
- * Abstract base interface for voice call providers.
- *
- * Each provider (Telnyx, Twilio, etc.) implements this interface to provide
- * a consistent API for the call manager.
- *
- * Responsibilities:
- * - Webhook verification and event parsing
- * - Outbound call initiation and hangup
- * - Media control (TTS playback, STT listening)
- */
+/** Provider contract consumed by the call manager for webhook, call-control, and media actions. */
 export interface VoiceCallProvider {
-  /** Provider identifier */
+  /** Stable provider id stored on call records and used for restore-time status checks. */
   readonly name: ProviderName;
 
   /** Publish the externally reachable webhook base URL after provider construction. */
   setPublicUrl?(url: string): void;
 
   /**
-   * Verify webhook signature/HMAC before processing.
-   * Must be called before parseWebhookEvent.
+   * Verifies provider-signed webhook input before any state mutation.
+   *
+   * Implementations should fail closed for bad credentials/signatures and return
+   * skip metadata only for explicit local-dev bypasses.
    */
   verifyWebhook(ctx: WebhookContext): WebhookVerificationResult;
 
   /**
-   * Parse provider-specific webhook payload into normalized events.
-   * Returns events and optional response to send back to provider.
+   * Normalizes a provider webhook into manager events plus an optional immediate response.
+   *
+   * This must not perform provider side effects; manager replay dedupe happens after parsing.
    */
   parseWebhookEvent(ctx: WebhookContext, options?: WebhookParseOptions): ProviderWebhookParseResult;
 
@@ -54,10 +47,7 @@ export interface VoiceCallProvider {
    */
   consumeInitialTwiML?: (ctx: WebhookContext) => string | null;
 
-  /**
-   * Initiate an outbound call.
-   * @returns Provider call ID and status
-   */
+  /** Starts an outbound call and returns the provider call id that future webhooks will use. */
   initiateCall(input: InitiateCallInput): Promise<InitiateCallResult>;
 
   /**
@@ -66,15 +56,10 @@ export interface VoiceCallProvider {
    */
   answerCall?: (input: AnswerCallInput) => Promise<void>;
 
-  /**
-   * Hang up an active call.
-   */
+  /** Ends an active provider call; callers handle duplicate suppression before invoking this. */
   hangupCall(input: HangupCallInput): Promise<void>;
 
-  /**
-   * Play TTS audio to the caller.
-   * The provider should handle streaming if supported.
-   */
+  /** Plays synthesized speech on the active call leg using the provider's best media path. */
   playTts(input: PlayTtsInput): Promise<void>;
 
   /**
@@ -87,16 +72,14 @@ export interface VoiceCallProvider {
    */
   startListening(input: StartListeningInput): Promise<void>;
 
-  /**
-   * Stop listening for user speech (deactivate STT).
-   */
+  /** Stops provider speech capture while preserving any already-finalized transcript event. */
   stopListening(input: StopListeningInput): Promise<void>;
 
   /**
-   * Query provider for current call status.
-   * Used to verify persisted calls are still active on restart.
-   * Must return `isUnknown: true` for transient errors (network, 5xx)
-   * so the caller can keep the call and rely on timer-based fallback.
+   * Reads provider status during restore and reconciliation.
+   *
+   * Transient lookup failures must return `isUnknown: true`; the manager keeps
+   * the call and relies on max-duration timers instead of ending it speculatively.
    */
   getCallStatus(input: GetCallStatusInput): Promise<GetCallStatusResult>;
 }
