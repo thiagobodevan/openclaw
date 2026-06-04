@@ -32,6 +32,9 @@ import { transformMessages } from "./transform-messages.js";
 
 const MISTRAL_TOOL_CALL_ID_LENGTH = 9;
 const MAX_MISTRAL_ERROR_BODY_CHARS = 4000;
+const MISTRAL_TOOL_SCHEMA_MAX_DEPTH = 24;
+const MISTRAL_TOOL_SCHEMA_MAX_NODES = 1_000;
+const MISTRAL_TOOL_SCHEMA_INVALID = Symbol("mistral-tool-schema-invalid");
 
 /**
  * Provider-specific options for the Mistral API.
@@ -276,8 +279,9 @@ function buildChatPayload(
     messages: toChatMessages(messages, model.input.includes("image")),
   };
 
-  if (context.tools?.length) {
-    payload.tools = toFunctionTools(context.tools);
+  const toolSnapshots = context.tools?.length ? snapshotMistralTools(context.tools) : [];
+  if (toolSnapshots.length > 0) {
+    payload.tools = toFunctionTools(toolSnapshots);
   }
   if (options?.temperature !== undefined) {
     payload.temperature = options.temperature;
@@ -289,7 +293,10 @@ function buildChatPayload(
     payload.stop = options.stop;
   }
   if (options?.toolChoice) {
-    payload.toolChoice = mapToolChoice(options.toolChoice);
+    const toolChoice = resolveMistralToolChoice(options.toolChoice, toolSnapshots);
+    if (toolChoice) {
+      payload.toolChoice = mapToolChoice(toolChoice);
+    }
   }
   if (options?.promptMode) {
     payload.promptMode = options.promptMode;
@@ -506,32 +513,172 @@ async function consumeChatStream(
   }
 }
 
-function toFunctionTools(tools: Tool[]): Array<FunctionTool & { type: "function" }> {
+type MistralToolSnapshot = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+type MistralToolSchemaCloneState = {
+  seen: WeakSet<object>;
+  nodes: number;
+};
+
+function toFunctionTools(tools: readonly MistralToolSnapshot[]): Array<
+  FunctionTool & {
+    type: "function";
+  }
+> {
   return tools.map((tool) => ({
     type: "function",
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: stripSymbolKeys(tool.parameters) as Record<string, unknown>,
+      parameters: tool.parameters,
       strict: false,
     },
   }));
 }
 
-function stripSymbolKeys(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => stripSymbolKeys(item));
+function resolveMistralToolChoice(
+  choice: MistralOptions["toolChoice"],
+  tools: readonly MistralToolSnapshot[],
+): MistralOptions["toolChoice"] | undefined {
+  if (!choice) {
+    return undefined;
   }
-
-  if (value && typeof value === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      result[key] = stripSymbolKeys(entry);
+  if (choice === "auto" || choice === "none") {
+    return choice;
+  }
+  if (typeof choice !== "string") {
+    const requiredName = choice.function.name;
+    if (tools.some((tool) => tool.name === requiredName)) {
+      return choice;
     }
+    throw new Error(
+      `Mistral forced toolChoice "${requiredName}" is unavailable after tool schema filtering`,
+    );
+  }
+  if (tools.length === 0) {
+    throw new Error(`Mistral toolChoice "${choice}" requires at least one available tool`);
+  }
+  return choice;
+}
+
+function snapshotMistralTools(tools: readonly Tool[]): MistralToolSnapshot[] {
+  const snapshots: MistralToolSnapshot[] = [];
+  for (const tool of tools) {
+    const snapshot = snapshotMistralTool(tool);
+    if (snapshot) {
+      snapshots.push(snapshot);
+    }
+  }
+  return snapshots;
+}
+
+function snapshotMistralTool(tool: Tool): MistralToolSnapshot | undefined {
+  let name: string;
+  let description: string;
+  let parameters: unknown;
+  try {
+    name = tool.name;
+    description = tool.description;
+    parameters = tool.parameters;
+  } catch {
+    return undefined;
+  }
+  if (!name || typeof name !== "string" || typeof description !== "string") {
+    return undefined;
+  }
+  let clonedParameters: unknown;
+  try {
+    clonedParameters = cloneMistralToolSchemaValue(
+      parameters,
+      {
+        seen: new WeakSet<object>(),
+        nodes: 0,
+      },
+      0,
+    );
+  } catch {
+    return undefined;
+  }
+  if (clonedParameters === MISTRAL_TOOL_SCHEMA_INVALID) {
+    return undefined;
+  }
+  return clonedParameters &&
+    typeof clonedParameters === "object" &&
+    !Array.isArray(clonedParameters)
+    ? { name, description, parameters: clonedParameters as Record<string, unknown> }
+    : undefined;
+}
+
+function cloneMistralToolSchemaValue(
+  value: unknown,
+  state: MistralToolSchemaCloneState,
+  depth: number,
+): unknown {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (depth >= MISTRAL_TOOL_SCHEMA_MAX_DEPTH || state.nodes >= MISTRAL_TOOL_SCHEMA_MAX_NODES) {
+    return MISTRAL_TOOL_SCHEMA_INVALID;
+  }
+  if (state.seen.has(value)) {
+    return MISTRAL_TOOL_SCHEMA_INVALID;
+  }
+  state.seen.add(value);
+  state.nodes += 1;
+
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+    for (const item of value) {
+      const clonedItem = cloneMistralToolSchemaValue(item, state, depth + 1);
+      if (clonedItem === MISTRAL_TOOL_SCHEMA_INVALID) {
+        state.seen.delete(value);
+        return MISTRAL_TOOL_SCHEMA_INVALID;
+      }
+      result.push(clonedItem);
+    }
+    state.seen.delete(value);
     return result;
   }
 
-  return value;
+  const result: Record<string, unknown> = {};
+  let keys: string[];
+  try {
+    keys = Object.keys(value);
+  } catch {
+    state.seen.delete(value);
+    return MISTRAL_TOOL_SCHEMA_INVALID;
+  }
+  for (const key of keys) {
+    let entry: unknown;
+    try {
+      entry = Reflect.get(value, key);
+    } catch {
+      state.seen.delete(value);
+      return MISTRAL_TOOL_SCHEMA_INVALID;
+    }
+    const clonedEntry = cloneMistralToolSchemaValue(entry, state, depth + 1);
+    if (clonedEntry === MISTRAL_TOOL_SCHEMA_INVALID) {
+      state.seen.delete(value);
+      return MISTRAL_TOOL_SCHEMA_INVALID;
+    }
+    if (key === "__proto__") {
+      Object.defineProperty(result, key, {
+        value: clonedEntry,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    } else {
+      result[key] = clonedEntry;
+    }
+  }
+
+  state.seen.delete(value);
+  return result;
 }
 
 function toChatMessages(
