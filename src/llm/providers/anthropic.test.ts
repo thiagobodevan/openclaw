@@ -219,6 +219,165 @@ describe("Anthropic provider", () => {
     expect((capturedPayload as { stop_sequences?: unknown }).stop_sequences).toEqual(["STOP"]);
   });
 
+  it("skips unreadable tools when building Anthropic request payloads", async () => {
+    const revokedTool = Object.create(null) as {
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    };
+    Object.defineProperty(revokedTool, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("tool revoked");
+      },
+    });
+    Object.defineProperty(revokedTool, "description", {
+      enumerable: true,
+      value: "broken",
+    });
+    Object.defineProperty(revokedTool, "parameters", {
+      enumerable: true,
+      value: { type: "object", properties: {} },
+    });
+    const poisonedSchema = {
+      type: "object",
+      properties: {},
+      required: ["query"],
+    };
+    Object.defineProperty(poisonedSchema.properties, "query", {
+      enumerable: true,
+      get() {
+        throw new Error("schema revoked");
+      },
+    });
+    const revokedRequired = Proxy.revocable(["query"], {});
+    revokedRequired.revoke();
+    const iteratorPoisonedRequired = new Proxy(["query"], {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) {
+          throw new Error("required iterator revoked");
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const healthyTool = {
+      name: "healthy_tool",
+      description: "Still available",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      },
+    };
+    let capturedPayload: unknown;
+    const stream = streamSimpleAnthropic(
+      makeAnthropicModel(),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+        tools: [
+          revokedTool,
+          {
+            name: "poisoned_schema",
+            description: "Broken nested schema",
+            parameters: poisonedSchema,
+          },
+          {
+            name: "revoked_required",
+            description: "Broken required list",
+            parameters: {
+              type: "object",
+              properties: {},
+              required: revokedRequired.proxy,
+            },
+          },
+          {
+            name: "indexed_required",
+            description: "Required list with broken iterator",
+            parameters: {
+              type: "object",
+              properties: {},
+              required: iteratorPoisonedRequired,
+            },
+          },
+          healthyTool,
+        ],
+      },
+      {
+        apiKey: "sk-ant-provider",
+        onPayload: (payload) => {
+          capturedPayload = payload;
+          throw new Error("stop before network");
+        },
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect((capturedPayload as { tools?: unknown[] }).tools).toEqual([
+      {
+        name: "indexed_required",
+        description: "Required list with broken iterator",
+        eager_input_streaming: true,
+        input_schema: {
+          type: "object",
+          properties: {},
+          required: ["query"],
+        },
+      },
+      {
+        name: "healthy_tool",
+        description: "Still available",
+        eager_input_streaming: true,
+        cache_control: { type: "ephemeral" },
+        input_schema: {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+          },
+          required: ["query"],
+        },
+      },
+    ]);
+  });
+
+  it("fails closed when forced Anthropic tool choice is filtered out", async () => {
+    const revokedSchema = Proxy.revocable({ type: "object", properties: {} }, {});
+    revokedSchema.revoke();
+
+    const stream = streamAnthropic(
+      makeAnthropicModel(),
+      {
+        messages: [{ role: "user", content: "hello", timestamp: 0 }],
+        tools: [
+          {
+            name: "revoked_schema",
+            description: "Revoked schema proxy",
+            parameters: revokedSchema.proxy,
+          },
+          {
+            name: "healthy_tool",
+            description: "Still available",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      },
+      {
+        apiKey: "sk-ant-provider",
+        toolChoice: { type: "tool", name: "revoked_schema" },
+      },
+    );
+
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain(
+      'Anthropic forced toolChoice "revoked_schema" is unavailable after tool schema filtering',
+    );
+  });
+
   it("splits the system prompt cache boundary into cached and uncached Anthropic blocks", async () => {
     let capturedPayload: unknown;
     const stream = streamSimpleAnthropic(

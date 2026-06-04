@@ -43,6 +43,9 @@ import { adjustMaxTokensForThinking, buildBaseOptions } from "./simple-options.j
 import { transformMessages } from "./transform-messages.js";
 
 const ANTHROPIC_CACHE_CONTROL_LIMIT = 4;
+const ANTHROPIC_TOOL_SCHEMA_MAX_DEPTH = 24;
+const ANTHROPIC_TOOL_SCHEMA_MAX_NODES = 1_000;
+const ANTHROPIC_TOOL_SCHEMA_INVALID = Symbol("anthropic-tool-schema-invalid");
 
 /**
  * Resolve cache retention preference.
@@ -944,14 +947,17 @@ function buildParams(
   const { cacheControl } = getCacheControl(model, options?.cacheRetention);
   const system = buildAnthropicSystemBlocks(context.systemPrompt, isOAuthTokenResult, cacheControl);
   const compat = context.tools?.length ? getAnthropicCompat(model) : undefined;
-  const tools =
+  const toolSnapshots =
     context.tools && compat
-      ? convertTools(
+      ? snapshotAnthropicTools(
           context.tools,
           isOAuthTokenResult,
           compat.supportsEagerToolInputStreaming,
-          compat.supportsCacheControlOnTools ? cacheControl : undefined,
         )
+      : [];
+  const tools =
+    toolSnapshots.length > 0
+      ? convertTools(toolSnapshots, compat?.supportsCacheControlOnTools ? cacheControl : undefined)
       : undefined;
   const systemCacheControlCount = countNativeCacheControlMarkers(system);
   const toolCacheControlCount = countNativeCacheControlMarkers(tools);
@@ -1029,10 +1035,11 @@ function buildParams(
   }
 
   if (options?.toolChoice) {
-    if (typeof options.toolChoice === "string") {
-      params.tool_choice = { type: options.toolChoice };
+    const toolChoice = resolveAnthropicToolChoice(options.toolChoice, toolSnapshots);
+    if (typeof toolChoice === "string") {
+      params.tool_choice = { type: toolChoice };
     } else {
-      params.tool_choice = options.toolChoice;
+      params.tool_choice = toolChoice;
     }
   }
 
@@ -1329,31 +1336,254 @@ function shouldUseFineGrainedToolStreamingBeta(
   );
 }
 
+type AnthropicToolSnapshot = {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required: string[];
+  };
+  eagerInputStreaming: boolean;
+};
+
+type AnthropicToolSchemaCloneState = {
+  seen: WeakSet<object>;
+  nodes: number;
+};
+
 function convertTools(
-  tools: Tool[],
-  isOAuthTokenLocal: boolean,
-  supportsEagerToolInputStreaming: boolean,
+  tools: readonly AnthropicToolSnapshot[],
   cacheControl?: CacheControlEphemeral,
 ): Anthropic.Messages.Tool[] {
-  if (!tools) {
-    return [];
-  }
-
   return tools.map((tool, index) => {
-    const schema = tool.parameters as { properties?: unknown; required?: string[] };
-
     return {
-      name: isOAuthTokenLocal ? toClaudeCodeName(tool.name) : tool.name,
+      name: tool.name,
       description: tool.description,
-      ...(supportsEagerToolInputStreaming ? { eager_input_streaming: true } : {}),
-      input_schema: {
-        type: "object",
-        properties: schema.properties ?? {},
-        required: schema.required ?? [],
-      },
+      ...(tool.eagerInputStreaming ? { eager_input_streaming: true } : {}),
+      input_schema: tool.inputSchema,
       ...(cacheControl && index === tools.length - 1 ? { cache_control: cacheControl } : {}),
     };
   });
+}
+
+function snapshotAnthropicTools(
+  tools: readonly Tool[],
+  isOAuthTokenLocal: boolean,
+  supportsEagerToolInputStreaming: boolean,
+): AnthropicToolSnapshot[] {
+  const snapshots: AnthropicToolSnapshot[] = [];
+  for (const tool of tools) {
+    const snapshot = snapshotAnthropicTool(
+      tool,
+      isOAuthTokenLocal,
+      supportsEagerToolInputStreaming,
+    );
+    if (snapshot) {
+      snapshots.push(snapshot);
+    }
+  }
+  return snapshots;
+}
+
+function snapshotAnthropicTool(
+  tool: Tool,
+  isOAuthTokenLocal: boolean,
+  supportsEagerToolInputStreaming: boolean,
+): AnthropicToolSnapshot | undefined {
+  let name: string;
+  let description: string;
+  let parameters: unknown;
+  try {
+    name = tool.name;
+    description = tool.description;
+    parameters = tool.parameters;
+  } catch {
+    return undefined;
+  }
+  if (!name || typeof name !== "string" || typeof description !== "string") {
+    return undefined;
+  }
+  const schema = cloneAnthropicToolSchemaObject(parameters);
+  if (!schema) {
+    return undefined;
+  }
+  return {
+    name: isOAuthTokenLocal ? toClaudeCodeName(name) : name,
+    description,
+    inputSchema: schema,
+    eagerInputStreaming: supportsEagerToolInputStreaming,
+  };
+}
+
+function cloneAnthropicToolSchemaObject(
+  schema: unknown,
+): AnthropicToolSnapshot["inputSchema"] | undefined {
+  try {
+    if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  let propertiesInput: unknown;
+  let requiredInput: unknown;
+  try {
+    propertiesInput = Reflect.get(schema, "properties") ?? {};
+    requiredInput = Reflect.get(schema, "required") ?? [];
+  } catch {
+    return undefined;
+  }
+  const properties = cloneAnthropicToolSchemaValue(
+    propertiesInput,
+    {
+      seen: new WeakSet<object>(),
+      nodes: 0,
+    },
+    0,
+  );
+  if (
+    properties === ANTHROPIC_TOOL_SCHEMA_INVALID ||
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  ) {
+    return undefined;
+  }
+  const required = cloneAnthropicToolRequiredList(requiredInput);
+  if (!required) {
+    return undefined;
+  }
+  return {
+    type: "object",
+    properties: properties as Record<string, unknown>,
+    required,
+  };
+}
+
+function cloneAnthropicToolSchemaValue(
+  value: unknown,
+  state: AnthropicToolSchemaCloneState,
+  depth: number,
+): unknown {
+  try {
+    return cloneAnthropicToolSchemaValueUnsafe(value, state, depth);
+  } catch {
+    return ANTHROPIC_TOOL_SCHEMA_INVALID;
+  }
+}
+
+function cloneAnthropicToolSchemaValueUnsafe(
+  value: unknown,
+  state: AnthropicToolSchemaCloneState,
+  depth: number,
+): unknown {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (depth >= ANTHROPIC_TOOL_SCHEMA_MAX_DEPTH || state.nodes >= ANTHROPIC_TOOL_SCHEMA_MAX_NODES) {
+    return ANTHROPIC_TOOL_SCHEMA_INVALID;
+  }
+  if (state.seen.has(value)) {
+    return ANTHROPIC_TOOL_SCHEMA_INVALID;
+  }
+  state.seen.add(value);
+  state.nodes += 1;
+
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+    for (const item of value) {
+      const clonedItem = cloneAnthropicToolSchemaValueUnsafe(item, state, depth + 1);
+      if (clonedItem === ANTHROPIC_TOOL_SCHEMA_INVALID) {
+        state.seen.delete(value);
+        return ANTHROPIC_TOOL_SCHEMA_INVALID;
+      }
+      result.push(clonedItem);
+    }
+    state.seen.delete(value);
+    return result;
+  }
+
+  const result: Record<string, unknown> = {};
+  let keys: string[];
+  try {
+    keys = Object.keys(value);
+  } catch {
+    state.seen.delete(value);
+    return ANTHROPIC_TOOL_SCHEMA_INVALID;
+  }
+  for (const key of keys) {
+    let entry: unknown;
+    try {
+      entry = Reflect.get(value, key);
+    } catch {
+      state.seen.delete(value);
+      return ANTHROPIC_TOOL_SCHEMA_INVALID;
+    }
+    const clonedEntry = cloneAnthropicToolSchemaValueUnsafe(entry, state, depth + 1);
+    if (clonedEntry === ANTHROPIC_TOOL_SCHEMA_INVALID) {
+      state.seen.delete(value);
+      return ANTHROPIC_TOOL_SCHEMA_INVALID;
+    }
+    if (key === "__proto__") {
+      Object.defineProperty(result, key, {
+        value: clonedEntry,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    } else {
+      result[key] = clonedEntry;
+    }
+  }
+
+  state.seen.delete(value);
+  return result;
+}
+
+function cloneAnthropicToolRequiredList(value: unknown): string[] | undefined {
+  try {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const required: string[] = [];
+    let index = 0;
+    while (index < value.length) {
+      const entry = value[index];
+      if (typeof entry !== "string") {
+        return undefined;
+      }
+      required.push(entry);
+      index += 1;
+    }
+    return required;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveAnthropicToolChoice(
+  choice: AnthropicOptions["toolChoice"],
+  tools: readonly AnthropicToolSnapshot[],
+): AnthropicOptions["toolChoice"] {
+  if (!choice) {
+    return undefined;
+  }
+  if (choice === "none" || choice === "auto") {
+    return choice;
+  }
+  if (choice === "any") {
+    if (tools.length === 0) {
+      throw new Error('Anthropic toolChoice "any" requires at least one available tool');
+    }
+    return choice;
+  }
+  if (tools.some((tool) => tool.name === choice.name)) {
+    return choice;
+  }
+  throw new Error(
+    `Anthropic forced toolChoice "${choice.name}" is unavailable after tool schema filtering`,
+  );
 }
 
 function mapStopReason(reason: string): StopReason {
