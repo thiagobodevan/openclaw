@@ -1,11 +1,66 @@
 // Normalizes error objects for codes, names, messages, and redacted logs.
 import { redactSensitiveText } from "../logging/redact.js";
 
-export function extractErrorCode(err: unknown): string | undefined {
-  if (!err || typeof err !== "object") {
+function isObjectLike(value: unknown): value is Record<PropertyKey, unknown> {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
+}
+
+function readErrorField(err: unknown, key: PropertyKey): unknown {
+  if (!isObjectLike(err)) {
     return undefined;
   }
-  const code = (err as { code?: unknown }).code;
+  try {
+    return err[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function isErrorInstance(err: unknown): err is Error {
+  try {
+    return err instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
+function formatUnknownObject(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? Object.prototype.toString.call(value);
+  } catch {
+    try {
+      return Object.prototype.toString.call(value);
+    } catch {
+      return "Unknown error";
+    }
+  }
+}
+
+function copyEnumerableDataFields(
+  value: Record<PropertyKey, unknown>,
+): Record<PropertyKey, unknown> {
+  const copy: Record<PropertyKey, unknown> = {};
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor) {
+      throw new Error("error field descriptor disappeared");
+    }
+    if (!descriptor.enumerable) {
+      continue;
+    }
+    if (!("value" in descriptor)) {
+      throw new Error("error field accessor is not safe to copy");
+    }
+    if (key === "cause") {
+      continue;
+    }
+    copy[key] = descriptor.value;
+  }
+  return copy;
+}
+
+export function extractErrorCode(err: unknown): string | undefined {
+  const code = readErrorField(err, "code");
   if (typeof code === "string") {
     return code;
   }
@@ -16,10 +71,7 @@ export function extractErrorCode(err: unknown): string | undefined {
 }
 
 export function readErrorName(err: unknown): string {
-  if (!err || typeof err !== "object") {
-    return "";
-  }
-  const name = (err as { name?: unknown }).name;
+  const name = readErrorField(err, "name");
   return typeof name === "string" ? name : "";
 }
 
@@ -39,13 +91,17 @@ export function collectErrorGraphCandidates(
     seen.add(current);
     candidates.push(current);
 
-    if (!current || typeof current !== "object" || !resolveNested) {
+    if (!isObjectLike(current) || !resolveNested) {
       continue;
     }
-    for (const nested of resolveNested(current as Record<string, unknown>)) {
-      if (nested != null && !seen.has(nested)) {
-        queue.push(nested);
+    try {
+      for (const nested of resolveNested(current as Record<string, unknown>)) {
+        if (nested != null && !seen.has(nested)) {
+          queue.push(nested);
+        }
       }
+    } catch {
+      continue;
     }
   }
 
@@ -56,37 +112,43 @@ export function collectErrorGraphCandidates(
  * Type guard for NodeJS.ErrnoException (any error with a `code` property).
  */
 export function isErrno(err: unknown): err is NodeJS.ErrnoException {
-  return Boolean(err && typeof err === "object" && "code" in err);
+  return readErrorField(err, "code") !== undefined;
 }
 
 /**
  * Check if an error has a specific errno code.
  */
 export function hasErrnoCode(err: unknown, code: string): boolean {
-  return isErrno(err) && err.code === code;
+  return extractErrorCode(err) === code;
 }
 
 export function formatErrorMessage(err: unknown): string {
   let formatted: string;
-  if (err instanceof Error) {
-    formatted = err.message || err.name || "Error";
+  if (isErrorInstance(err)) {
+    const message = readErrorField(err, "message");
+    const name = readErrorField(err, "name");
+    formatted =
+      (typeof message === "string" && message) || (typeof name === "string" && name) || "Error";
     // Traverse .cause chain to include nested error messages (e.g. grammY HttpError wraps network errors in .cause)
-    let cause: unknown = err.cause;
+    let cause: unknown = readErrorField(err, "cause");
     const seen = new Set<unknown>([err]);
     // Skip causes that repeat a message already emitted (e.g. coerceToFailoverError).
     const seenMessages = new Set<string>([formatted]);
-    const appendCauseMessage = (message: string): void => {
-      if (!message || seenMessages.has(message)) {
+    const appendCauseMessage = (causeText: string): void => {
+      if (!causeText || seenMessages.has(causeText)) {
         return;
       }
-      formatted += ` | ${message}`;
-      seenMessages.add(message);
+      formatted += ` | ${causeText}`;
+      seenMessages.add(causeText);
     };
     while (cause && !seen.has(cause)) {
       seen.add(cause);
-      if (cause instanceof Error) {
-        appendCauseMessage(cause.message);
-        cause = cause.cause;
+      if (isErrorInstance(cause)) {
+        const causeMessage = readErrorField(cause, "message");
+        if (typeof causeMessage === "string") {
+          appendCauseMessage(causeMessage);
+        }
+        cause = readErrorField(cause, "cause");
       } else if (typeof cause === "string") {
         appendCauseMessage(cause);
         break;
@@ -99,11 +161,7 @@ export function formatErrorMessage(err: unknown): string {
   } else if (typeof err === "number" || typeof err === "boolean" || typeof err === "bigint") {
     formatted = String(err);
   } else {
-    try {
-      formatted = JSON.stringify(err);
-    } catch {
-      formatted = Object.prototype.toString.call(err);
-    }
+    formatted = formatUnknownObject(err);
   }
   // Security: best-effort token redaction before returning/logging.
   return redactSensitiveText(formatted);
@@ -123,23 +181,24 @@ export function stringifyNonErrorCause(value: unknown): string {
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
     return String(value);
   }
-  try {
-    return JSON.stringify(value) ?? Object.prototype.toString.call(value);
-  } catch {
-    return Object.prototype.toString.call(value);
-  }
+  return formatUnknownObject(value);
 }
 
 export function toErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
+  if (isErrorInstance(value)) {
     return value;
   }
   if (typeof value === "string") {
     return new Error(value);
   }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
+  const error = new Error(fallbackMessage);
+  if (isObjectLike(value)) {
+    try {
+      const fields = copyEnumerableDataFields(value);
+      Object.assign(error, fields);
+    } catch {
+      // Hostile thrown values should not replace the fallback Error while normalizing.
+    }
   }
   return error;
 }
@@ -148,9 +207,16 @@ export function formatUncaughtError(err: unknown): string {
   if (extractErrorCode(err) === "INVALID_CONFIG") {
     return formatErrorMessage(err);
   }
-  if (err instanceof Error) {
-    const stack = err.stack ?? err.message ?? err.name;
-    return redactSensitiveText(stack);
+  if (isErrorInstance(err)) {
+    const stack = readErrorField(err, "stack");
+    const message = readErrorField(err, "message");
+    const name = readErrorField(err, "name");
+    const formatted =
+      (typeof stack === "string" && stack) ||
+      (typeof message === "string" && message) ||
+      (typeof name === "string" && name) ||
+      "Error";
+    return redactSensitiveText(formatted);
   }
   return formatErrorMessage(err);
 }

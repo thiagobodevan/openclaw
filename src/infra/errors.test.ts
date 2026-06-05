@@ -9,6 +9,8 @@ import {
   hasErrnoCode,
   isErrno,
   readErrorName,
+  stringifyNonErrorCause,
+  toErrorObject,
 } from "./errors.js";
 
 function createCircularObject() {
@@ -120,6 +122,86 @@ describe("error helpers", () => {
     expect(formatted).toContain("authorization:");
     expect(formatted).not.toContain(appSecret);
     expect(formatted).not.toContain(tenantToken);
+  });
+
+  it("formats hostile thrown values without triggering proxy traps", () => {
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("property denied");
+        },
+        getPrototypeOf() {
+          throw new Error("prototype denied");
+        },
+        ownKeys() {
+          throw new Error("keys denied");
+        },
+      },
+    );
+
+    expect(extractErrorCode(hostile)).toBeUndefined();
+    expect(readErrorName(hostile)).toBe("");
+    expect(isErrno(hostile)).toBe(false);
+    expect(hasErrnoCode(hostile, "ENOENT")).toBe(false);
+    expect(formatErrorMessage(hostile)).toBe("Unknown error");
+    expect(formatUncaughtError(hostile)).toBe("Unknown error");
+    expect(stringifyNonErrorCause(hostile)).toBe("Unknown error");
+
+    const normalized = toErrorObject(hostile, "Non-Error rejection");
+    expect(normalized.message).toBe("Non-Error rejection");
+    expect(Object.hasOwn(normalized, "cause")).toBe(false);
+  });
+
+  it("does not partially overwrite fallback Errors while copying hostile fields", () => {
+    const hostile = {};
+    Object.defineProperty(hostile, "message", {
+      value: "",
+      enumerable: true,
+    });
+    Object.defineProperty(hostile, "bad", {
+      enumerable: true,
+      get() {
+        throw new Error("field denied");
+      },
+    });
+
+    const normalized = toErrorObject(hostile, "Non-Error rejection");
+
+    expect(normalized.message).toBe("Non-Error rejection");
+  });
+
+  it("does not copy raw cause fields from non-Error thrown objects", () => {
+    const normalized = toErrorObject(
+      {
+        code: "E_PLUGIN_FAILURE",
+        cause: new Proxy(
+          {},
+          {
+            get() {
+              throw new Error("cause denied");
+            },
+          },
+        ),
+      },
+      "Non-Error rejection",
+    ) as Error & { code?: string };
+
+    expect(normalized.message).toBe("Non-Error rejection");
+    expect(normalized.code).toBe("E_PLUGIN_FAILURE");
+    expect(Object.hasOwn(normalized, "cause")).toBe(false);
+  });
+
+  it("keeps Error formatting best-effort when cause accessors throw", () => {
+    const error = new Error("outer");
+    Object.defineProperty(error, "cause", {
+      get() {
+        throw new Error("cause denied");
+      },
+    });
+
+    expect(formatErrorMessage(error)).toBe("outer");
+    expect(formatUncaughtError(error)).toContain("outer");
   });
 
   it.each([
