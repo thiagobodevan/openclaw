@@ -15,6 +15,7 @@ import {
   type EmbeddedRunAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
+import { readCodexDynamicToolName } from "./dynamic-tool-profile.js";
 import type { CodexDynamicToolSpec } from "./protocol.js";
 import { isJsonObject } from "./protocol.js";
 import type { CodexAppServerThreadBinding } from "./session-binding.js";
@@ -854,7 +855,9 @@ export function hasCodexWorkspaceMemoryTools(tools: readonly { name: string }[])
 
 /** Lists available memory tool names understood by Codex workspace memory routing. */
 export function getCodexWorkspaceMemoryToolNames(tools: readonly { name: string }[]): string[] {
-  const availableToolNames = new Set(tools.map((tool) => normalizeCodexDynamicToolName(tool.name)));
+  const availableToolNames = new Set(
+    tools.map(readCodexDynamicToolName).filter((name) => name.length > 0),
+  );
   return Array.from(CODEX_MEMORY_TOOL_NAMES).filter((name) => availableToolNames.has(name));
 }
 
@@ -989,10 +992,6 @@ function getCodexContextFileDisplayBasename(filePath: string): string {
 
 function getCodexContextFileBasename(filePath: string): string {
   return normalizeCodexContextFilePath(filePath).split("/").pop() ?? "";
-}
-
-function normalizeCodexDynamicToolName(name: string): string {
-  return name.trim().toLowerCase();
 }
 
 function isNonEmptyString(value: unknown): value is string {

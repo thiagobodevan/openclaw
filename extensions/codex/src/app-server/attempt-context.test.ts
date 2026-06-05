@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCodexWorkspaceBootstrapContext,
   buildCodexSystemPromptReport,
+  getCodexWorkspaceMemoryToolNames,
   readContextEngineThreadBootstrapProjection,
   remapCodexContextFilePath,
   resolveContextEngineBootstrapProjectionDecision,
@@ -15,6 +16,23 @@ import type { CodexDynamicToolSpec } from "./protocol.js";
 import type { CodexAppServerContextEngineBinding } from "./session-binding.js";
 
 describe("Codex app-server attempt context", () => {
+  it("skips unreadable dynamic tool names while detecting workspace memory tools", () => {
+    const unreadableName = Object.defineProperty({}, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("name exploded");
+      },
+    });
+
+    expect(
+      getCodexWorkspaceMemoryToolNames([
+        unreadableName,
+        { name: "memory_search" },
+        { name: "message" },
+      ] as never),
+    ).toEqual(["memory_search"]);
+  });
+
   it("returns a run context report without deferred Codex dynamic tool schemas", () => {
     const tools = [
       {
