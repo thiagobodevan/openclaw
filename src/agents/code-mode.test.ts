@@ -46,6 +46,16 @@ function fakeTool(name: string, description: string): AnyAgentTool {
   };
 }
 
+function unreadableNameTool(): AnyAgentTool {
+  const tool = fakeTool("unreadable_tool", "Throws while reading its name");
+  Object.defineProperty(tool, "name", {
+    get: () => {
+      throw new Error("revoked name");
+    },
+  });
+  return tool;
+}
+
 function pluginTool(name: string, description: string, pluginId = "fake-code-mode"): AnyAgentTool {
   const tool = fakeTool(name, description);
   setPluginToolMeta(tool, {
@@ -258,6 +268,27 @@ describe("Code Mode", () => {
 
     const compacted = applyCodeModeCatalog({
       tools: [...codeModeTools, shellExec, ticket],
+      config,
+      sessionId: "session-code-mode",
+      sessionKey: "agent:main:main",
+      runId: "run-code-mode",
+      catalogRef,
+    });
+
+    expect(compacted.tools.map((tool) => tool.name)).toEqual([
+      CODE_MODE_EXEC_TOOL_NAME,
+      CODE_MODE_WAIT_TOOL_NAME,
+    ]);
+    expect(compacted.catalogToolCount).toBe(2);
+  });
+
+  it("drops unreadable tool names while compacting code mode tools", () => {
+    const { config, catalogRef, tools: codeModeTools } = createCodeModeHarness();
+    const shellExec = fakeTool("exec", "Run shell command");
+    const ticket = pluginTool("fake_create_ticket", "Create a fake ticket");
+
+    const compacted = applyCodeModeCatalog({
+      tools: [...codeModeTools, unreadableNameTool(), shellExec, ticket],
       config,
       sessionId: "session-code-mode",
       sessionKey: "agent:main:main",

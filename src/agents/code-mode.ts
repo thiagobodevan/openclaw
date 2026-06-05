@@ -1195,6 +1195,14 @@ export function createCodeModeTools(ctx: CodeModeToolContext): AnyAgentTool[] {
   return [execTool, waitTool];
 }
 
+function readCodeModeCatalogToolName(tool: AnyAgentTool): string | undefined {
+  try {
+    return tool.name;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Compact normal tools behind Code Mode exec/wait controls. */
 export function applyCodeModeCatalog(params: {
   tools: AnyAgentTool[];
@@ -1214,14 +1222,19 @@ export function applyCodeModeCatalog(params: {
       isVisibleControlTool: isCodeModeControlTool,
     });
   }
-  const tools = params.tools.filter(
-    (tool) =>
-      isCodeModeControlTool(tool) ||
-      (tool.name !== TOOL_SEARCH_CODE_MODE_TOOL_NAME &&
-        tool.name !== TOOL_SEARCH_RAW_TOOL_NAME &&
-        tool.name !== TOOL_DESCRIBE_RAW_TOOL_NAME &&
-        tool.name !== TOOL_CALL_RAW_TOOL_NAME),
-  );
+  const tools = params.tools.filter((tool) => {
+    if (isCodeModeControlTool(tool)) {
+      return true;
+    }
+    const name = readCodeModeCatalogToolName(tool);
+    return (
+      name !== undefined &&
+      name !== TOOL_SEARCH_CODE_MODE_TOOL_NAME &&
+      name !== TOOL_SEARCH_RAW_TOOL_NAME &&
+      name !== TOOL_DESCRIBE_RAW_TOOL_NAME &&
+      name !== TOOL_CALL_RAW_TOOL_NAME
+    );
+  });
   const compacted = applyToolCatalogCompaction({
     ...params,
     tools,
