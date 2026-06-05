@@ -2,6 +2,8 @@
  * Filters Codex dynamic tools for turns that already contain image inputs so
  * models with native vision do not get redundant image-inspection tools.
  */
+import { readCodexDynamicToolName } from "./dynamic-tool-profile.js";
+
 /** Removes the image tool when the model can directly consume inbound images. */
 export function filterToolsForVisionInputs<T extends { name?: string }>(
   tools: T[],
@@ -13,5 +15,8 @@ export function filterToolsForVisionInputs<T extends { name?: string }>(
   if (!params.modelHasVision || !params.hasInboundImages) {
     return tools;
   }
-  return tools.filter((tool) => tool.name !== "image");
+  return tools.filter((tool) => {
+    const name = readCodexDynamicToolName(tool);
+    return Boolean(name) && name !== "image";
+  });
 }

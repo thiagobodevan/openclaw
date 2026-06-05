@@ -35,9 +35,10 @@ export function normalizeCodexDynamicToolName(name: string): string {
 }
 
 /** Reads and normalizes a dynamic tool name without trusting plugin-owned getters. */
-export function readCodexDynamicToolName(tool: { name: string }): string {
+export function readCodexDynamicToolName(tool: { name?: unknown }): string {
   try {
-    return normalizeCodexDynamicToolName(tool.name);
+    const name = tool.name;
+    return typeof name === "string" ? normalizeCodexDynamicToolName(name) : "";
   } catch {
     return "";
   }
