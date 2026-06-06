@@ -96,4 +96,27 @@ describe("scripts/e2e/lib/docker-stats/assert-resource-ceiling.mjs", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("had non-positive MemUsage");
   });
+
+  it("ignores Docker teardown samples after a valid resource sample", () => {
+    const result = runAssert(
+      writeStats(
+        [
+          '{"MemUsage":"128MiB / 2GiB","CPUPerc":"25.0%"}',
+          '{"MemUsage":"0B / 0B","CPUPerc":"0.0%"}',
+          "",
+        ].join("\n"),
+      ),
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("samples=1");
+    expect(result.stdout).toContain("skipped_teardown_samples=1");
+  });
+
+  it("still requires at least one non-teardown Docker stats sample", () => {
+    const result = runAssert(writeStats('{"MemUsage":"0B / 0B","CPUPerc":"0.0%"}\n'));
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("no docker stats samples captured");
+  });
 });

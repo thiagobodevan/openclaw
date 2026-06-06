@@ -49,6 +49,10 @@ function parseCpuPercent(raw) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function isZeroMemoryTeardownSample(value, raw) {
+  return value === 0 && String(raw || "").trim() === "0B / 0B";
+}
+
 function assertSampleValue(value, raw, name, labelLocal) {
   if (value === undefined) {
     throw new Error(
@@ -78,6 +82,7 @@ async function scanStatsFileLines(file, onLine) {
 let maxObservedMemoryMiB = 0;
 let maxObservedCpuPercent = 0;
 let parsedSamples = 0;
+let skippedTeardownSamples = 0;
 
 assertFiniteLimit(maxMemoryMiB, maxMemoryRaw, "max memory MiB");
 assertFiniteLimit(maxCpuPercent, maxCpuRaw, "max CPU percent");
@@ -91,6 +96,10 @@ await scanStatsFileLines(statsFile, (line) => {
   }
   const observedMemoryMiB = parseMemoryMiB(parsed.MemUsage);
   const observedCpuPercent = parseCpuPercent(parsed.CPUPerc);
+  if (isZeroMemoryTeardownSample(observedMemoryMiB, parsed.MemUsage)) {
+    skippedTeardownSamples += 1;
+    return;
+  }
   assertSampleValue(observedMemoryMiB, parsed.MemUsage, "MemUsage", label);
   assertSampleValue(observedCpuPercent, parsed.CPUPerc, "CPUPerc", label);
   parsedSamples += 1;
@@ -99,7 +108,7 @@ await scanStatsFileLines(statsFile, (line) => {
 });
 
 console.log(
-  `${label} resource peak: memory=${maxObservedMemoryMiB.toFixed(1)}MiB cpu=${maxObservedCpuPercent.toFixed(1)}% samples=${parsedSamples}`,
+  `${label} resource peak: memory=${maxObservedMemoryMiB.toFixed(1)}MiB cpu=${maxObservedCpuPercent.toFixed(1)}% samples=${parsedSamples} skipped_teardown_samples=${skippedTeardownSamples}`,
 );
 if (parsedSamples === 0) {
   throw new Error(`no docker stats samples captured for ${label}`);
