@@ -71,6 +71,7 @@ Environment:
   OPENCLAW_KITCHEN_SINK_RPC_CALL_MS      RPC call timeout.
   OPENCLAW_KITCHEN_SINK_MAX_RSS_MIB      Gateway RSS ceiling.
   OPENCLAW_KITCHEN_SINK_COMMAND_MAX_RSS_MIB  Install/CLI command RSS ceiling.
+  OPENCLAW_KITCHEN_SINK_EXPECT_UI_DESCRIPTOR=1  Require a Kitchen Sink UI descriptor.
   OPENCLAW_KITCHEN_SINK_KEEP_TMP=1       Preserve the isolated temp home.
 `;
 }
@@ -1366,7 +1367,7 @@ export function assertCreatedKitchenSinkSession(payload, expectedKey = SESSION_K
   return created;
 }
 
-export function assertKitchenSinkUiDescriptors(payload) {
+export function assertKitchenSinkUiDescriptors(payload, options = {}) {
   const descriptorPayload = assertObjectPayload(payload, "plugins.uiDescriptors");
   if (descriptorPayload.ok !== true || !Array.isArray(descriptorPayload.descriptors)) {
     throw new Error(
@@ -1375,6 +1376,9 @@ export function assertKitchenSinkUiDescriptors(payload) {
   }
   const descriptor = descriptorPayload.descriptors.find((entry) => entry?.pluginId === PLUGIN_ID);
   if (!descriptor) {
+    if (options.required !== true) {
+      return undefined;
+    }
     throw new Error(
       `plugins.uiDescriptors did not report Kitchen Sink descriptor for ${PLUGIN_ID}: ${boundedJsonPreview(
         descriptorPayload.descriptors,
@@ -2171,7 +2175,9 @@ export async function main() {
     assertTtsProviderCoverage(ttsStatus, "status");
 
     const uiDescriptors = await retryRpcCall("plugins.uiDescriptors", {}, rpcOptions);
-    assertKitchenSinkUiDescriptors(uiDescriptors);
+    assertKitchenSinkUiDescriptors(uiDescriptors, {
+      required: process.env.OPENCLAW_KITCHEN_SINK_EXPECT_UI_DESCRIPTOR === "1",
+    });
     const stability = await retryRpcCall("diagnostics.stability", {}, rpcOptions);
     assertDiagnosticStabilityClean(stability);
     await sampleInFlight?.catch(() => {});

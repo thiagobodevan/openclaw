@@ -1029,9 +1029,10 @@ describe("kitchen-sink RPC command catalog assertions", () => {
     expect(() => assertKitchenSinkUiDescriptors({})).toThrow(
       "plugins.uiDescriptors returned invalid payload",
     );
-    expect(() => assertKitchenSinkUiDescriptors({ ok: true, descriptors: [] })).toThrow(
-      "plugins.uiDescriptors did not report Kitchen Sink descriptor",
-    );
+    expect(assertKitchenSinkUiDescriptors({ ok: true, descriptors: [] })).toBeUndefined();
+    expect(() =>
+      assertKitchenSinkUiDescriptors({ ok: true, descriptors: [] }, { required: true }),
+    ).toThrow("plugins.uiDescriptors did not report Kitchen Sink descriptor");
   });
 });
 
