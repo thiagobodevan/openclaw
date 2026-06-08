@@ -1123,7 +1123,7 @@ describe("generateAndAppendDreamNarrative", () => {
           sessionId: "still-missing-non-dreaming",
           updatedAt,
         },
-      },
+      } as never,
       { skipMaintenance: true },
     );
     await fs.writeFile(orphanPath, '{"runId":"dreaming-narrative-light-123"}\n', "utf-8");
@@ -1194,7 +1194,7 @@ describe("generateAndAppendDreamNarrative", () => {
           sessionId: "still-live",
           updatedAt,
         },
-      },
+      } as never,
       { skipMaintenance: true },
     );
     await fs.writeFile(orphanTranscript, '{"runId":"dreaming-narrative-deep-orphan"}\n', "utf-8");
