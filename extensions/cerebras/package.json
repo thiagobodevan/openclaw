@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/cerebras-provider",
-  "version": "2026.6.5-beta.9",
+  "version": "2026.6.5-beta.10",
   "private": true,
   "description": "OpenClaw Cerebras provider plugin",
   "type": "module",
