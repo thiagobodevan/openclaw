@@ -1789,6 +1789,7 @@ export class AgentSession {
   async compact(customInstructions?: string): Promise<CompactionResult> {
     return await this.runWithSessionWriteLock(
       async () => await this.compactWithSessionWriteLock(customInstructions),
+      { publishOwnedWrite: true },
     );
   }
 
@@ -1807,6 +1808,7 @@ export class AgentSession {
         mode: "manual",
         settings,
         signal: this.compactionAbortController.signal,
+        sessionWriteLockHeld: true,
       });
       if (outcome.status !== "compacted") {
         throw new Error("Compaction cancelled");
@@ -1878,6 +1880,7 @@ export class AgentSession {
     signal: AbortSignal;
     customInstructions?: string;
     mode: "manual" | "auto";
+    sessionWriteLockHeld?: boolean;
   }): Promise<CompactionWorkOutcome> {
     const isManual = options.mode === "manual";
     if (!this.model) {
@@ -1946,17 +1949,19 @@ export class AgentSession {
       return { status: "aborted" };
     }
 
-    await this.runWithSessionWriteLock(
-      () =>
-        this.sessionManager.appendCompaction(
-          compactionResult.summary,
-          compactionResult.firstKeptEntryId,
-          compactionResult.tokensBefore,
-          compactionResult.details,
-          fromExtension,
-        ),
-      { publishOwnedWrite: true },
-    );
+    const appendCompaction = () =>
+      this.sessionManager.appendCompaction(
+        compactionResult.summary,
+        compactionResult.firstKeptEntryId,
+        compactionResult.tokensBefore,
+        compactionResult.details,
+        fromExtension,
+      );
+    if (options.sessionWriteLockHeld) {
+      appendCompaction();
+    } else {
+      await this.runWithSessionWriteLock(appendCompaction, { publishOwnedWrite: true });
+    }
     const newEntries = this.sessionManager.getEntries();
     const sessionContext = this.sessionManager.buildSessionContext();
     this.agent.state.messages = sessionContext.messages;

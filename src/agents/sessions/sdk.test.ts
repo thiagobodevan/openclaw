@@ -209,6 +209,81 @@ describe("createAgentSession tool defaults", () => {
     expect(sessionManager.getEntries().some((entry) => entry.type === "message")).toBe(true);
   });
 
+  it("does not re-enter the configured write lock while appending manual compaction", async () => {
+    const events: string[] = [];
+    const lockOptions: Array<{ publishOwnedWrite?: boolean } | undefined> = [];
+    const sessionManager = SessionManager.inMemory();
+    sessionManager.appendMessage({
+      role: "user",
+      content: "Please compact this test conversation.",
+      timestamp: Date.now(),
+    });
+    const firstKeptEntryId = sessionManager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "Ready." }],
+      api: testModel.api,
+      provider: testModel.provider,
+      model: testModel.id,
+      usage: {
+        input: 10,
+        output: 2,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 12,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    });
+    const handlers = new Map<string, Array<(...args: unknown[]) => Promise<unknown>>>([
+      [
+        "session_before_compact",
+        [
+          async () => ({
+            compaction: {
+              summary: "Compacted by test extension.",
+              firstKeptEntryId,
+              tokensBefore: 12,
+            },
+          }),
+        ],
+      ],
+    ]);
+
+    let locked = false;
+    const { session } = await createAgentSession({
+      model: testModel,
+      resourceLoader: createResourceLoaderWithHandlers(handlers),
+      sessionManager,
+      settingsManager: SettingsManager.inMemory({
+        compaction: { reserveTokens: 1, keepRecentTokens: 1 },
+      }),
+      modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
+      withSessionWriteLock: async (run, options) => {
+        if (locked) {
+          throw new Error("nested session write lock");
+        }
+        locked = true;
+        lockOptions.push(options);
+        events.push("lock:start");
+        try {
+          return await run();
+        } finally {
+          events.push("lock:end");
+          locked = false;
+        }
+      },
+    });
+
+    await expect(session.compact()).resolves.toMatchObject({
+      summary: "Compacted by test extension.",
+    });
+
+    expect(events).toEqual(["lock:start", "lock:end"]);
+    expect(lockOptions).toEqual([{ publishOwnedWrite: true }]);
+    expect(sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(true);
+  });
+
   it("runs write-capable tool hooks under the configured write lock", async () => {
     const events: string[] = [];
     const handlers = new Map<string, Array<(...args: unknown[]) => Promise<unknown>>>([
