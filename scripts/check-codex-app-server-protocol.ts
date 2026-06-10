@@ -189,6 +189,7 @@ export type { ProtocolCompatibilityChecks };
       "scripts/run-tsgo.mjs",
       "--ignoreConfig",
       "--noEmit",
+      "--allowImportingTsExtensions",
       "--strict",
       "--skipLibCheck",
       "--module",
