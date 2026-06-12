@@ -130,23 +130,39 @@ struct GatewayChannelDeviceTokenRetryTests {
                 connectOptions: options)
 
             do {
-                try await channel.connect()
-                Issue.record("expected stale shared-token connect to fail before device-token retry")
-            } catch let error as GatewayConnectAuthError {
-                #expect(error.detail == .authTokenMismatch)
+                do {
+                    try await Self.connectWithTestTimeout(channel)
+                    Issue.record("expected stale shared-token connect to fail before device-token retry")
+                } catch let error as GatewayConnectAuthError {
+                    #expect(error.detail == .authTokenMismatch)
+                }
+
+                try await Self.connectWithTestTimeout(channel)
+
+                let firstAuth = try #require(recorder.auth(at: 0))
+                #expect(firstAuth["token"] as? String == "stale-shared-token")
+                #expect(firstAuth["deviceToken"] == nil)
+
+                let retryAuth = try #require(recorder.auth(at: 1))
+                #expect(retryAuth["token"] as? String == "stale-shared-token")
+                #expect(retryAuth["deviceToken"] as? String == "stored-device-token")
+            } catch {
+                await channel.shutdown()
+                throw error
             }
-
-            try await channel.connect()
-
-            let firstAuth = try #require(recorder.auth(at: 0))
-            #expect(firstAuth["token"] as? String == "stale-shared-token")
-            #expect(firstAuth["deviceToken"] == nil)
-
-            let retryAuth = try #require(recorder.auth(at: 1))
-            #expect(retryAuth["token"] as? String == "stale-shared-token")
-            #expect(retryAuth["deviceToken"] as? String == "stored-device-token")
-
             await channel.shutdown()
         }
+    }
+
+    private static func connectWithTestTimeout(_ channel: GatewayChannelActor) async throws {
+        try await AsyncTimeout.withTimeout(
+            seconds: 5,
+            onTimeout: {
+                NSError(
+                    domain: "GatewayChannelDeviceTokenRetryTests",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "test gateway connect timed out"])
+            },
+            operation: { try await channel.connect() })
     }
 }
