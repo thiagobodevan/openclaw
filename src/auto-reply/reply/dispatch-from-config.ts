@@ -507,6 +507,7 @@ function resolveRoutedFinalDeliveryMirrorOption(payload: ReplyPayload): { mirror
 export const testing = {
   createReplyDispatchEvent,
   resolveRoutedFinalDeliveryMirrorOption,
+  shouldLetSlackRoutedThreadBypassBusyReplyOperation,
 };
 
 function resolveHarnessDefaultChannel(params: {

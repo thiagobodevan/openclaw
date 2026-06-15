@@ -1567,51 +1567,95 @@ describe("dispatchReplyFromConfig", () => {
     }
   });
 
-  it("keeps non-Slack routed direct turns behind the active reply operation", async () => {
-    setNoAbort();
-    const sessionKey = "agent:main:telegram:direct:1";
+  it.each([
+    {
+      name: "non-Slack direct",
+      sessionKey: "agent:main:telegram:direct:1",
+      provider: "telegram",
+      chatType: "direct",
+      activeRouteThreadId: "500.000",
+      routeThreadId: "501.000",
+      messageThreadId: "501.000",
+      expected: false,
+    },
+    {
+      name: "Slack direct in a different thread",
+      sessionKey: "agent:main:slack:direct:U1",
+      provider: "slack",
+      chatType: "direct",
+      activeRouteThreadId: "500.000",
+      routeThreadId: "501.000",
+      messageThreadId: "501.000",
+      expected: true,
+    },
+    {
+      name: "Slack direct in the same thread",
+      sessionKey: "agent:main:slack:direct:U1",
+      provider: "slack",
+      chatType: "direct",
+      activeRouteThreadId: "500.000",
+      routeThreadId: "500.000",
+      messageThreadId: "500.000",
+      expected: false,
+    },
+    {
+      name: "Slack channel thread",
+      sessionKey: "agent:main:slack:channel:C1",
+      provider: "slack",
+      chatType: "channel",
+      activeRouteThreadId: "500.000",
+      routeThreadId: "501.000",
+      messageThreadId: "501.000",
+      expected: false,
+    },
+    {
+      name: "Slack direct without routed thread",
+      sessionKey: "agent:main:slack:direct:U1",
+      provider: "slack",
+      chatType: "direct",
+      activeRouteThreadId: "500.000",
+      routeThreadId: undefined,
+      messageThreadId: undefined,
+      expected: false,
+    },
+    {
+      name: "Slack direct without active thread metadata",
+      sessionKey: "agent:main:slack:direct:U1",
+      provider: "slack",
+      chatType: "direct",
+      activeRouteThreadId: undefined,
+      routeThreadId: "501.000",
+      messageThreadId: "501.000",
+      expected: false,
+    },
+  ])("resolves active reply bypass for $name", (params) => {
     const activeOperation = createReplyOperation({
-      sessionKey,
+      sessionKey: params.sessionKey,
       sessionId: "active-session",
       resetTriggered: false,
-      routeThreadId: "500.000",
+      routeThreadId: params.activeRouteThreadId,
     });
     activeOperation.setPhase("running");
-    const abortController = new AbortController();
-    const dispatcher = createDispatcher();
-    const replyResolver = vi.fn(async () => ({ text: "telegram reply" }) satisfies ReplyPayload);
-
-    const resultPromise = dispatchReplyFromConfig({
-      ctx: buildTestCtx({
-        Provider: "telegram",
-        Surface: "telegram",
-        OriginatingChannel: "telegram",
-        OriginatingTo: "user:1",
-        ChatType: "direct",
-        SessionKey: sessionKey,
-        MessageThreadId: "501.000",
-        BodyForAgent: "second telegram direct turn",
-      }),
-      cfg: emptyConfig,
-      dispatcher,
-      replyOptions: { abortSignal: abortController.signal },
-      replyResolver,
-    });
 
     try {
-      const result = await Promise.race([
-        resultPromise,
-        new Promise<"blocked">((resolve) => {
-          setTimeout(() => resolve("blocked"), 1_000);
+      expect(
+        dispatchFromConfigTesting.shouldLetSlackRoutedThreadBypassBusyReplyOperation({
+          activeOperation,
+          ctx: buildTestCtx({
+            Provider: params.provider,
+            Surface: params.provider,
+            OriginatingChannel: params.provider,
+            OriginatingTo: params.provider === "slack" ? "user:U1" : "user:1",
+            ChatType: params.chatType,
+            SessionKey: params.sessionKey,
+            MessageThreadId: params.messageThreadId,
+            BodyForAgent: params.name,
+          }),
+          routeThreadId: params.routeThreadId,
         }),
-      ]);
-
-      expect(result).toBe("blocked");
-      expect(replyResolver).not.toHaveBeenCalled();
+      ).toBe(params.expected);
     } finally {
-      abortController.abort();
       activeOperation.complete();
-      await resultPromise;
     }
   });
 
