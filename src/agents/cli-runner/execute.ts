@@ -125,12 +125,7 @@ function extractCliMessagingTarget(
   if (!isMessagingToolSendAction(normalizedToolName, targetArgs)) {
     return undefined;
   }
-  return extractMessagingToolSend(normalizedToolName, targetArgs, {
-    config: context.params.config,
-    currentChannelId: context.params.currentChannelId,
-    currentThreadId: context.params.currentThreadTs,
-    currentMessageId: context.params.currentMessageId,
-  });
+  return extractMessagingToolSend(normalizedToolName, targetArgs);
 }
 
 function buildMessagingToolSendEvidenceKey(send: MessagingToolSend): string {

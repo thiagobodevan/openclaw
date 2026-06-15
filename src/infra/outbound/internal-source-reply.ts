@@ -68,7 +68,6 @@ function hasCurrentSourceReplyContext(input: InternalSourceReplySinkInput): bool
   const currentMessageId = input.toolContext?.currentMessageId;
   return Boolean(
     normalizeOptionalString(input.toolContext?.currentChannelId) ||
-    normalizeOptionalString(input.toolContext?.currentMessagingTarget) ||
     normalizeOptionalString(input.toolContext?.currentThreadTs) ||
     (typeof currentMessageId === "number" && Number.isFinite(currentMessageId)) ||
     normalizeOptionalString(currentMessageId),
@@ -108,10 +107,7 @@ export async function shouldUseInternalSourceReplySink(
   if (!hasImplicitCurrentSourceRoute) {
     return false;
   }
-  if (
-    !normalizeOptionalString(input.toolContext?.currentChannelId) &&
-    !normalizeOptionalString(input.toolContext?.currentMessagingTarget)
-  ) {
+  if (!normalizeOptionalString(input.toolContext?.currentChannelId)) {
     return true;
   }
   // Configured current-source channels can infer the target and deliver through
