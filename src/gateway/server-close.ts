@@ -24,6 +24,7 @@ import {
 } from "./restart-trace.js";
 import type { ChatRunEntry, ChatRunState } from "./server-chat-state.js";
 import type { GatewayPostReadySidecarHandle } from "./server-startup-post-attach.js";
+import { runShutdownStepWithTimeout } from "./shutdown-timeout.js";
 
 const shutdownLog = createSubsystemLogger("gateway/shutdown");
 const GATEWAY_SHUTDOWN_HOOK_TIMEOUT_MS = 5_000;
@@ -33,6 +34,7 @@ const WEBSOCKET_CLOSE_GRACE_MS = 1_000;
 const WEBSOCKET_CLOSE_FORCE_CONTINUE_MS = 250;
 const HTTP_CLOSE_GRACE_MS = 1_000;
 const HTTP_CLOSE_FORCE_WAIT_MS = 5_000;
+const GATEWAY_SHUTDOWN_SUBSYSTEM_TIMEOUT_MS = 5_000;
 const MCP_RUNTIME_CLOSE_GRACE_MS = 5_000;
 const LSP_RUNTIME_CLOSE_GRACE_MS = 5_000;
 const RESTART_REPLY_DRAIN_POLL_MS = 100;
@@ -79,16 +81,47 @@ async function shutdownStep(
   name: string,
   fn: () => Promise<void> | void,
   warnings: string[],
+  opts?: { timeoutMs?: number },
 ): Promise<boolean> {
+  const logFailure = (err: unknown, suffix = "") => {
+    const detail = err instanceof Error ? err.message : String(err);
+    shutdownLog.warn(`${name}: ${detail}${suffix}`);
+    recordShutdownWarning(warnings, name);
+  };
+  if (opts?.timeoutMs !== undefined) {
+    const result = await runShutdownStepWithTimeout({
+      run: fn,
+      timeoutMs: opts.timeoutMs,
+      onLateFailure: (err) => logFailure(err, " after shutdown timeout"),
+    });
+    if (result.status === "completed") {
+      return true;
+    }
+    if (result.status === "failed") {
+      logFailure(result.error);
+      return false;
+    }
+    shutdownLog.warn(`${name} exceeded ${opts.timeoutMs}ms; continuing shutdown`);
+    recordShutdownWarning(warnings, name);
+    return false;
+  }
   try {
     await fn();
     return true;
   } catch (err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err);
-    shutdownLog.warn(`${name}: ${detail}`);
-    recordShutdownWarning(warnings, name);
+    logFailure(err);
     return false;
   }
+}
+
+function shutdownSubsystemStep(
+  name: string,
+  fn: () => Promise<void> | void,
+  warnings: string[],
+): Promise<boolean> {
+  return shutdownStep(name, fn, warnings, {
+    timeoutMs: GATEWAY_SHUTDOWN_SUBSYSTEM_TIMEOUT_MS,
+  });
 }
 
 /** Record a shutdown warning once. */
@@ -782,30 +815,42 @@ export function createGatewayCloseHandler(
         );
       }
       if (params.bonjourStop) {
-        await shutdownStep("bonjour", () => params.bonjourStop!(), warnings);
+        await shutdownSubsystemStep("bonjour", () => params.bonjourStop!(), warnings);
       }
       if (params.tailscaleCleanup) {
-        await shutdownStep("tailscale", () => params.tailscaleCleanup!(), warnings);
+        await shutdownSubsystemStep("tailscale", () => params.tailscaleCleanup!(), warnings);
       }
       if (params.postReadySidecars?.length) {
         await measureCloseStep("post-ready-sidecars", async () => {
           for (const [index, sidecar] of params.postReadySidecars!.entries()) {
-            await shutdownStep(`post-ready-sidecar/${index}`, () => sidecar.stop(), warnings);
+            await shutdownSubsystemStep(
+              `post-ready-sidecar/${index}`,
+              () => sidecar.stop(),
+              warnings,
+            );
           }
         });
       }
       if (params.pluginServices) {
         await measureCloseStep("plugin-services", () =>
-          shutdownStep("plugin-services", () => params.pluginServices!.stop(), warnings),
+          shutdownSubsystemStep("plugin-services", () => params.pluginServices!.stop(), warnings),
         );
       }
       await measureCloseStep("channels", async () => {
         const channelIds = params.channelIds ?? listChannelPlugins().map((plugin) => plugin.id);
         for (const channelId of channelIds) {
-          await shutdownStep(`channel/${channelId}`, () => params.stopChannel(channelId), warnings);
+          await shutdownSubsystemStep(
+            `channel/${channelId}`,
+            () => params.stopChannel(channelId),
+            warnings,
+          );
         }
       });
-      await shutdownStep("agent-harnesses", () => disposeRegisteredAgentHarnesses(), warnings);
+      await shutdownSubsystemStep(
+        "agent-harnesses",
+        () => disposeRegisteredAgentHarnesses(),
+        warnings,
+      );
       await measureCloseStep("bundle-runtimes", async () => {
         await Promise.all([
           disposeRuntimeWithShutdownGrace({
@@ -822,21 +867,25 @@ export function createGatewayCloseHandler(
           }),
         ]);
       });
-      await shutdownStep("plugin-state-store", () => closePluginStateSqliteStore(), warnings);
+      await shutdownSubsystemStep(
+        "plugin-state-store",
+        () => closePluginStateSqliteStore(),
+        warnings,
+      );
       await measureCloseStep("config-reloader", () =>
-        shutdownStep("config-reloader", () => params.configReloader.stop(), warnings),
+        shutdownSubsystemStep("config-reloader", () => params.configReloader.stop(), warnings),
       );
       await measureCloseStep("gmail-watcher", () =>
-        shutdownStep("gmail-watcher", () => stopGmailWatcherOnDemand(), warnings),
+        shutdownSubsystemStep("gmail-watcher", () => stopGmailWatcherOnDemand(), warnings),
       );
       params.cron.stop();
       params.heartbeatRunner.stop();
-      await shutdownStep(
+      await shutdownSubsystemStep(
         "task-registry-maintenance",
         () => params.stopTaskRegistryMaintenance?.(),
         warnings,
       );
-      await shutdownStep("update-check", () => params.updateCheckStop?.(), warnings);
+      await shutdownSubsystemStep("update-check", () => params.updateCheckStop?.(), warnings);
       for (const timer of params.nodePresenceTimers.values()) {
         clearInterval(timer);
       }
@@ -852,16 +901,16 @@ export function createGatewayCloseHandler(
         clearInterval(params.mediaCleanup);
       }
       if (params.agentUnsub) {
-        await shutdownStep("agent-unsub", () => params.agentUnsub!(), warnings);
+        await shutdownSubsystemStep("agent-unsub", () => params.agentUnsub!(), warnings);
       }
       if (params.heartbeatUnsub) {
-        await shutdownStep("heartbeat-unsub", () => params.heartbeatUnsub!(), warnings);
+        await shutdownSubsystemStep("heartbeat-unsub", () => params.heartbeatUnsub!(), warnings);
       }
       if (params.transcriptUnsub) {
-        await shutdownStep("transcript-unsub", () => params.transcriptUnsub!(), warnings);
+        await shutdownSubsystemStep("transcript-unsub", () => params.transcriptUnsub!(), warnings);
       }
       if (params.lifecycleUnsub) {
-        await shutdownStep("lifecycle-unsub", () => params.lifecycleUnsub!(), warnings);
+        await shutdownSubsystemStep("lifecycle-unsub", () => params.lifecycleUnsub!(), warnings);
       }
       params.chatRunState.clear();
       let clientCloseFailures = 0;

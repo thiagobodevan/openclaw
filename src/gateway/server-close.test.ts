@@ -1183,6 +1183,79 @@ describe("createGatewayCloseHandler", () => {
     expect(stopChannel).toHaveBeenCalledTimes(2);
   });
 
+  it("continues later cleanup after a non-HTTP subsystem timeout", async () => {
+    vi.useFakeTimers();
+    const stopChannel = vi.fn(async () => undefined);
+    const lifecycleUnsub = vi.fn();
+    const pluginServices = {
+      stop: vi.fn(() => new Promise<void>(() => {})),
+    };
+    const close = createGatewayCloseHandler(
+      createGatewayCloseTestDeps({
+        channelIds: ["discord"],
+        lifecycleUnsub,
+        pluginServices: pluginServices as never,
+        stopChannel,
+      }),
+    );
+
+    const closePromise = close({ reason: "test shutdown" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await closePromise;
+
+    expect(result.warnings).toContain("plugin-services");
+    expect(stopChannel).toHaveBeenCalledWith("discord");
+    expect(lifecycleUnsub).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.logWarn.mock.calls.some(([message]) =>
+        String(message).includes("plugin-services exceeded 5000ms"),
+      ),
+    ).toBe(true);
+  });
+
+  it("logs late subsystem rejection after timeout without unhandled rejection", async () => {
+    vi.useFakeTimers();
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      let rejectPluginServices!: (error: Error) => void;
+      const pluginServices = {
+        stop: vi.fn(
+          () =>
+            new Promise<void>((_resolve, reject) => {
+              rejectPluginServices = reject;
+            }),
+        ),
+      };
+      const close = createGatewayCloseHandler(
+        createGatewayCloseTestDeps({
+          pluginServices: pluginServices as never,
+        }),
+      );
+
+      const closePromise = close({ reason: "test shutdown" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await closePromise;
+
+      rejectPluginServices(new Error("late stop failed"));
+      await vi.runAllTicks();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(result.warnings).toContain("plugin-services");
+      expect(
+        mocks.logWarn.mock.calls.some(([message]) =>
+          String(message).includes("plugin-services: late stop failed after shutdown timeout"),
+        ),
+      ).toBe(true);
+      expect(unhandledRejections).toStrictEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+  });
+
   it("uses caller-provided channel ids instead of the local channel registry", async () => {
     mocks.listChannelPlugins.mockReturnValue([]);
     const stopChannel = vi.fn(async (_id: string) => undefined);
