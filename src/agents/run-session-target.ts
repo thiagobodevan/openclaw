@@ -1,3 +1,4 @@
+import path from "node:path";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { resolveStorePath } from "../config/sessions/paths.js";
 import {
@@ -42,7 +43,11 @@ export async function resolveAgentRunSessionTarget(params: {
   const sessionKey = normalizeOptionalString(sessionTarget?.sessionKey) ?? params.sessionKey;
   const effectiveAgentId = agentId ?? resolveAgentIdFromSessionKey(sessionKey);
   const sessionFile = normalizeOptionalString(params.sessionFile);
-  if (sessionFile) {
+  const storePath =
+    normalizeOptionalString(sessionTarget?.storePath) ??
+    resolveStorePath(params.config?.session?.store, { agentId: effectiveAgentId });
+  const useSqliteSessionTarget = shouldUseSqliteSessionTarget({ sessionTarget, storePath });
+  if (sessionFile && !useSqliteSessionTarget) {
     return {
       agentId: effectiveAgentId ?? "",
       sessionFile,
@@ -55,9 +60,6 @@ export async function resolveAgentRunSessionTarget(params: {
   if (!sessionKey) {
     throw new Error(`Cannot resolve run session target without a session key: ${sessionId}`);
   }
-  const storePath =
-    normalizeOptionalString(sessionTarget?.storePath) ??
-    resolveStorePath(params.config?.session?.store, { agentId: effectiveAgentId });
   const scope = {
     ...(effectiveAgentId ? { agentId: effectiveAgentId } : {}),
     sessionId,
@@ -65,8 +67,13 @@ export async function resolveAgentRunSessionTarget(params: {
     storePath,
     ...(sessionTarget?.threadId !== undefined ? { threadId: sessionTarget.threadId } : {}),
   };
-  if (shouldUseSqliteSessionTarget({ sessionTarget, storePath })) {
-    return await resolveSqliteSessionTranscriptRuntimeTarget(scope);
+  if (useSqliteSessionTarget) {
+    const target = await resolveSqliteSessionTranscriptRuntimeTarget(scope);
+    const activeSessionFile = resolveCurrentSqliteEmbeddedRunSessionFile(
+      target.sqlitePath,
+      sessionFile,
+    );
+    return activeSessionFile ? { ...target, sessionFile: activeSessionFile } : target;
   }
   return await resolveSessionTranscriptRuntimeTarget({
     ...scope,
@@ -115,6 +122,22 @@ function shouldUseSqliteSessionTarget(params: {
     return false;
   }
   return params.storePath.trim().toLowerCase().endsWith(".sqlite");
+}
+
+function resolveCurrentSqliteEmbeddedRunSessionFile(
+  sqlitePath: string,
+  sessionFile: string | undefined,
+): string | undefined {
+  const trimmed = sessionFile?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const artifactDir = path.resolve(path.dirname(sqlitePath), "embedded-run-session-files");
+  const candidate = path.resolve(trimmed);
+  const relative = path.relative(artifactDir, candidate);
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative)
+    ? trimmed
+    : undefined;
 }
 
 /** Applies identity fields from the explicit target before legacy backfills run. */

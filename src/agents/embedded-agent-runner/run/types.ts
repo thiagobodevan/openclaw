@@ -16,6 +16,7 @@ import type {
   MessagingToolSend,
   MessagingToolSourceReplyPayload,
 } from "../../embedded-agent-messaging.types.js";
+import type { ResolvedAgentRunSessionTarget } from "../../run-session-target.js";
 import type { AgentRunTimeoutPhase } from "../../run-timeout-attribution.js";
 import type { AgentRuntimePlan } from "../../runtime-plan/types.js";
 import type { AgentMessage } from "../../runtime/index.js";
@@ -65,6 +66,8 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   agentHarnessId?: string;
   /** OpenClaw-owned runtime policy prepared by the orchestrator for this attempt. */
   runtimePlan?: AgentRuntimePlan;
+  /** Resolved storage target for operation-sized transcript/session mutations. */
+  runSessionTarget?: ResolvedAgentRunSessionTarget;
   /** Host-issued scope for harnesses that mirror native child runs into task state. */
   agentHarnessTaskRuntimeScope?: AgentHarnessTaskRuntimeScope;
   /** Live observer called after wrapped tool outcomes are recorded. */
@@ -120,6 +123,8 @@ export type EmbeddedRunAttemptResult = {
       };
   sessionIdUsed: string;
   sessionFileUsed?: string;
+  /** True when a compaction rotation already persisted the active run target. */
+  sessionTargetIdentityPersisted?: boolean;
   diagnosticTrace?: DiagnosticTraceContext;
   agentHarnessId?: string;
   agentHarnessResultClassification?: "empty" | "reasoning-only" | "planning-only";

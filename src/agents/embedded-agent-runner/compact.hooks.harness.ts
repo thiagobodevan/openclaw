@@ -730,6 +730,8 @@ export async function loadCompactHooksHarness(): Promise<{
     );
     return {
       ...actual,
+      rotateAgentRunSessionTargetAfterCompaction: rotateTranscriptAfterCompactionMock,
+      rotateAgentRunSessionTargetFileAfterCompaction: rotateTranscriptAfterCompactionMock,
       rotateTranscriptAfterCompaction: rotateTranscriptAfterCompactionMock,
     };
   });

@@ -1648,6 +1648,7 @@ export async function runEmbeddedAgent(
             // attempt too. Otherwise plugin-owned transports can skip OpenClaw auth
             // bootstrap but drift back to OpenClaw when the attempt is created.
             agentHarnessId: agentHarness.id,
+            runSessionTarget,
             ...(params.sessionKey
               ? {
                   agentHarnessTaskRuntimeScope: createAgentHarnessTaskRuntimeScope({
@@ -1774,7 +1775,7 @@ export async function runEmbeddedAgent(
             activeSessionFile = sessionFileUsed;
             activeTargetChanged = true;
           }
-          if (activeTargetChanged) {
+          if (activeTargetChanged && attempt.sessionTargetIdentityPersisted !== true) {
             await persistActiveRunSessionTarget({
               sessionFile: activeSessionFile,
               sessionId: activeSessionId,

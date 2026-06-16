@@ -3,8 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { loadSqliteSessionEntry } from "../../config/sessions/session-accessor.sqlite.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
+import { resolveAgentRunSessionTarget } from "../run-session-target.js";
 import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
 import {
+  rotateAgentRunSessionTargetAfterCompaction,
   rotateTranscriptAfterCompaction,
   rotateTranscriptFileAfterCompaction,
   shouldRotateCompactionTranscript,
@@ -19,6 +24,7 @@ async function createTmpDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  closeOpenClawAgentDatabasesForTest();
   if (tmpDir) {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
     tmpDir = undefined;
@@ -209,6 +215,43 @@ describe("rotateTranscriptAfterCompaction", () => {
     expect(context.thinkingLevel).toBe("medium");
     expect(successor.getLabel(firstKeptId)).toBe("kept bookmark");
     expect(successor.getLabel(oldUserId)).toBeUndefined();
+  });
+
+  it("persists rotated SQLite active target identity through the rotation operation", async () => {
+    const dir = await createTmpDir();
+    const sqlitePath = path.join(dir, "helper", "openclaw-agent.sqlite");
+    const sessionKey = "agent:helper:commitments:compaction-rotation";
+    const runSessionTarget = await resolveAgentRunSessionTarget({
+      agentId: "helper",
+      config: { session: { store: sqlitePath } } as OpenClawConfig,
+      sessionId: "sqlite-source",
+      sessionKey,
+    });
+    const { manager, sessionFile } = createCompactedSession(
+      path.dirname(runSessionTarget.sessionFile),
+    );
+
+    const result = await rotateAgentRunSessionTargetAfterCompaction({
+      runSessionTarget,
+      sessionManager: manager,
+      sessionFile,
+      now: () => new Date("2026-04-27T12:15:00.000Z"),
+    });
+
+    expect(result.rotated).toBe(true);
+    expect(result.targetIdentityPersisted).toBe(true);
+    const rotatedSessionId = requireString(result.sessionId, "rotated session id");
+    const rotatedSessionFile = requireString(result.sessionFile, "rotated session file");
+    expect(
+      loadSqliteSessionEntry({
+        agentId: "helper",
+        sessionKey,
+        storePath: sqlitePath,
+      }),
+    ).toMatchObject({
+      sessionId: rotatedSessionId,
+      sessionFile: rotatedSessionFile,
+    });
   });
 
   it("rotates with a fallback timestamp when the injected clock is invalid", async () => {

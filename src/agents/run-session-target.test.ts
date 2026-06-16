@@ -191,6 +191,31 @@ describe("agent run session target", () => {
     );
   });
 
+  it("keeps SQLite identity when callers pass the active bridge file", async () => {
+    const sqlitePath = path.join(tempDir, "helper", "openclaw-agent.sqlite");
+    const sessionKey = "agent:helper:commitments:sqlite-active-file";
+    const activeSessionFile = path.join(
+      path.dirname(sqlitePath),
+      "embedded-run-session-files",
+      "sqlite-active-file.jsonl",
+    );
+
+    const target = await resolveAgentRunSessionTarget({
+      agentId: "helper",
+      config: { session: { store: sqlitePath } } as OpenClawConfig,
+      sessionFile: activeSessionFile,
+      sessionId: "sqlite-active-file",
+      sessionKey,
+    });
+
+    expect(target).toMatchObject({
+      sessionFile: activeSessionFile,
+      sessionId: "sqlite-active-file",
+      sqlitePath,
+      storageKind: "sqlite",
+    });
+  });
+
   it("can force SQLite resolution for canonical agent session stores", async () => {
     const storeRoot = path.join(
       tempDir,

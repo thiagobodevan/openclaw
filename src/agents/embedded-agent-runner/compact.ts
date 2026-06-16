@@ -98,6 +98,7 @@ import { registerProviderStreamForModel } from "../provider-stream.js";
 import {
   applyAgentRunSessionTargetIdentity,
   resolveAgentRunSessionTarget,
+  type ResolvedAgentRunSessionTarget,
 } from "../run-session-target.js";
 import { collectRuntimeChannelCapabilities } from "../runtime-capabilities.js";
 import { buildAgentRuntimePlan } from "../runtime-plan/build.js";
@@ -146,6 +147,7 @@ import {
 } from "./compaction-safety-timeout.js";
 import {
   type CompactionTranscriptRotation,
+  rotateAgentRunSessionTargetAfterCompaction,
   rotateTranscriptAfterCompaction,
   shouldRotateCompactionTranscript,
 } from "./compaction-successor-transcript.js";
@@ -181,6 +183,7 @@ import { flushPendingToolResultsAfterIdle } from "./wait-for-idle-before-flush.j
 export type { CompactEmbeddedAgentSessionParams } from "./compact.types.js";
 
 type CompactEmbeddedAgentSessionParamsWithSessionFile = CompactEmbeddedAgentSessionRuntimeParams & {
+  runSessionTarget: ResolvedAgentRunSessionTarget;
   sessionFile: string;
 };
 
@@ -433,6 +436,7 @@ export async function compactEmbeddedAgentSessionDirect(
   const params: CompactEmbeddedAgentSessionParamsWithSessionFile = {
     ...paramsBase,
     agentId: paramsBase.agentId ?? runSessionTarget.agentId,
+    runSessionTarget,
     sessionId: runSessionTarget.sessionId,
     sessionKey: paramsBase.sessionKey ?? runSessionTarget.sessionKey,
     sessionFile: runSessionTarget.sessionFile,
@@ -1427,7 +1431,8 @@ async function compactEmbeddedAgentSessionDirectOnce(
           let transcriptRotation: CompactionTranscriptRotation = { rotated: false };
           if (shouldRotateCompactionTranscript(params.config)) {
             try {
-              transcriptRotation = await rotateTranscriptAfterCompaction({
+              transcriptRotation = await rotateAgentRunSessionTargetAfterCompaction({
+                runSessionTarget: params.runSessionTarget,
                 sessionManager: transcriptRotationSessionManager,
                 sessionFile: params.sessionFile,
               });

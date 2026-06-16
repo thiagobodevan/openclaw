@@ -314,7 +314,7 @@ import {
 } from "./attempt.bootstrap-context.js";
 export { buildContextEnginePromptCacheInfo } from "./attempt.context-engine-helpers.js";
 import {
-  rotateTranscriptAfterCompaction,
+  rotateAgentRunSessionTargetAfterCompaction,
   shouldRotateCompactionTranscript,
 } from "../compaction-successor-transcript.js";
 import { releaseEmbeddedAttemptSessionLockForAbort } from "./attempt-abort.js";
@@ -758,6 +758,20 @@ function collectAttemptExplicitToolAllowlistSources(params: {
     { label: "inherited tools.allow", allow: inheritedToolPolicy?.allow },
     { label: "runtime toolsAllow", allow: params.toolsAllow, enforceWhenToolsDisabled: true },
   ]);
+}
+
+function resolveAttemptRunSessionTarget(params: EmbeddedRunAttemptParams) {
+  if (params.runSessionTarget) {
+    return params.runSessionTarget;
+  }
+  return {
+    agentId: params.agentId ?? "",
+    sessionFile: params.sessionFile,
+    sessionId: params.sessionId,
+    sessionKey: params.sessionKey ?? "",
+    storageKind: "file" as const,
+    targetKind: "active-session-file" as const,
+  };
 }
 
 export async function runEmbeddedAttempt(
@@ -3285,6 +3299,7 @@ export async function runEmbeddedAttempt(
       let messagesSnapshot: AgentMessage[] = [];
       let sessionIdUsed = activeSession.sessionId;
       let sessionFileUsed: string | undefined = params.sessionFile;
+      let sessionTargetIdentityPersisted = false;
       const onAbort = () => {
         externalAbort = true;
         const reason = params.abortSignal ? getAbortReason(params.abortSignal) : undefined;
@@ -4588,13 +4603,16 @@ export async function runEmbeddedAttempt(
             shouldRotateCompactionTranscript(params.config)
           ) {
             try {
-              const rotation = await rotateTranscriptAfterCompaction({
+              const rotation = await rotateAgentRunSessionTargetAfterCompaction({
+                allowTargetPersistenceRetry: true,
+                runSessionTarget: resolveAttemptRunSessionTarget(params),
                 sessionManager: activeSessionManager,
                 sessionFile: params.sessionFile,
               });
               if (rotation.rotated) {
                 sessionIdUsed = rotation.sessionId ?? sessionIdUsed;
                 sessionFileUsed = rotation.sessionFile ?? sessionFileUsed;
+                sessionTargetIdentityPersisted = rotation.targetIdentityPersisted === true;
                 updateActiveEmbeddedRunSessionFile(params.sessionId, sessionFileUsed);
                 log.info(
                   `[compaction] rotated active transcript after automatic compaction ` +
@@ -4981,6 +4999,7 @@ export async function runEmbeddedAttempt(
         preflightRecovery,
         sessionIdUsed,
         sessionFileUsed,
+        sessionTargetIdentityPersisted,
         diagnosticTrace,
         bootstrapPromptWarningSignaturesSeen: bootstrapPromptWarning.warningSignaturesSeen,
         bootstrapPromptWarningSignature: bootstrapPromptWarning.signature,

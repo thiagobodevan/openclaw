@@ -3,6 +3,10 @@ import path from "node:path";
 import { resolveTimestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
 import { CURRENT_SESSION_VERSION } from "../../config/sessions/version.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  persistAgentRunSessionTargetIdentity,
+  type ResolvedAgentRunSessionTarget,
+} from "../run-session-target.js";
 import type { CompactionEntry, SessionEntry, SessionHeader } from "../sessions/index.js";
 import { collectDuplicateUserMessageEntryIdsForCompaction } from "./compaction-duplicate-user-messages.js";
 import {
@@ -21,6 +25,7 @@ export type CompactionTranscriptRotation = {
   reason?: string;
   sessionId?: string;
   sessionFile?: string;
+  targetIdentityPersisted?: boolean;
   compactionEntryId?: string;
   leafId?: string;
   entriesWritten?: number;
@@ -83,6 +88,44 @@ export async function rotateTranscriptAfterCompaction(params: {
   };
 }
 
+/** Rotates a compaction successor and persists the active run target in one operation. */
+export async function rotateAgentRunSessionTargetAfterCompaction(params: {
+  allowTargetPersistenceRetry?: boolean;
+  runSessionTarget: ResolvedAgentRunSessionTarget;
+  sessionManager: ReadonlySessionManagerForRotation;
+  sessionFile: string;
+  now?: () => Date;
+}): Promise<CompactionTranscriptRotation> {
+  const rotation = await rotateTranscriptAfterCompaction({
+    sessionManager: params.sessionManager,
+    sessionFile: params.sessionFile,
+    ...(params.now ? { now: params.now } : {}),
+  });
+  const targetIdentityPersisted = await persistRotatedAgentRunSessionTarget({
+    allowTargetPersistenceRetry: params.allowTargetPersistenceRetry,
+    runSessionTarget: params.runSessionTarget,
+    rotation,
+  });
+  return rotation.rotated ? { ...rotation, targetIdentityPersisted } : rotation;
+}
+
+/** Opens a transcript file, rotates its compaction successor, and persists the active target. */
+export async function rotateAgentRunSessionTargetFileAfterCompaction(params: {
+  allowTargetPersistenceRetry?: boolean;
+  runSessionTarget: ResolvedAgentRunSessionTarget;
+  sessionFile: string;
+  now?: () => Date;
+}): Promise<CompactionTranscriptRotation> {
+  const state = await readTranscriptFileState(params.sessionFile);
+  return rotateAgentRunSessionTargetAfterCompaction({
+    allowTargetPersistenceRetry: params.allowTargetPersistenceRetry,
+    runSessionTarget: params.runSessionTarget,
+    sessionManager: state,
+    sessionFile: params.sessionFile,
+    ...(params.now ? { now: params.now } : {}),
+  });
+}
+
 export async function rotateTranscriptFileAfterCompaction(params: {
   sessionFile: string;
   now?: () => Date;
@@ -93,6 +136,31 @@ export async function rotateTranscriptFileAfterCompaction(params: {
     sessionFile: params.sessionFile,
     ...(params.now ? { now: params.now } : {}),
   });
+}
+
+async function persistRotatedAgentRunSessionTarget(params: {
+  allowTargetPersistenceRetry?: boolean;
+  runSessionTarget: ResolvedAgentRunSessionTarget;
+  rotation: CompactionTranscriptRotation;
+}): Promise<boolean> {
+  if (!params.rotation.rotated || !params.rotation.sessionId || !params.rotation.sessionFile) {
+    return false;
+  }
+  try {
+    await persistAgentRunSessionTargetIdentity({
+      target: params.runSessionTarget,
+      sessionFile: params.rotation.sessionFile,
+      sessionId: params.rotation.sessionId,
+    });
+    return true;
+  } catch (err) {
+    if (params.allowTargetPersistenceRetry !== true) {
+      throw err;
+    }
+    // The successor transcript already exists. Return it so callers can adopt
+    // the rotation and, when they own the run loop, retry target persistence.
+    return false;
+  }
 }
 
 function findLatestCompactionIndex(entries: SessionEntry[]): number {

@@ -29,6 +29,7 @@ import {
   resolveAgentHarnessPolicy,
 } from "../harness/selection.js";
 import { isOpenAIProvider } from "../openai-routing.js";
+import { resolveAgentRunSessionTarget } from "../run-session-target.js";
 import { ensureRuntimePluginsLoaded } from "../runtime-plugins.js";
 import { DEFERRED_CONTEXT_ENGINE_COMPACTION_REASON } from "./compact-reasons.js";
 import type { CompactEmbeddedAgentSessionParams } from "./compact.types.js";
@@ -42,7 +43,7 @@ import {
   resolveCompactionTimeoutMs,
 } from "./compaction-safety-timeout.js";
 import {
-  rotateTranscriptFileAfterCompaction,
+  rotateAgentRunSessionTargetFileAfterCompaction,
   shouldRotateCompactionTranscript,
 } from "./compaction-successor-transcript.js";
 import { resolveContextEngineCapabilities } from "./context-engine-capabilities.js";
@@ -172,6 +173,7 @@ export async function compactEmbeddedAgentSession(
     agentDir,
     workspaceDir: resolvedWorkspaceDir,
   });
+  const runSessionTarget = await resolveAgentRunSessionTarget(params);
   const runtimePolicySessionKey = params.sandboxSessionKey ?? params.sessionKey;
   const runtimePolicyAgentId =
     params.sandboxSessionKey && parseAgentSessionKey(params.sandboxSessionKey)
@@ -403,7 +405,8 @@ export async function compactEmbeddedAgentSession(
         if (result.ok && result.compacted) {
           if (shouldRotateCompactionTranscript(params.config) && !delegatedRotatedTranscript) {
             try {
-              const rotation = await rotateTranscriptFileAfterCompaction({
+              const rotation = await rotateAgentRunSessionTargetFileAfterCompaction({
+                runSessionTarget,
                 sessionFile: params.sessionFile,
               });
               if (rotation.rotated) {

@@ -2330,7 +2330,14 @@ describe("compactEmbeddedAgentSession hooks (ownsCompaction engine)", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(rotateTranscriptAfterCompactionMock).not.toHaveBeenCalled();
+    expect(rotateTranscriptAfterCompactionMock).toHaveBeenCalledWith({
+      runSessionTarget: expect.objectContaining({
+        sessionFile: TEST_SESSION_FILE,
+        sessionId: TEST_SESSION_ID,
+        storageKind: "file",
+      }),
+      sessionFile: TEST_SESSION_FILE,
+    });
     expect(result.result?.sessionId).toBeUndefined();
     expect(result.result?.sessionFile).toBeUndefined();
     expectRecordFields(mockCallArg(maintain), {
