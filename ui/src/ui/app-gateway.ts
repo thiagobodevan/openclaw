@@ -4,6 +4,7 @@ import {
   GATEWAY_EVENT_UPDATE_AVAILABLE,
   type GatewayUpdateAvailableEventPayload,
 } from "../../../src/gateway/events.js";
+import { loadCron, refreshActiveRoute } from "../app/active-route.ts";
 import type { Tab } from "../routes/route-registry.ts";
 import {
   clearPendingQueueItemsForRun,
@@ -20,13 +21,7 @@ import {
   scopedAgentParamsForSession,
 } from "./app-chat.ts";
 import type { EventLogEntry } from "./app-events.ts";
-import {
-  applySettings,
-  loadCron,
-  refreshActiveTab,
-  setLastActiveSessionKey,
-  syncUrlWithSessionKey,
-} from "./app-settings.ts";
+import { applySettings, setLastActiveSessionKey, syncUrlWithSessionKey } from "./app-settings.ts";
 import {
   handleAgentEvent,
   handleSessionOperationEvent,
@@ -719,7 +714,7 @@ async function loadAgentsThenRefreshActiveTab(host: GatewayHost) {
   const refreshBeforeAgents = canRefreshActiveTabBeforeAgents(host);
   const agentsListBeforeStartup = host.agentsList;
   const initialRefresh = refreshBeforeAgents
-    ? refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0], {
+    ? refreshActiveRoute(host as unknown as Parameters<typeof refreshActiveRoute>[0], {
         chatStartup: true,
       }).catch((err: unknown) => {
         initialRefreshError = normalizeStartupRefreshError(err);
@@ -741,7 +736,7 @@ async function loadAgentsThenRefreshActiveTab(host: GatewayHost) {
     agentsError = normalizeStartupRefreshError(err);
   }
   if (refreshAfterAgents) {
-    await refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+    await refreshActiveRoute(host as unknown as Parameters<typeof refreshActiveRoute>[0]);
   } else if (initialRefreshError) {
     throw initialRefreshError;
   }

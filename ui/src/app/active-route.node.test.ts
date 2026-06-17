@@ -54,10 +54,10 @@ const mocks = vi.hoisted(() => ({
   stopNodesPollingMock: vi.fn(),
 }));
 
-vi.mock("./app-chat.ts", () => ({
+vi.mock("../ui/app-chat.ts", () => ({
   refreshChat: mocks.refreshChatMock,
 }));
-vi.mock("./app-polling.ts", () => ({
+vi.mock("../ui/app-polling.ts", () => ({
   startDebugPolling: mocks.startDebugPollingMock,
   startLogsPolling: mocks.startLogsPollingMock,
   startNodesPolling: mocks.startNodesPollingMock,
@@ -65,80 +65,81 @@ vi.mock("./app-polling.ts", () => ({
   stopLogsPolling: mocks.stopLogsPollingMock,
   stopNodesPolling: mocks.stopNodesPollingMock,
 }));
-vi.mock("./app-scroll.ts", () => ({
+vi.mock("../ui/app-scroll.ts", () => ({
   scheduleChatScroll: mocks.scheduleChatScrollMock,
   scheduleLogsScroll: mocks.scheduleLogsScrollMock,
 }));
-vi.mock("./controllers/agent-files.ts", () => ({
+vi.mock("../ui/controllers/agent-files.ts", () => ({
   loadAgentFiles: mocks.loadAgentFilesMock,
 }));
-vi.mock("./controllers/agent-identity.ts", () => ({
+vi.mock("../ui/controllers/agent-identity.ts", () => ({
   loadAgentIdentities: mocks.loadAgentIdentitiesMock,
   loadAgentIdentity: mocks.loadAgentIdentityMock,
 }));
-vi.mock("./controllers/agent-skills.ts", () => ({
+vi.mock("../ui/controllers/agent-skills.ts", () => ({
   loadAgentSkills: mocks.loadAgentSkillsMock,
 }));
-vi.mock("./controllers/agents.ts", () => ({
+vi.mock("../ui/controllers/agents.ts", () => ({
   loadAgents: mocks.loadAgentsMock,
 }));
-vi.mock("./controllers/channels.ts", () => ({
+vi.mock("../ui/controllers/channels.ts", () => ({
   loadChannels: mocks.loadChannelsMock,
 }));
-vi.mock("./controllers/config.ts", () => ({
+vi.mock("../ui/controllers/config.ts", () => ({
   loadConfig: mocks.loadConfigMock,
   loadConfigSchema: mocks.loadConfigSchemaMock,
 }));
-vi.mock("./controllers/cron.ts", () => ({
+vi.mock("../ui/controllers/cron.ts", () => ({
   loadCronStatus: mocks.loadCronStatusMock,
   loadCronJobsPage: mocks.loadCronJobsPageMock,
   loadCronRuns: mocks.loadCronRunsMock,
 }));
-vi.mock("./controllers/debug.ts", () => ({
+vi.mock("../ui/controllers/debug.ts", () => ({
   loadDebug: mocks.loadDebugMock,
 }));
-vi.mock("./controllers/devices.ts", () => ({
+vi.mock("../ui/controllers/devices.ts", () => ({
   loadDevices: mocks.loadDevicesMock,
 }));
-vi.mock("./controllers/dreaming.ts", () => ({
+vi.mock("../ui/controllers/dreaming.ts", () => ({
   loadDreamDiary: mocks.loadDreamDiaryMock,
   loadDreamingStatus: mocks.loadDreamingStatusMock,
   loadWikiImportInsights: mocks.loadWikiImportInsightsMock,
   loadWikiMemoryPalace: mocks.loadWikiMemoryPalaceMock,
 }));
-vi.mock("./controllers/exec-approvals.ts", () => ({
+vi.mock("../ui/controllers/exec-approvals.ts", () => ({
   loadExecApprovals: mocks.loadExecApprovalsMock,
 }));
-vi.mock("./controllers/logs.ts", () => ({
+vi.mock("../ui/controllers/logs.ts", () => ({
   loadLogs: mocks.loadLogsMock,
 }));
-vi.mock("./controllers/model-auth-status.ts", () => ({
+vi.mock("../ui/controllers/model-auth-status.ts", () => ({
   loadModelAuthStatusState: mocks.loadModelAuthStatusStateMock,
 }));
-vi.mock("./controllers/nodes.ts", () => ({
+vi.mock("../ui/controllers/nodes.ts", () => ({
   loadNodes: mocks.loadNodesMock,
 }));
-vi.mock("./controllers/presence.ts", () => ({
+vi.mock("../ui/controllers/presence.ts", () => ({
   loadPresence: mocks.loadPresenceMock,
 }));
-vi.mock("./controllers/sessions.ts", () => ({
+vi.mock("../ui/controllers/sessions.ts", () => ({
   loadSessions: mocks.loadSessionsMock,
   syncSelectedSessionMessageSubscription: vi.fn(),
 }));
-vi.mock("./controllers/skills.ts", () => ({
+vi.mock("../ui/controllers/skills.ts", () => ({
   loadSkills: mocks.loadSkillsMock,
   reconcileSkillsAgentId: mocks.reconcileSkillsAgentIdMock,
 }));
-vi.mock("./controllers/usage.ts", () => ({
+vi.mock("../ui/controllers/usage.ts", () => ({
   loadUsage: mocks.loadUsageMock,
 }));
-vi.mock("./controllers/workboard.ts", () => ({
+vi.mock("../ui/controllers/workboard.ts", () => ({
   loadWorkboard: mocks.loadWorkboardMock,
   stopWorkboardLifecycleRefresh: mocks.stopWorkboardLifecycleRefreshMock,
   stopWorkboardPolling: mocks.stopWorkboardPollingMock,
 }));
 
-import { loadChannelsTab, refreshActiveTab, setTab } from "./app-settings.ts";
+import { setTab } from "../ui/app-settings.ts";
+import { refreshActiveRoute } from "./active-route.ts";
 
 function createHost() {
   return {
@@ -200,7 +201,7 @@ function expectBufferedPerformanceEvent(
   return entry.payload;
 }
 
-describe("refreshActiveTab", () => {
+describe("refreshActiveRoute", () => {
   beforeEach(() => {
     for (const fn of Object.values(mocks)) {
       fn.mockReset();
@@ -240,7 +241,7 @@ describe("refreshActiveTab", () => {
       expect(host.selectedAgentId).toBe("research");
     });
 
-    await refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+    await refreshActiveRoute(host as unknown as Parameters<typeof refreshActiveRoute>[0]);
 
     expect(host.selectedAgentId).toBe("research");
     expect(mocks.loadConfigMock).toHaveBeenCalledOnce();
@@ -255,7 +256,7 @@ describe("refreshActiveTab", () => {
       const host = createHost();
       host.agentsPanel = panel;
 
-      await refreshActiveTab(host as never);
+      await refreshActiveRoute(host as never);
 
       expectCommonAgentsTabRefresh(host);
       expect(mocks.loadAgentFilesMock).toHaveBeenCalledTimes(panel === "files" ? 1 : 0);
@@ -276,7 +277,7 @@ describe("refreshActiveTab", () => {
     host.cronRunsScope = "job";
     host.cronRunsJobId = "job-123";
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expectCommonAgentsTabRefresh(host);
     expect(mocks.loadChannelsMock).toHaveBeenCalledWith(host, false);
@@ -290,7 +291,8 @@ describe("refreshActiveTab", () => {
   it("loads the Channels tab without automatic live probes", async () => {
     const host = createHost();
 
-    await loadChannelsTab(host as never);
+    host.tab = "channels";
+    await refreshActiveRoute(host as never);
 
     expect(mocks.loadChannelsMock).toHaveBeenCalledWith(host, false);
     expect(mocks.loadConfigSchemaMock).toHaveBeenCalledWith(host);
@@ -301,7 +303,7 @@ describe("refreshActiveTab", () => {
     const host = createHost();
     host.tab = "logs";
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(host.logsAtBottom).toBe(true);
     expect(mocks.loadLogsMock).toHaveBeenCalledWith(host, { reset: true });
@@ -331,7 +333,7 @@ describe("refreshActiveTab", () => {
     const host = createHost();
     host.tab = "sessions";
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(mocks.loadConfigMock).toHaveBeenCalledOnce();
     expect(mocks.loadSessionsMock).toHaveBeenCalledOnce();
@@ -341,7 +343,7 @@ describe("refreshActiveTab", () => {
     const host = createHost();
     host.tab = "workboard";
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(mocks.loadConfigMock).toHaveBeenCalledWith(host);
     expect(mocks.loadSessionsMock).toHaveBeenCalledWith(host);
@@ -360,7 +362,7 @@ describe("refreshActiveTab", () => {
     host.tab = "workboard";
     host.hello = { auth: { role: "operator", scopes: ["operator.read"] } };
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(mocks.loadWorkboardMock).toHaveBeenCalledWith({
       host,
@@ -385,7 +387,7 @@ describe("refreshActiveTab", () => {
       calls.push("skills");
     });
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(calls).toEqual(["agents", "reconcile", "skills"]);
     expect(mocks.loadAgentsMock).toHaveBeenCalledWith(host);
@@ -420,7 +422,7 @@ describe("refreshActiveTab", () => {
     host.tab = "overview";
     mocks.loadUsageMock.mockReturnValueOnce(new Promise<void>(() => {}));
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     const outcome = await raceWithNextMacrotask(refresh);
 
     expect(outcome).toBe("resolved");
@@ -435,7 +437,7 @@ describe("refreshActiveTab", () => {
     const channels = createDeferred();
     mocks.loadChannelsMock.mockReturnValueOnce(channels.promise);
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     await Promise.resolve();
     host.tab = "sessions";
     channels.resolve();
@@ -452,7 +454,7 @@ describe("refreshActiveTab", () => {
     const schema = createDeferred();
     mocks.loadConfigSchemaMock.mockReturnValueOnce(schema.promise);
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     const outcome = await raceWithNextMacrotask(refresh);
 
     expect(outcome).toBe("resolved");
@@ -473,7 +475,7 @@ describe("refreshActiveTab", () => {
     const config = createDeferred();
     mocks.loadConfigMock.mockReturnValueOnce(config.promise);
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     await Promise.resolve();
 
     expect(mocks.loadConfigMock).toHaveBeenCalledOnce();
@@ -492,7 +494,7 @@ describe("refreshActiveTab", () => {
     const host = createHost();
     host.tab = "workboard";
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(mocks.loadConfigMock).toHaveBeenCalledOnce();
     expect(mocks.loadSessionsMock).toHaveBeenCalledOnce();
@@ -506,7 +508,7 @@ describe("refreshActiveTab", () => {
     const error = new Error("config unavailable");
     mocks.loadConfigMock.mockRejectedValueOnce(error);
 
-    await expect(refreshActiveTab(host as never)).rejects.toBe(error);
+    await expect(refreshActiveRoute(host as never)).rejects.toBe(error);
     await Promise.resolve();
 
     expect(mocks.loadConfigSchemaMock).not.toHaveBeenCalled();
@@ -518,7 +520,7 @@ describe("refreshActiveTab", () => {
     const schema = createDeferred();
     mocks.loadConfigSchemaMock.mockReturnValueOnce(schema.promise);
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     const outcome = await raceWithNextMacrotask(refresh);
 
     expect(outcome).toBe("resolved");
@@ -540,7 +542,7 @@ describe("refreshActiveTab", () => {
     mocks.loadUsageMock.mockReturnValueOnce(usage.promise);
     mocks.loadSkillsMock.mockRejectedValueOnce(new Error("skills failed"));
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
     usage.resolve();
 
     await vi.waitFor(() => {
@@ -556,7 +558,7 @@ describe("refreshActiveTab", () => {
     host.tab = "cron";
     mocks.loadCronRunsMock.mockReturnValueOnce(new Promise<"ok">(() => {}));
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     const outcome = await raceWithNextMacrotask(refresh);
 
     expect(outcome).toBe("resolved");
@@ -570,7 +572,7 @@ describe("refreshActiveTab", () => {
     const host = createHost();
     host.tab = "chat";
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
 
     expect(mocks.refreshChatMock).toHaveBeenCalledOnce();
     expect(mocks.loadModelAuthStatusStateMock).toHaveBeenCalledWith(host);
@@ -583,7 +585,7 @@ describe("refreshActiveTab", () => {
     const quotaRefresh = createDeferred();
     mocks.loadModelAuthStatusStateMock.mockReturnValueOnce(quotaRefresh.promise);
 
-    const refresh = refreshActiveTab(host as never);
+    const refresh = refreshActiveRoute(host as never);
     const outcome = await raceWithNextMacrotask(refresh);
 
     expect(outcome).toBe("resolved");
@@ -599,7 +601,7 @@ describe("refreshActiveTab", () => {
     host.tab = "chat";
     mocks.refreshChatMock.mockRejectedValueOnce(new Error("chat refresh failed"));
 
-    await expect(refreshActiveTab(host as never)).rejects.toThrow("chat refresh failed");
+    await expect(refreshActiveRoute(host as never)).rejects.toThrow("chat refresh failed");
 
     expect(mocks.loadModelAuthStatusStateMock).toHaveBeenCalledWith(host);
     expect(mocks.scheduleChatScrollMock).not.toHaveBeenCalled();
@@ -610,7 +612,7 @@ describe("refreshActiveTab", () => {
     host.tab = "chat";
     mocks.loadModelAuthStatusStateMock.mockRejectedValueOnce(new Error("quota failed"));
 
-    await expect(refreshActiveTab(host as never)).resolves.toBeUndefined();
+    await expect(refreshActiveRoute(host as never)).resolves.toBeUndefined();
 
     expect(mocks.refreshChatMock).toHaveBeenCalledOnce();
     expect(mocks.scheduleChatScrollMock).toHaveBeenCalledOnce();
@@ -621,7 +623,7 @@ describe("refreshActiveTab", () => {
     host.tab = "cron";
     mocks.loadCronRunsMock.mockResolvedValueOnce("error" as const);
 
-    await expect(refreshActiveTab(host as never)).resolves.toBeUndefined();
+    await expect(refreshActiveRoute(host as never)).resolves.toBeUndefined();
     await Promise.resolve();
 
     expectBufferedPerformanceEvent(host, "control-ui.cron.runs", {
@@ -635,7 +637,7 @@ describe("refreshActiveTab", () => {
     host.tab = "cron";
     mocks.loadCronRunsMock.mockRejectedValueOnce(new Error("cron runs slow path failed"));
 
-    await expect(refreshActiveTab(host as never)).resolves.toBeUndefined();
+    await expect(refreshActiveRoute(host as never)).resolves.toBeUndefined();
     await Promise.resolve();
 
     expectBufferedPerformanceEvent(host, "control-ui.cron.runs", {
@@ -650,7 +652,7 @@ describe("refreshActiveTab", () => {
     const runs = createDeferred<"ok">();
     mocks.loadCronRunsMock.mockReturnValueOnce(runs.promise);
 
-    await refreshActiveTab(host as never);
+    await refreshActiveRoute(host as never);
     host.tab = "chat";
     runs.resolve("ok");
     await Promise.resolve();
