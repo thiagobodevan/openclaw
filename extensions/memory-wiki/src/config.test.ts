@@ -6,7 +6,7 @@ import {
   type JsonSchemaObject,
 } from "openclaw/plugin-sdk/json-schema-runtime";
 import { describe, expect, it } from "vitest";
-import type { OpenClawConfig } from "./api.js";
+import type { OpenClawConfig } from "../api.js";
 import {
   DEFAULT_WIKI_RENDER_MODE,
   DEFAULT_WIKI_SEARCH_BACKEND,
