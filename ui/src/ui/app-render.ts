@@ -5,7 +5,6 @@ import { styleMap } from "lit/directives/style-map.js";
 import { hasOperatorAdminAccess, hasOperatorWriteAccess } from "../app/operator-access.ts";
 import { i18n, t } from "../i18n/index.ts";
 import { getSafeLocalStorage } from "../local-storage.ts";
-import { createRouteFeatures } from "../routes/route-features.ts";
 import {
   iconForRoute,
   isSettingsRoute,
@@ -17,6 +16,7 @@ import {
   titleForRoute,
   type RouteId,
 } from "../routes/route-registry.ts";
+import { createRouteTree } from "../routes/route-tree.ts";
 import {
   createChatSessionsLoadOverrides,
   hasAbortableSessionRun,
@@ -470,7 +470,7 @@ const lazySessions = createLazyView(() => import("./views/sessions.ts"), notifyL
 const lazySkills = createLazyView(() => import("./views/skills.ts"), notifyLazyViewChanged);
 const lazyUsage = createLazyView(() => import("./views/usage.ts"), notifyLazyViewChanged);
 const lazyWorkboard = createLazyView(() => import("./views/workboard.ts"), notifyLazyViewChanged);
-const routeFeatures = createRouteFeatures(notifyLazyViewChanged);
+const routeTree = createRouteTree({ notifyLazyViewChanged });
 
 type ChatWorkspaceFilesState = {
   activeId: string | null;
@@ -1182,7 +1182,7 @@ export function renderApp(state: AppViewState) {
   const cronNext = state.cronStatus?.nextWakeAtMs ?? null;
   const chatDisabledReason = state.connected ? null : t("chat.disconnected");
   const isChat = state.routeId === "chat";
-  const activeRouteFeature = routeFeatures.get(state.routeId);
+  const activeRoute = routeTree.get(state.routeId);
   const headerError = !isChat && state.lastError !== state.chatError ? state.lastError : null;
   const chatViewError = state.lastError;
   const chatHeaderHidden = isChat && (state.onboarding || state.chatHeaderControlsHidden);
@@ -2439,7 +2439,7 @@ export function renderApp(state: AppViewState) {
           ? "content--logs"
           : ""} ${state.routeId === "workboard"
           ? "content--workboard"
-          : ""} ${activeRouteFeature?.contentClass?.(state) ?? ""}"
+          : ""} ${activeRoute?.contentClass?.(state) ?? ""}"
       >
         ${state.updateStatusBanner
           ? html`<div class="callout ${state.updateStatusBanner.tone}" role="alert">
@@ -2487,7 +2487,7 @@ export function renderApp(state: AppViewState) {
                 <div class="page-sub">${subtitleForRoute(state.routeId)}</div>
               </div>
               <div class="page-meta">
-                ${activeRouteFeature?.renderHeaderControls?.(state) ?? nothing}
+                ${activeRoute?.renderHeaderControls?.(state) ?? nothing}
                 ${state.routeId === "dreams"
                   ? html`
                       <div class="dreaming-header-controls">
@@ -3344,7 +3344,7 @@ export function renderApp(state: AppViewState) {
               }),
             )
           : nothing}
-        ${activeRouteFeature?.renderView(state) ?? nothing}
+        ${activeRoute?.renderView?.(state) ?? nothing}
         ${state.routeId === "nodes"
           ? renderLazyView(lazyNodes, (m) =>
               m.renderNodes({
