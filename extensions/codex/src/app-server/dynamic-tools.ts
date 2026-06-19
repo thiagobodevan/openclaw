@@ -25,7 +25,6 @@ import {
   isMessagingToolSendAction,
   normalizeHeartbeatToolResponse,
   projectRuntimeToolInputSchema,
-  createDeliveredMessagingResultReconciler,
   runAgentHarnessAfterToolCallHook,
   sanitizeToolResult,
   setBeforeToolCallDiagnosticsEnabled,
@@ -289,12 +288,6 @@ export function createCodexDynamicToolBridge(params: {
         );
         const telemetryRawResult = sanitizeToolResult(rawResult);
         const rawIsError = isCodexToolResultError(rawResult);
-        const reconcileMiddlewareResult = createDeliveredMessagingResultReconciler({
-          toolName,
-          args: executedArgs,
-          rawResult,
-          rawIsError,
-        });
         const middlewareResult = await middlewareRunner.applyToolResultMiddleware({
           threadId: call.threadId,
           turnId: call.turnId,
@@ -304,14 +297,13 @@ export function createCodexDynamicToolBridge(params: {
           isError: rawIsError,
           result: rawResult,
         });
-        const reconciledMiddlewareResult = reconcileMiddlewareResult(middlewareResult);
         const result = await legacyExtensionRunner.applyToolResultExtensions({
           threadId: call.threadId,
           turnId: call.turnId,
           toolCallId: call.callId,
           toolName,
           args: structuredClone(executedArgs),
-          result: reconciledMiddlewareResult,
+          result: middlewareResult,
         });
         const resultIsError = rawIsError || isCodexToolResultError(result);
         notifyAgentToolResult(options?.onAgentToolResult, toolName, result, resultIsError);

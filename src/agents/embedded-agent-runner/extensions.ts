@@ -18,7 +18,6 @@ import {
 import { resolveContextWindowInfo } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
 import { createAgentToolResultMiddlewareRunner } from "../harness/tool-result-middleware.js";
-import { createDeliveredMessagingResultReconciler } from "../messaging-tool-result-fallback.js";
 import type { AgentToolResult } from "../runtime/index.js";
 import type { ExtensionFactory, SessionManager } from "../sessions/index.js";
 import { isToolResultError } from "../tool-result-error.js";
@@ -80,24 +79,16 @@ function buildAgentToolResultMiddlewareFactory(
       const adjustedInput = eventToolCallId
         ? peekAdjustedParamsForToolCall(eventToolCallId, runId)
         : undefined;
-      const args = recordFromUnknown(adjustedInput ?? event.input);
-      const reconcileMiddlewareResult = createDeliveredMessagingResultReconciler({
-        toolName: event.toolName,
-        args,
-        rawResult: current,
-        rawIsError: event.isError === true || inputHadErrorStatus,
-      });
-      const middlewareResult = await runner.applyToolResultMiddleware({
+      const result = await runner.applyToolResultMiddleware({
         threadId: event.threadId,
         turnId: event.turnId,
         toolCallId,
         toolName: event.toolName,
-        args,
+        args: recordFromUnknown(adjustedInput ?? event.input),
         cwd: ctx.cwd,
         isError: event.isError,
         result: current,
       });
-      const result = reconcileMiddlewareResult(middlewareResult);
       const isError = event.isError === true || inputHadErrorStatus || isToolResultError(result);
       if (eventToolCallId) {
         finalizeToolTerminalPresentation({
