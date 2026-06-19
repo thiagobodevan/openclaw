@@ -268,6 +268,7 @@ describe("snapshot cli", () => {
     await fs.mkdir(path.dirname(restorePath), { recursive: true });
     await fs.writeFile(`${restorePath}-wal`, "stale wal sidecar");
     await fs.writeFile(`${restorePath}-shm`, "stale shm sidecar");
+    await fs.writeFile(`${restorePath}-journal`, "stale rollback journal sidecar");
 
     await expect(
       snapshotRestoreCommand(syncedSnapshotPath, { target: restorePath, json: true }, runtime),
@@ -290,6 +291,7 @@ describe("snapshot cli", () => {
     });
     await expect(fileExists(`${restorePath}-wal`)).resolves.toBe(false);
     await expect(fileExists(`${restorePath}-shm`)).resolves.toBe(false);
+    await expect(fileExists(`${restorePath}-journal`)).resolves.toBe(false);
 
     const restored = new DatabaseSync(restorePath, { readOnly: true });
     try {

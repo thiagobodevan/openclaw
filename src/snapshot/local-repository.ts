@@ -169,6 +169,7 @@ async function removeSqliteSidecars(databasePath: string): Promise<void> {
   await Promise.all([
     fs.rm(`${databasePath}-wal`, { force: true }),
     fs.rm(`${databasePath}-shm`, { force: true }),
+    fs.rm(`${databasePath}-journal`, { force: true }),
   ]);
 }
 
