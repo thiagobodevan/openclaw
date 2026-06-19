@@ -33,7 +33,7 @@ Docs: https://docs.openclaw.ai
 
 ### Complete contribution record
 
-This audited record covers the complete v2026.6.8..origin/main history: 421 merged PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
+This audited record covers the complete v2026.6.8..origin/main history: 422 merged PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
 
 #### Pull requests
 
@@ -458,6 +458,7 @@ This audited record covers the complete v2026.6.8..origin/main history: 421 merg
 - **PR #92477** fix: migrate watch app to single-target app (Xcode 27+ compat). Thanks @zats and @joshavant.
 - **PR #94812** test(perf): compare saved CLI startup benchmarks. Thanks @FelixIsaac.
 - **PR #94856** fix(telegram): normalize all HTML tables before entity-escaping in rich messages. Related #94317. Thanks @zhangqueping and @jairrab.
+- **PR #91685** fix(cron): refuse keyless implicit isolated cron delivery inherited from shared agent-main bucket. Thanks @nxmxbbd.
 
 ## 2026.6.8
 
