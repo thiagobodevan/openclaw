@@ -2,6 +2,16 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.19-alpha.1
+
+### Changes
+
+- Alpha nightly from current `main`, including unreleased agent, release, plugin, UI, mobile, and channel changes since 2026.6.9.
+
+### Fixes
+
+- Release validation now gives Kova performance scenarios a longer timeout for alpha gates, and alpha packaging includes refreshed plugin version and shrinkwrap evidence for 2026.6.19-alpha.1.
+
 ## 2026.6.9
 
 ### Highlights
