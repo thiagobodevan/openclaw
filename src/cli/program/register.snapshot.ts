@@ -26,7 +26,9 @@ export function registerSnapshotCommand(program: Command): void {
   snapshot
     .command("create")
     .description("Create a consistent SQLite snapshot in a local repository")
-    .requiredOption("--db <path>", "SQLite database path")
+    .option("--db <path>", "SQLite database path")
+    .option("--target <target>", "OpenClaw database target (global)")
+    .option("--agent <id>", "OpenClaw agent id for the per-agent database")
     .requiredOption("--repository <path>", "Snapshot repository directory")
     .option("--id <id>", "Logical database id recorded in the manifest")
     .option("--kind <kind>", "Logical database kind recorded in the manifest")

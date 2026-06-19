@@ -12,13 +12,20 @@ import {
 } from "./snapshot.js";
 
 let workspaceDir: string;
+let previousOpenClawStateDir: string | undefined;
 
 describe("snapshot cli", () => {
   beforeEach(async () => {
+    previousOpenClawStateDir = process.env.OPENCLAW_STATE_DIR;
     workspaceDir = await fs.mkdtemp(path.join(tmpdir(), "snapshot-cli-"));
   });
 
   afterEach(async () => {
+    if (previousOpenClawStateDir === undefined) {
+      delete process.env.OPENCLAW_STATE_DIR;
+    } else {
+      process.env.OPENCLAW_STATE_DIR = previousOpenClawStateDir;
+    }
     await fs.rm(workspaceDir, { recursive: true, force: true });
   });
 
@@ -107,9 +114,89 @@ describe("snapshot cli", () => {
     await expect(snapshotCreateCommand({ repository: workspaceDir }, runtime)).resolves.toBe(2);
 
     expect(runtime.logs).toEqual([]);
-    expect(runtime.errors).toEqual(["Missing required --db value."]);
+    expect(runtime.errors).toEqual([
+      "Missing snapshot source. Provide one of --db <path>, --target global, or --agent <id>.",
+    ]);
+  });
+
+  it("creates a snapshot from the named global OpenClaw database", async () => {
+    const runtime = createRuntimeCapture();
+    const stateDir = path.join(workspaceDir, "state-root");
+    const dbPath = path.join(stateDir, "state", "openclaw.sqlite");
+    const repositoryPath = path.join(workspaceDir, "snapshots");
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    await createSqliteDatabase(dbPath, "from-global");
+
+    await expect(
+      snapshotCreateCommand({ target: "global", repository: repositoryPath, json: true }, runtime),
+    ).resolves.toBe(0);
+
+    const createReport = JSON.parse(runtime.logs.shift() ?? "{}") as {
+      snapshotPath?: string;
+      manifest?: { database?: { id?: string; kind?: string } };
+    };
+    expect(createReport.snapshotPath).toBeTruthy();
+    expect(createReport.manifest?.database).toMatchObject({
+      id: "global",
+      kind: "global-control-plane",
+    });
+    expect(runtime.errors).toEqual([]);
+  });
+
+  it("creates a snapshot from the named per-agent OpenClaw database", async () => {
+    const runtime = createRuntimeCapture();
+    const stateDir = path.join(workspaceDir, "state-root");
+    const dbPath = path.join(stateDir, "agents", "ops-team", "agent", "openclaw-agent.sqlite");
+    const repositoryPath = path.join(workspaceDir, "snapshots");
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    await createSqliteDatabase(dbPath, "from-agent");
+
+    await expect(
+      snapshotCreateCommand({ agent: "Ops Team", repository: repositoryPath, json: true }, runtime),
+    ).resolves.toBe(0);
+
+    const createReport = JSON.parse(runtime.logs.shift() ?? "{}") as {
+      snapshotPath?: string;
+      manifest?: { database?: { id?: string; kind?: string } };
+    };
+    expect(createReport.snapshotPath).toBeTruthy();
+    expect(createReport.manifest?.database).toMatchObject({
+      id: "agent:ops-team",
+      kind: "agent-data-plane",
+    });
+    expect(runtime.errors).toEqual([]);
+  });
+
+  it("rejects ambiguous snapshot source selectors", async () => {
+    const runtime = createRuntimeCapture();
+
+    await expect(
+      snapshotCreateCommand(
+        { db: "/tmp/source.sqlite", target: "global", repository: workspaceDir },
+        runtime,
+      ),
+    ).resolves.toBe(2);
+
+    expect(runtime.logs).toEqual([]);
+    expect(runtime.errors).toEqual([
+      "Choose only one snapshot source: --db, --target, or --agent.",
+    ]);
   });
 });
+
+async function createSqliteDatabase(dbPath: string, value: string): Promise<void> {
+  await fs.mkdir(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE entries (value TEXT NOT NULL);
+    `);
+    db.prepare("INSERT INTO entries (value) VALUES (?)").run(value);
+  } finally {
+    db.close();
+  }
+}
 
 function createRuntimeCapture(): RuntimeEnv & {
   readonly logs: string[];

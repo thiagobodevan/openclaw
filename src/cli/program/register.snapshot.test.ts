@@ -82,6 +82,30 @@ describe("registerSnapshotCommand", () => {
     );
   });
 
+  it("runs snapshot create for a named global target", async () => {
+    await runCli(["snapshot", "create", "--target", "global", "--repository", "/tmp/snapshots"]);
+
+    expect(mocks.snapshotCreateCommand).toHaveBeenCalledWith(
+      {
+        target: "global",
+        repository: "/tmp/snapshots",
+      },
+      mocks.runtime,
+    );
+  });
+
+  it("runs snapshot create for a named agent target", async () => {
+    await runCli(["snapshot", "create", "--agent", "main", "--repository", "/tmp/snapshots"]);
+
+    expect(mocks.snapshotCreateCommand).toHaveBeenCalledWith(
+      {
+        agent: "main",
+        repository: "/tmp/snapshots",
+      },
+      mocks.runtime,
+    );
+  });
+
   it("runs snapshot list with forwarded options", async () => {
     await runCli(["snapshot", "list", "--repository", "/tmp/snapshots", "--json"]);
 

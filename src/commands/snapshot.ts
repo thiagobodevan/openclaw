@@ -1,14 +1,19 @@
 // Core command handlers for SQLite snapshot artifacts.
+import { normalizeAgentId } from "../routing/session-key.js";
+import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { createLocalSqliteSnapshotProvider } from "../snapshot/local-repository.js";
 import type {
   SnapshotManifest,
   SnapshotSummary,
   SnapshotVerificationResult,
 } from "../snapshot/snapshot-provider.js";
-import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+import { resolveOpenClawAgentSqlitePath } from "../state/openclaw-agent-db.paths.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 
 export interface SnapshotCreateOptions {
   readonly db?: string;
+  readonly target?: string;
+  readonly agent?: string;
   readonly repository?: string;
   readonly id?: string;
   readonly kind?: string;
@@ -48,18 +53,24 @@ type SnapshotListReport = {
   readonly snapshots: readonly SnapshotSummary[];
 };
 
+type SnapshotCreateSource = {
+  readonly path: string;
+  readonly id?: string;
+  readonly kind?: string;
+};
+
 export async function snapshotCreateCommand(
   options: SnapshotCreateOptions,
   runtime: RuntimeEnv,
 ): Promise<number> {
   try {
     const repositoryPath = requireOption(options.repository, "--repository");
-    const dbPath = requireOption(options.db, "--db");
+    const source = resolveSnapshotCreateSource(options);
     const provider = createLocalSqliteSnapshotProvider({ repositoryPath });
     const result = await provider.create({
-      path: dbPath,
-      ...(options.id ? { id: options.id } : {}),
-      ...(options.kind ? { kind: options.kind } : {}),
+      path: source.path,
+      ...(source.id ? { id: source.id } : {}),
+      ...(source.kind ? { kind: source.kind } : {}),
     });
     writeCreateReport(
       { ok: true, snapshotPath: result.ref.path, manifest: result.manifest },
@@ -123,6 +134,46 @@ export async function snapshotListCommand(
     runtime.error(err instanceof Error ? err.message : String(err));
     return 2;
   }
+}
+
+function resolveSnapshotCreateSource(options: SnapshotCreateOptions): SnapshotCreateSource {
+  const selectors = [
+    hasValue(options.db),
+    hasValue(options.target),
+    hasValue(options.agent),
+  ].filter(Boolean).length;
+  if (selectors === 0) {
+    throw new Error(
+      "Missing snapshot source. Provide one of --db <path>, --target global, or --agent <id>.",
+    );
+  }
+  if (selectors > 1) {
+    throw new Error("Choose only one snapshot source: --db, --target, or --agent.");
+  }
+  if (hasValue(options.db)) {
+    return {
+      path: requireValue(options.db, "--db"),
+      ...(options.id ? { id: options.id } : {}),
+      ...(options.kind ? { kind: options.kind } : {}),
+    };
+  }
+  if (hasValue(options.target)) {
+    const target = requireValue(options.target, "--target").toLowerCase();
+    if (target !== "global") {
+      throw new Error(`Unsupported snapshot target "${target}". Supported targets: global.`);
+    }
+    return {
+      path: resolveOpenClawStateSqlitePath(),
+      id: options.id ?? "global",
+      kind: options.kind ?? "global-control-plane",
+    };
+  }
+  const agentId = normalizeAgentId(requireValue(options.agent, "--agent"));
+  return {
+    path: resolveOpenClawAgentSqlitePath({ agentId }),
+    id: options.id ?? `agent:${agentId}`,
+    kind: options.kind ?? "agent-data-plane",
+  };
 }
 
 function writeCreateReport(
@@ -191,6 +242,10 @@ function writeJson(value: unknown, runtime: RuntimeEnv): void {
 
 function requireOption(value: string | undefined, flag: string): string {
   return requireValue(value, flag);
+}
+
+function hasValue(value: string | undefined): boolean {
+  return value !== undefined && value.trim() !== "";
 }
 
 function requireValue(value: string | undefined, label: string): string {
