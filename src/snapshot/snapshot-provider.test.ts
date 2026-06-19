@@ -68,6 +68,16 @@ describe("snapshot provider", () => {
       ).rejects.toMatchObject({
         code: "ENOENT",
       });
+      const artifact = new DatabaseSync(path.join(result.ref.path, "database.sqlite"), {
+        readOnly: true,
+      });
+      try {
+        expect(artifact.prepare("PRAGMA user_version").get()).toEqual({
+          user_version: result.manifest.database.userVersion,
+        });
+      } finally {
+        artifact.close();
+      }
 
       const verified = await provider.verify(result.ref);
       expect(verified).toMatchObject({

@@ -17,10 +17,8 @@ export async function createVacuumedSqliteSnapshot(params: {
     allowExtension: true,
     readOnly: true,
   });
-  let userVersion: number;
   try {
     source.exec("PRAGMA busy_timeout = 30000;");
-    userVersion = readSqliteUserVersion(source);
     // Loading sqlite-vec keeps vec0-backed memory indexes vacuumable while
     // VACUUM INTO removes deleted-page remnants before the snapshot is stored.
     await loadSqliteVecExtension({ db: source });
@@ -29,6 +27,7 @@ export async function createVacuumedSqliteSnapshot(params: {
     source.close();
   }
   await fs.chmod(params.targetPath, 0o600);
+  const userVersion = readSqliteUserVersionFromPath(params.targetPath);
   return { userVersion };
 }
 
@@ -51,4 +50,14 @@ function readSqliteUserVersion(db: DatabaseSync): number {
   const row = db.prepare("PRAGMA user_version;").get() as { user_version: number | bigint };
   const value = row.user_version;
   return typeof value === "bigint" ? Number(value) : value;
+}
+
+function readSqliteUserVersionFromPath(databasePath: string): number {
+  const sqlite = requireNodeSqlite();
+  const db = new sqlite.DatabaseSync(databasePath, { readOnly: true });
+  try {
+    return readSqliteUserVersion(db);
+  } finally {
+    db.close();
+  }
 }
