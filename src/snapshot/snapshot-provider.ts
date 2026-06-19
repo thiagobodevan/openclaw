@@ -5,6 +5,7 @@ export type SnapshotDatabaseRef = {
   readonly path: string;
   readonly id?: string;
   readonly kind?: string;
+  readonly sanitize?: "global-state";
 };
 
 export type SnapshotArtifact = {

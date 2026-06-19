@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   createVacuumedSqliteSnapshot,
   verifySqliteDatabaseIntegrity,
@@ -56,6 +57,9 @@ class LocalSqliteSnapshotProvider implements SqliteSnapshotProvider {
         sourcePath,
         targetPath: artifactPath,
       });
+      if (dbRef.sanitize === "global-state") {
+        sanitizeGlobalStateSqliteSnapshot(artifactPath);
+      }
       const manifest: SnapshotManifest = {
         schemaVersion: 1,
         snapshotId,
@@ -134,6 +138,25 @@ class LocalSqliteSnapshotProvider implements SqliteSnapshotProvider {
       left.manifest.createdAt.localeCompare(right.manifest.createdAt),
     );
   }
+}
+
+function sanitizeGlobalStateSqliteSnapshot(databasePath: string): void {
+  const db = new DatabaseSync(databasePath);
+  try {
+    if (tableExistsSql(db, "delivery_queue_entries")) {
+      db.prepare("DELETE FROM delivery_queue_entries").run();
+      db.exec("VACUUM;");
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function tableExistsSql(db: DatabaseSync, tableName: string): boolean {
+  const row = db
+    .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(tableName) as { ok?: unknown } | undefined;
+  return row?.ok === 1;
 }
 
 function buildSnapshotId(now: Date, sourcePath: string, suffix: string): string {

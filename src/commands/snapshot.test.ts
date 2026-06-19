@@ -147,6 +147,55 @@ describe("snapshot cli", () => {
     expect(runtime.errors).toEqual([]);
   });
 
+  it("scrubs transient delivery queue rows from named global snapshots", async () => {
+    const runtime = createRuntimeCapture();
+    const stateDir = path.join(workspaceDir, "state-root");
+    const dbPath = path.join(stateDir, "state", "openclaw.sqlite");
+    const repositoryPath = path.join(workspaceDir, "snapshots");
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.exec(`
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE entries (value TEXT NOT NULL);
+        CREATE TABLE delivery_queue_entries (id TEXT PRIMARY KEY);
+        INSERT INTO entries (value) VALUES ('durable-global');
+        INSERT INTO delivery_queue_entries (id) VALUES ('transient-queue');
+      `);
+
+      await expect(
+        snapshotCreateCommand(
+          { target: "global", repository: repositoryPath, json: true },
+          runtime,
+        ),
+      ).resolves.toBe(0);
+
+      const createReport = JSON.parse(runtime.logs.shift() ?? "{}") as {
+        snapshotPath?: string;
+      };
+      const artifactPath = path.join(createReport.snapshotPath ?? "", "database.sqlite");
+      const artifact = new DatabaseSync(artifactPath, { readOnly: true });
+      try {
+        expect(artifact.prepare("SELECT value FROM entries").all()).toEqual([
+          { value: "durable-global" },
+        ]);
+        expect(
+          artifact.prepare("SELECT COUNT(*) AS count FROM delivery_queue_entries").get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        artifact.close();
+      }
+
+      expect(db.prepare("SELECT COUNT(*) AS count FROM delivery_queue_entries").get()).toEqual({
+        count: 1,
+      });
+    } finally {
+      db.close();
+    }
+    expect(runtime.errors).toEqual([]);
+  });
+
   it("creates a snapshot from the named per-agent OpenClaw database", async () => {
     const runtime = createRuntimeCapture();
     const stateDir = path.join(workspaceDir, "state-root");

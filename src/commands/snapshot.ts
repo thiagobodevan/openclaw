@@ -58,6 +58,7 @@ type SnapshotCreateSource = {
   readonly path: string;
   readonly id?: string;
   readonly kind?: string;
+  readonly sanitize?: "global-state";
 };
 
 export async function snapshotCreateCommand(
@@ -72,6 +73,7 @@ export async function snapshotCreateCommand(
       path: source.path,
       ...(source.id ? { id: source.id } : {}),
       ...(source.kind ? { kind: source.kind } : {}),
+      ...(source.sanitize ? { sanitize: source.sanitize } : {}),
     });
     writeCreateReport(
       { ok: true, snapshotPath: result.ref.path, manifest: result.manifest },
@@ -165,6 +167,7 @@ async function resolveSnapshotCreateSource(
         path: await realpathIfExists(resolveOpenClawStateSqlitePath()),
         id: options.id ?? "global",
         kind: options.kind ?? "global-control-plane",
+        sanitize: "global-state",
       };
     }
     throw new Error(`Unsupported snapshot target "${target}". Supported targets: global.`);
