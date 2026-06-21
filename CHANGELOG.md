@@ -2,6 +2,16 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.21-alpha.1
+
+### Changes
+
+- Alpha nightly from current `main`, including unreleased agent, release, plugin, UI, mobile, and channel changes since 2026.6.9.
+
+### Fixes
+
+- Release validation includes refreshed Plugin SDK API and Swift protocol baselines, stabilized Feishu media temp-home tests, typed run-node signal injection, and Codex auth test isolation for the alpha release path.
+
 ## 2026.6.9
 
 ### Highlights
