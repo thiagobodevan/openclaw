@@ -1,5 +1,5 @@
 // Control UI module implements app tool stream behavior.
-import { updateActivityFromToolEvent, type ActivityEntry } from "./activity-model.ts";
+import { updateActivityFromToolEvent, type ActivityEntry } from "../pages/activity/data.ts";
 import { createChatModelOverride } from "./chat-model-ref.ts";
 import type { ChatModelOverride } from "./chat-model-ref.types.ts";
 import { formatUnknownText, truncateText } from "./format.ts";

@@ -4,6 +4,7 @@ import { state } from "lit/decorators.js";
 import { appRouter, createApplicationContext, type ApplicationContext } from "../app-routes.ts";
 import { createRouterOutletSnapshot } from "../app/router-outlet.ts";
 import { i18n, I18nController, isSupportedLocale, t } from "../i18n/index.ts";
+import type { ActivityEntry, ActivityStatus } from "../pages/activity/data.ts";
 import {
   handleAbortChat as handleAbortChatInternal,
   handleChatDraftChange as handleChatDraftChangeInternal,
@@ -19,7 +20,6 @@ import {
 import { loadCron as loadCronPage } from "../pages/loaders.ts";
 import { loadOverview as loadOverviewPage } from "../pages/overview/data.ts";
 import { type SkillWorkshopState } from "../pages/skill-workshop/data.ts";
-import type { ActivityEntry, ActivityStatus } from "./activity-model.ts";
 import {
   handleChannelConfigReload as handleChannelConfigReloadInternal,
   handleChannelConfigSave as handleChannelConfigSaveInternal,
