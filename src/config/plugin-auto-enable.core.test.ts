@@ -1196,32 +1196,30 @@ describe("applyPluginAutoEnable core", () => {
   });
 
   it("does not reuse same-turn auto-enable results after discovery mutates in place", () => {
-    const config: OpenClawConfig = {};
+    const config: OpenClawConfig = {
+      channels: { apn: { someKey: "value" } },
+    };
     const mutableDiscovery: PluginDiscoveryResult = { candidates: [], diagnostics: [] };
-    const manifestRegistry = makeRegistry([{ id: "irc-plugin", channels: ["irc"] }]);
-    const configuredEnv = makeIsolatedEnv({
-      IRC_HOST: "irc.libera.chat",
-      IRC_NICK: "openclaw-bot",
-    });
+    const manifestRegistry = makeRegistry([{ id: "apn-channel", channels: ["apn"] }]);
 
     const first = applyPluginAutoEnable({
       config,
       discovery: mutableDiscovery,
-      env: configuredEnv,
+      env,
       manifestRegistry,
     });
     mutableDiscovery.candidates.push(
-      makeBundledChannelCandidate({ pluginId: "irc-plugin", channelId: "irc" }),
+      makeBundledChannelCandidate({ pluginId: "discovery-only", channelId: "apn" }),
     );
     const second = applyPluginAutoEnable({
       config,
       discovery: mutableDiscovery,
-      env: configuredEnv,
+      env,
       manifestRegistry,
     });
 
-    expect(first.config.plugins?.entries?.["irc-plugin"]).toBeUndefined();
-    expect(second.config.plugins?.entries?.["irc-plugin"]?.enabled).toBe(true);
+    expect(first.config.plugins?.entries?.["apn-channel"]?.enabled).toBe(true);
+    expect(second.config.plugins?.entries?.["apn-channel"]?.enabled).toBe(true);
     expect(second).not.toBe(first);
   });
 
