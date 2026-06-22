@@ -1,7 +1,7 @@
-// Control UI controller manages devices gateway state.
-import { clearDeviceAuthToken, storeDeviceAuthToken } from "../device-auth.ts";
-import { loadOrCreateDeviceIdentity } from "../device-identity.ts";
-import type { GatewayBrowserClient } from "../gateway.ts";
+// Nodes page data owns device pairing and token operations.
+import { clearDeviceAuthToken, storeDeviceAuthToken } from "../../ui/device-auth.ts";
+import { loadOrCreateDeviceIdentity } from "../../ui/device-identity.ts";
+import type { GatewayBrowserClient } from "../../ui/gateway.ts";
 
 export type DeviceTokenSummary = {
   role: string;

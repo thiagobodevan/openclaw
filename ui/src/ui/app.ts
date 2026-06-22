@@ -24,6 +24,8 @@ import {
 import { loadCronPage } from "../pages/cron/data.ts";
 import { DEFAULT_CRON_FORM } from "../pages/cron/data.ts";
 import { DEFAULT_LOG_LEVEL_FILTERS, type LogEntry, type LogLevel } from "../pages/logs/data.ts";
+import type { DevicePairingList } from "../pages/nodes/devices.ts";
+import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "../pages/nodes/exec-approvals.ts";
 import { loadOverview as loadOverviewPage } from "../pages/overview/data.ts";
 import { type SkillWorkshopState } from "../pages/skill-workshop/data.ts";
 import type {
@@ -99,7 +101,6 @@ import type { ChatRunUiStatus } from "./chat/run-lifecycle.ts";
 import type { ChatMessageCache } from "./chat/session-message-cache.ts";
 import type { ChatSideResult } from "./chat/side-result.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
-import type { DevicePairingList } from "./controllers/devices.ts";
 import type {
   DreamingStatus,
   WikiImportInsights,
@@ -111,7 +112,6 @@ import {
   refreshPendingApprovalQueue,
   type ExecApprovalRequest,
 } from "./controllers/exec-approval.ts";
-import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./controllers/exec-approvals.ts";
 import { importCustomThemeFromUrl } from "./custom-theme.ts";
 import {
   clearActiveFloatingTooltips,

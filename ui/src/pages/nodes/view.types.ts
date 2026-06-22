@@ -1,6 +1,6 @@
-// Control UI type declarations define nodes contracts.
-import type { DevicePairingList } from "../controllers/devices.ts";
-import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "../controllers/exec-approvals.ts";
+// Nodes page view contracts.
+import type { DevicePairingList } from "./devices.ts";
+import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./exec-approvals.ts";
 
 export type NodesProps = {
   loading: boolean;

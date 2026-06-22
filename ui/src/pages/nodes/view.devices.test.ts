@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import { render } from "lit";
 import { describe, expect, it } from "vitest";
-import { renderNodes, type NodesProps } from "./nodes.ts";
+import { renderNodes, type NodesProps } from "./view.ts";
 
 function baseProps(overrides: Partial<NodesProps> = {}): NodesProps {
   return {

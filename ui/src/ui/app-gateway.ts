@@ -29,6 +29,7 @@ import {
   type ChatEventPayload,
   type ChatState,
 } from "../pages/chat/gateway.ts";
+import { loadDevices, type DevicesState } from "../pages/nodes/devices.ts";
 import {
   applySessionsChangedEvent,
   loadSessions,
@@ -59,7 +60,6 @@ import {
   type AssistantIdentityState,
 } from "./controllers/assistant-identity.ts";
 import { loadControlUiBootstrapConfig } from "./controllers/control-ui-bootstrap.ts";
-import { loadDevices, type DevicesState } from "./controllers/devices.ts";
 import type { ExecApprovalRequest } from "./controllers/exec-approval.ts";
 import {
   clearResolvedExecApprovalPrompt,

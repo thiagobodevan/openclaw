@@ -59,7 +59,7 @@ vi.mock("./app-tool-stream.ts", () => ({
   handleSessionOperationEvent: handleSessionOperationEventMock,
   resetToolStream: vi.fn(),
 }));
-vi.mock("./controllers/agents.ts", () => ({
+vi.mock("../pages/agents/data.ts", () => ({
   loadAgents: vi.fn(),
   loadToolsCatalog: vi.fn(),
 }));
@@ -70,7 +70,7 @@ vi.mock("../pages/chat/gateway.ts", () => ({
   loadChatHistory: loadChatHistoryMock,
   handleChatEvent: handleChatEventMock,
 }));
-vi.mock("./controllers/devices.ts", () => ({
+vi.mock("../pages/nodes/devices.ts", () => ({
   loadDevices: vi.fn(),
 }));
 vi.mock("./controllers/exec-approval.ts", () => ({
@@ -83,7 +83,7 @@ vi.mock("./controllers/exec-approval.ts", () => ({
   pruneExecApprovalQueue: vi.fn((queue) => queue),
   removeExecApproval: vi.fn(),
 }));
-vi.mock("./controllers/nodes.ts", () => ({
+vi.mock("../pages/nodes/data.ts", () => ({
   loadNodes: vi.fn(),
 }));
 vi.mock("../pages/sessions/data.ts", () => ({
@@ -107,12 +107,12 @@ afterAll(() => {
   vi.doUnmock("../pages/chat/data.ts");
   vi.doUnmock("./app-settings.ts");
   vi.doUnmock("./app-tool-stream.ts");
-  vi.doUnmock("./controllers/agents.ts");
+  vi.doUnmock("../pages/agents/data.ts");
   vi.doUnmock("./controllers/assistant-identity.ts");
   vi.doUnmock("../pages/chat/gateway.ts");
-  vi.doUnmock("./controllers/devices.ts");
+  vi.doUnmock("../pages/nodes/devices.ts");
   vi.doUnmock("./controllers/exec-approval.ts");
-  vi.doUnmock("./controllers/nodes.ts");
+  vi.doUnmock("../pages/nodes/data.ts");
   vi.doUnmock("../pages/sessions/data.ts");
   vi.doUnmock("./gateway.ts");
   vi.resetModules();
