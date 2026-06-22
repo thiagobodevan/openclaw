@@ -38,6 +38,7 @@ import {
   type ChatInputHistoryKeyInput,
   type ChatInputHistoryKeyResult,
 } from "../pages/chat/data.ts";
+import { exportChatMarkdown } from "../pages/chat/export.ts";
 import {
   reconcileRealtimeTalkCatalogSelection,
   type RealtimeTalkCatalogProvider,
@@ -105,7 +106,6 @@ import {
 } from "./app-tool-stream.ts";
 import type { AppViewState } from "./app-view-state.ts";
 import { normalizeAssistantIdentity } from "./assistant-identity.ts";
-import { exportChatMarkdown } from "./chat/export.ts";
 import { loadAssistantIdentity as loadAssistantIdentityInternal } from "./controllers/assistant-identity.ts";
 import {
   dismissExecApprovalPrompt,
