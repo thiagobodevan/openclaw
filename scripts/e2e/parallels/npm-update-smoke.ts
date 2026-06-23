@@ -1052,9 +1052,13 @@ export class NpmUpdateSmoke {
       "openclaw-parallels-npm-update-macos",
       { execArgs: macosUpdateExec.execArgs, mode: "700" },
     );
-    run("prlctl", ["exec", this.macosVm, "/usr/sbin/chown", macosUpdateExec.ownerUser, scriptPath], {
-      timeoutMs: 30_000,
-    });
+    run(
+      "prlctl",
+      ["exec", this.macosVm, "/usr/sbin/chown", macosUpdateExec.ownerUser, scriptPath],
+      {
+        timeoutMs: 30_000,
+      },
+    );
     try {
       const status = await this.runStreamingToJobLog(
         "prlctl",
