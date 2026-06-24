@@ -472,6 +472,7 @@ function resolveConfigStatMetadata(
 
 function resolveConfigWriteSuspiciousReasons(params: {
   existsBefore: boolean;
+  unreadableBefore: boolean;
   previousBytes: number | null;
   nextBytes: number | null;
   hasMetaBefore: boolean;
@@ -481,6 +482,9 @@ function resolveConfigWriteSuspiciousReasons(params: {
   const reasons: string[] = [];
   if (!params.existsBefore) {
     return reasons;
+  }
+  if (params.unreadableBefore) {
+    reasons.push("unreadable-config-before-write");
   }
   if (
     typeof params.previousBytes === "number" &&
@@ -505,6 +509,7 @@ function resolveConfigWriteBlockingReasons(
 ): string[] {
   return suspicious.filter(
     (reason) =>
+      reason === "unreadable-config-before-write" ||
       (reason.startsWith("size-drop:") && options.allowConfigSizeDrop !== true) ||
       reason === "gateway-mode-removed",
   );
@@ -1318,6 +1323,7 @@ function createConfigFileSnapshot(params: {
   valid: boolean;
   runtimeConfig: OpenClawConfig;
   hash?: string;
+  readError?: { code: string | null };
   issues: ConfigFileSnapshot["issues"];
   warnings: ConfigFileSnapshot["warnings"];
   legacyIssues: LegacyConfigIssue[];
@@ -1335,6 +1341,7 @@ function createConfigFileSnapshot(params: {
     runtimeConfig,
     config: runtimeConfig,
     hash: params.hash,
+    ...(params.readError ? { readError: params.readError } : {}),
     issues: params.issues,
     warnings: params.warnings,
     legacyIssues: params.legacyIssues,
@@ -2081,6 +2088,7 @@ export function createConfigIO(
           valid: false,
           runtimeConfig: fallbackSourceConfig,
           hash: fallbackHash,
+          readError: { code: nodeErr?.code ?? null },
           issues: [{ path: "", message }],
           warnings: [],
           legacyIssues: [],
@@ -2360,6 +2368,7 @@ export function createConfigIO(
     const gatewayModeAfter = resolveGatewayMode(stampedOutputConfig);
     const suspiciousReasons = resolveConfigWriteSuspiciousReasons({
       existsBefore: snapshot.exists,
+      unreadableBefore: snapshot.readError != null,
       previousBytes,
       nextBytes,
       hasMetaBefore,
