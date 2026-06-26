@@ -127,12 +127,15 @@ function shouldDescendMemoryEntry(
   return entry.kind === "directory" && entry.name !== ".openclaw-repair";
 }
 
+// Returns false when fs-safe reported a failed readdir (root or any subtree)
+// in `failedDirs`: the listing is then incomplete and destructive callers must
+// not treat unseen files as deleted.
 async function collectMemoryFilesFromDir(
   dir: string,
   files: string[],
   multimodal?: MemoryMultimodalSettings,
   shouldSkipPath?: (absPath: string) => boolean,
-): Promise<void> {
+): Promise<boolean> {
   const scan = await walkDirectory(dir, {
     symlinks: "skip",
     descend: (entry) => shouldDescendMemoryEntry(entry, shouldSkipPath),
@@ -142,14 +145,14 @@ async function collectMemoryFilesFromDir(
       isAllowedMemoryFilePath(entry.path, multimodal),
   });
   files.push(...scan.entries.map((entry) => entry.path));
+  return scan.failedDirs.length === 0;
 }
 
 // Result of enumerating memory files. `ok` is false when a listing root (the
-// workspace memory dir, an extra path, or the root memory file stat) failed
-// for a non-missing reason; destructive callers (stale-row pruning) must then
-// skip rather than treat unseen files as deleted. Failures in subtrees below
-// the probed roots stay invisible (fs-safe walkDirectory swallows them); the
-// flag guards the whole-index wipe hazard, not per-file drift.
+// workspace memory dir, an extra path, or the root memory file stat) failed for
+// a non-missing reason, or when fs-safe walkDirectory reported a failed readdir
+// at any depth (failedDirs). Destructive callers (stale-row pruning) must then
+// skip rather than treat unseen files as deleted.
 export type MemoryFilesScanResult = { ok: boolean; files: string[] };
 
 export async function scanMemoryFiles(
@@ -196,11 +199,15 @@ export async function scanMemoryFiles(
   try {
     const dirStat = await fs.lstat(memoryDir);
     if (!dirStat.isSymbolicLink() && dirStat.isDirectory()) {
-      // fs-safe walkDirectory swallows readdir errors, even at the root, so
-      // probe the root read explicitly: a transient failure must flag the
-      // scan instead of reading as an empty dir and triggering mass pruning.
-      await fs.readdir(memoryDir);
-      await collectMemoryFilesFromDir(memoryDir, result, multimodal, shouldSkipWorkspaceMemoryPath);
+      const scanOk = await collectMemoryFilesFromDir(
+        memoryDir,
+        result,
+        multimodal,
+        shouldSkipWorkspaceMemoryPath,
+      );
+      if (!scanOk) {
+        ok = false;
+      }
     }
   } catch (err) {
     if (!isFileMissingError(err)) {
@@ -220,15 +227,15 @@ export async function scanMemoryFiles(
           continue;
         }
         if (stat.isDirectory()) {
-          // Same root-read probe as the memory dir: walkDirectory cannot
-          // report a failed readdir.
-          await fs.readdir(inputPath);
-          await collectMemoryFilesFromDir(
+          const scanOk = await collectMemoryFilesFromDir(
             inputPath,
             result,
             multimodal,
             shouldSkipWorkspaceMemoryPath,
           );
+          if (!scanOk) {
+            ok = false;
+          }
           continue;
         }
         if (stat.isFile() && isAllowedMemoryFilePath(inputPath, multimodal)) {

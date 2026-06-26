@@ -190,9 +190,9 @@ describe("memory host SDK package internals", () => {
   });
 
   it("flags the scan when the memory dir readdir fails after a successful lstat", async () => {
-    // fs-safe walkDirectory swallows readdir errors and returns an empty walk,
-    // so the scan must probe the root read itself or a permission/NFS blip on
-    // readdir would masquerade as an authoritatively empty dir.
+    // fs-safe 0.4.0 surfaces a failed readdir via walkDirectory's failedDirs;
+    // the scan must flag it so a permission/NFS blip on readdir does not
+    // masquerade as an authoritatively empty dir.
     const tmpDir = getTmpDir();
     const memoryDir = path.join(tmpDir, "memory");
     fsSync.mkdirSync(memoryDir, { recursive: true });
