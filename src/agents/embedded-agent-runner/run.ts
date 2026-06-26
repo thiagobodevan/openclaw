@@ -282,7 +282,7 @@ function buildContextEngineCompactionSessionTarget(params: {
 }): ContextEngineSessionTarget {
   const sqliteMarker = parseSqliteSessionFileMarker(params.sessionFile);
   const agentId = params.sessionTarget?.agentId ?? sqliteMarker?.agentId ?? params.agentId;
-  const sessionKey = params.sessionTarget?.sessionKey ?? params.sessionKey;
+  const sessionKey = params.sessionTarget?.sessionKey ?? params.sessionKey ?? params.sessionId;
   const storePath =
     params.sessionTarget?.storePath ??
     sqliteMarker?.storePath ??
@@ -2703,14 +2703,14 @@ async function runEmbeddedAgentInternal(
                   contextEngine,
                   {
                     sessionId: activeSessionId,
-                    sessionKey: params.sessionKey,
+                    sessionKey: resolvedSessionKey,
                     agentId: sessionAgentId,
                     sessionTarget: buildContextEngineCompactionSessionTarget({
                       agentId: sessionAgentId,
                       config: params.config,
                       sessionFile: activeSessionFile,
                       sessionId: activeSessionId,
-                      sessionKey: params.sessionKey,
+                      sessionKey: resolvedSessionKey,
                       sessionTarget: activeSessionTarget,
                     }),
                     tokenBudget: ctxInfo.tokens,
@@ -2916,14 +2916,14 @@ async function runEmbeddedAgentInternal(
                   contextEngine,
                   {
                     sessionId: activeSessionId,
-                    sessionKey: params.sessionKey,
+                    sessionKey: resolvedSessionKey,
                     agentId: sessionAgentId,
                     sessionTarget: buildContextEngineCompactionSessionTarget({
                       agentId: sessionAgentId,
                       config: params.config,
                       sessionFile: activeSessionFile,
                       sessionId: activeSessionId,
-                      sessionKey: params.sessionKey,
+                      sessionKey: resolvedSessionKey,
                       sessionTarget: activeSessionTarget,
                     }),
                     tokenBudget: ctxInfo.tokens,
