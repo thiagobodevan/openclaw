@@ -10,6 +10,7 @@ import { defaultRuntime } from "../runtime.js";
 import { createClackPrompter } from "../wizard/clack-prompter.js";
 import { WizardCancelledError } from "../wizard/prompts.js";
 import { runSetupWizard } from "../wizard/setup.js";
+import { runBrowserSetup } from "./onboard-browser.js";
 import type { OnboardOptions } from "./onboard-types.js";
 
 /** Runs the interactive setup wizard and maps user cancellation to exit code 1. */
@@ -17,6 +18,31 @@ export async function runInteractiveSetup(
   opts: OnboardOptions,
   runtime: RuntimeEnv = defaultRuntime,
 ) {
+  if (opts.browser !== false && opts.mode !== "remote") {
+    const browser = await runBrowserSetup(opts, runtime);
+    if (browser.started) {
+      if (browser.terminalStatus && browser.terminalStatus !== "done") {
+        runtime.error(browser.reason ?? "Browser onboarding did not complete.");
+        runtime.exit(1);
+      }
+      return;
+    }
+    if (!browser.terminalOnly) {
+      const fallbackPrompter = createClackPrompter();
+      const useTerminal = await fallbackPrompter.confirm({
+        message: [
+          "Browser onboarding is unavailable.",
+          browser.reason ?? "The setup page could not be opened.",
+          "Continue with terminal onboarding?",
+        ].join("\n"),
+        initialValue: true,
+      });
+      if (!useTerminal) {
+        runtime.exit(1);
+        return;
+      }
+    }
+  }
   const prompter = createClackPrompter();
   let exitCode: number | null = null;
   try {

@@ -1,6 +1,5 @@
 // Control UI module implements main behavior.
 import "./styles.css";
-import "./ui/app.ts";
 import { inferControlUiPublicAssetPath } from "./ui/public-assets.ts";
 
 type ViteImportMeta = ImportMeta & {
@@ -13,10 +12,17 @@ declare const OPENCLAW_CONTROL_UI_BUILD_ID: string | undefined;
 
 const isProd = (import.meta as ViteImportMeta).env?.PROD === true;
 const currentControlUiBuildId = OPENCLAW_CONTROL_UI_BUILD_ID || "dev";
+const isSetupPage =
+  /\/setup\/?$/u.test(window.location.pathname) &&
+  new URLSearchParams(window.location.search).get("openclawSetup") === "1";
 
 syncDocumentPublicAssetLinks();
 
-if (isProd && "serviceWorker" in navigator) {
+if (isSetupPage) {
+  document.title = "OpenClaw Setup";
+  void import("./setup/main.ts");
+} else if (isProd && "serviceWorker" in navigator) {
+  void import("./ui/app.ts");
   const swUrl = new URL(inferControlUiPublicAssetPath("sw.js"), window.location.origin);
   swUrl.searchParams.set("v", currentControlUiBuildId);
   navigator.serviceWorker.addEventListener("message", (event) => {
@@ -26,12 +32,15 @@ if (isProd && "serviceWorker" in navigator) {
   });
   void navigator.serviceWorker.register(swUrl, { updateViaCache: "none" });
 } else if (!isProd && "serviceWorker" in navigator) {
+  void import("./ui/app.ts");
   // Unregister any leftover dev SW to avoid stale cache issues.
   void navigator.serviceWorker.getRegistrations().then((registrations) => {
     for (const r of registrations) {
       void r.unregister();
     }
   });
+} else {
+  void import("./ui/app.ts");
 }
 
 function syncDocumentPublicAssetLinks() {
@@ -49,5 +58,11 @@ function setDocumentLinkHref(
   if (!link) {
     return;
   }
-  link.href = inferControlUiPublicAssetPath(asset);
+  const setupBasePath = isSetupPage
+    ? window.location.pathname.replace(/\/setup\/?$/u, "")
+    : undefined;
+  link.href = inferControlUiPublicAssetPath(
+    asset,
+    isSetupPage ? { basePath: setupBasePath ?? "" } : undefined,
+  );
 }

@@ -48,6 +48,19 @@ let configLoggingModulePromise: Promise<ConfigLoggingModule> | undefined;
 let modelPickerModulePromise: Promise<ModelPickerModule> | undefined;
 let onboardConfigModulePromise: Promise<OnboardConfigModule> | undefined;
 
+function resolveSetupGatewayPort(config: OpenClawConfig): number {
+  if (process.env.OPENCLAW_BROWSER_SETUP_PARENT === "1") {
+    const targetPort = process.env.OPENCLAW_BROWSER_SETUP_REAL_PORT?.trim();
+    if (targetPort) {
+      return resolveGatewayPort(config, {
+        ...process.env,
+        OPENCLAW_GATEWAY_PORT: targetPort,
+      });
+    }
+  }
+  return resolveGatewayPort(config);
+}
+
 function loadAuthChoiceModule(): Promise<AuthChoiceModule> {
   authChoiceModulePromise ??= import("../commands/auth-choice.js");
   return authChoiceModulePromise;
@@ -441,7 +454,7 @@ export async function runSetupWizard(
 
     return {
       hasExisting,
-      port: resolveGatewayPort(baseConfig),
+      port: resolveSetupGatewayPort(baseConfig),
       bind,
       authMode,
       tailscaleMode,
@@ -511,7 +524,7 @@ export async function runSetupWizard(
     await prompter.note(quickstartLines.join("\n"), "QuickStart");
   }
 
-  const localPort = resolveGatewayPort(baseConfig);
+  const localPort = resolveSetupGatewayPort(baseConfig);
   const localUrl = `ws://127.0.0.1:${localPort}`;
   let localGatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
   try {

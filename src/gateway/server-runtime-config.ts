@@ -89,8 +89,13 @@ export async function resolveGatewayRuntimeConfig(params: {
       );
     }
   }
+  // Browser onboarding uses a short-lived loopback Gateway before the user's
+  // persisted config is complete; keep its setup route available even when a
+  // prior install intentionally disabled the normal Control UI.
+  const browserSetupForcesControlUi = process.env.OPENCLAW_BROWSER_SETUP_PARENT === "1";
   const controlUiEnabled =
-    params.controlUiEnabled ?? params.cfg.gateway?.controlUi?.enabled ?? true;
+    params.controlUiEnabled ??
+    (browserSetupForcesControlUi ? true : (params.cfg.gateway?.controlUi?.enabled ?? true));
   const openAiChatCompletionsConfig = params.cfg.gateway?.http?.endpoints?.chatCompletions;
   const openAiChatCompletionsEnabled =
     params.openAiChatCompletionsEnabled ?? openAiChatCompletionsConfig?.enabled ?? false;

@@ -141,6 +141,11 @@ Discovery is not audited. Only applied operations and writes are logged.
 `openclaw onboard --modern` starts Crestodian as the modern onboarding preview.
 Plain `openclaw onboard` still runs classic onboarding.
 
+Interactive local classic onboarding now opens a separate loopback browser
+setup surface by default. Use `openclaw onboard --no-browser` to keep the
+terminal wizard. Crestodian remains the configless repair and maintenance
+surface.
+
 ## Setup bootstrap
 
 `setup` is the chat-first onboarding bootstrap. It writes only through typed

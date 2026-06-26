@@ -482,6 +482,7 @@ export async function finalizeSetupWizard(
   const seededInBackground = false;
   let hatchChoice: "tui" | "web" | "later" | null = null;
   let launchedTui = false;
+  const browserSetup = process.env.OPENCLAW_BROWSER_SETUP_PARENT === "1";
 
   if (!opts.skipUi) {
     if (hasBootstrap) {
@@ -514,52 +515,58 @@ export async function finalizeSetupWizard(
       await prompter.note(tokenNotes.join("\n"), "Token");
     }
 
-    const hatchOptions: { value: "tui" | "web" | "later"; label: string }[] = [
-      { value: "tui", label: t("wizard.finalize.terminalHatch") },
-      ...(gatewayProbe.ok
-        ? [{ value: "web" as const, label: t("wizard.finalize.browserHatch") }]
-        : []),
-      { value: "later", label: t("wizard.finalize.hatchLater") },
-    ];
-
-    hatchChoice = await prompter.select({
-      message: t("wizard.finalize.hatchPrompt"),
-      options: hatchOptions,
-      initialValue: "tui",
-    });
-
-    if (hatchChoice === "tui") {
-      restoreTerminalState("pre-setup tui", { resumeStdinIfPaused: false });
-      try {
-        await launchTuiCli({
-          local: true,
-          deliver: false,
-          message: hasBootstrap ? t("wizard.finalize.bootstrapHatchMessage") : undefined,
-          timeoutMs: HATCH_TUI_TIMEOUT_MS,
-        });
-      } finally {
-        restoreTerminalState("post-setup tui", { resumeStdinIfPaused: false });
-      }
-      launchedTui = true;
-    } else if (hatchChoice === "web") {
-      const dashboard = await showControlUiDashboardNote({
-        prompter,
-        settings,
-        authedUrl,
-        controlUiBasePath,
-        hintToken:
-          settings.authMode === "token" && !suppressGatewayTokenOutput
-            ? settings.gatewayToken
-            : undefined,
-      });
-      controlUiOpened = dashboard.opened;
+    if (browserSetup) {
+      // The browser owns the setup session; never launch a terminal TUI into
+      // the child Gateway's ignored stdio.
+      hatchChoice = "later";
     } else {
-      await prompter.note(
-        t("wizard.finalize.dashboardWhenReady", {
-          command: formatCliCommand("openclaw dashboard --no-open"),
-        }),
-        t("wizard.finalize.laterTitle"),
-      );
+      const hatchOptions: { value: "tui" | "web" | "later"; label: string }[] = [
+        { value: "tui", label: t("wizard.finalize.terminalHatch") },
+        ...(gatewayProbe.ok
+          ? [{ value: "web" as const, label: t("wizard.finalize.browserHatch") }]
+          : []),
+        { value: "later", label: t("wizard.finalize.hatchLater") },
+      ];
+
+      hatchChoice = await prompter.select({
+        message: t("wizard.finalize.hatchPrompt"),
+        options: hatchOptions,
+        initialValue: "tui",
+      });
+
+      if (hatchChoice === "tui") {
+        restoreTerminalState("pre-setup tui", { resumeStdinIfPaused: false });
+        try {
+          await launchTuiCli({
+            local: true,
+            deliver: false,
+            message: hasBootstrap ? t("wizard.finalize.bootstrapHatchMessage") : undefined,
+            timeoutMs: HATCH_TUI_TIMEOUT_MS,
+          });
+        } finally {
+          restoreTerminalState("post-setup tui", { resumeStdinIfPaused: false });
+        }
+        launchedTui = true;
+      } else if (hatchChoice === "web") {
+        const dashboard = await showControlUiDashboardNote({
+          prompter,
+          settings,
+          authedUrl,
+          controlUiBasePath,
+          hintToken:
+            settings.authMode === "token" && !suppressGatewayTokenOutput
+              ? settings.gatewayToken
+              : undefined,
+        });
+        controlUiOpened = dashboard.opened;
+      } else {
+        await prompter.note(
+          t("wizard.finalize.dashboardWhenReady", {
+            command: formatCliCommand("openclaw dashboard --no-open"),
+          }),
+          t("wizard.finalize.laterTitle"),
+        );
+      }
     }
   } else if (opts.skipUi) {
     await prompter.note(t("wizard.finalize.skipControlUi"), t("wizard.finalize.controlUiTitle"));

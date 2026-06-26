@@ -5,7 +5,11 @@ import { WizardCancelledError } from "../wizard/prompts.js";
 import { runInteractiveSetup } from "./onboard-interactive.js";
 
 const mocks = vi.hoisted(() => ({
-  createClackPrompter: vi.fn(() => ({ id: "prompter" })),
+  createClackPrompter: vi.fn(() => ({ id: "prompter", confirm: vi.fn(async () => true) })),
+  runBrowserSetup: vi.fn(async () => ({
+    started: false,
+    reason: "synthetic browser failure",
+  })),
   runSetupWizard: vi.fn(async () => {}),
   restoreTerminalState: vi.fn(),
 }));
@@ -16,6 +20,10 @@ vi.mock("../wizard/clack-prompter.js", () => ({
 
 vi.mock("../wizard/setup.js", () => ({
   runSetupWizard: mocks.runSetupWizard,
+}));
+
+vi.mock("./onboard-browser.js", () => ({
+  runBrowserSetup: mocks.runBrowserSetup,
 }));
 
 vi.mock("../../packages/terminal-core/src/restore.js", () => ({

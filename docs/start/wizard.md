@@ -17,6 +17,12 @@ and workspace defaults in one guided flow.
 openclaw onboard
 ```
 
+Interactive local onboarding opens a loopback browser setup page by default.
+The page uses the local Gemma 4 E2B browser model when WebGPU is available and
+falls back to the structured wizard controls when it is not. Use
+`openclaw onboard --no-browser` to stay in the terminal. Non-interactive and
+remote onboarding keep their existing behavior.
+
 ## Locale
 
 The CLI wizard localizes fixed onboarding copy. It resolves locale from

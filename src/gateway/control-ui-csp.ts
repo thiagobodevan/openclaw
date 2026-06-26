@@ -35,11 +35,18 @@ function hasScriptSrcAttribute(openTag: string): boolean {
 }
 
 /** Build the CSP header applied to Gateway-served Control UI HTML. */
-export function buildControlUiCspHeader(opts?: { inlineScriptHashes?: string[] }): string {
+export function buildControlUiCspHeader(opts?: {
+  inlineScriptHashes?: string[];
+  allowBrowserSetupModel?: boolean;
+}): string {
   const hashes = opts?.inlineScriptHashes;
+  const setupScriptSources = opts?.allowBrowserSetupModel ? " 'wasm-unsafe-eval'" : "";
   const scriptSrc = hashes?.length
-    ? `script-src 'self' ${hashes.map((h) => `'${h}'`).join(" ")}`
-    : "script-src 'self'";
+    ? `script-src 'self' ${hashes.map((h) => `'${h}'`).join(" ")}${setupScriptSources}`
+    : `script-src 'self'${setupScriptSources}`;
+  const modelConnectSources = opts?.allowBrowserSetupModel
+    ? " https://huggingface.co https://*.hf.co"
+    : "";
   return [
     "default-src 'self'",
     "base-uri 'none'",
@@ -51,6 +58,6 @@ export function buildControlUiCspHeader(opts?: { inlineScriptHashes?: string[] }
     "media-src 'self' data: blob:",
     "font-src 'self' https://fonts.gstatic.com",
     "worker-src 'self'",
-    "connect-src 'self' ws: wss: https://api.openai.com https://tweakcn.com",
+    `connect-src 'self' ws: wss: https://api.openai.com https://tweakcn.com${modelConnectSources}`,
   ].join("; ");
 }

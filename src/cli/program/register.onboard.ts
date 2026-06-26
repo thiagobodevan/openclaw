@@ -106,6 +106,7 @@ export function registerOnboardCommand(program: Command): void {
     )
     .option("--reset-scope <scope>", "Reset scope: config|config+creds+sessions|full")
     .option("--non-interactive", "Run without prompts", false)
+    .option("--no-browser", "Use the terminal onboarding wizard instead of browser setup")
     .option("--modern", "Use the conversational setup/repair assistant", false)
     .option(
       "--accept-risk",
@@ -203,6 +204,7 @@ export function registerOnboardCommand(program: Command): void {
         {
           workspace: opts.workspace as string | undefined,
           nonInteractive: Boolean(opts.nonInteractive),
+          browser: opts.browser as boolean | undefined,
           acceptRisk: Boolean(opts.acceptRisk),
           flow: opts.flow as "quickstart" | "advanced" | "manual" | "import" | undefined,
           mode: opts.mode as "local" | "remote" | undefined,

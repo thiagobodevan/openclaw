@@ -573,8 +573,12 @@ export async function startGatewayServer(
   const { bootstrapGatewayNetworkRuntime } = await import("./server-network-runtime.js");
   bootstrapGatewayNetworkRuntime();
 
+  // Browser onboarding uses the same intentionally sidecar-free startup shape
+  // as test gateways so a temporary setup child cannot duplicate live channels,
+  // cron jobs, or plugin services from an existing installation.
   const minimalTestGateway =
-    isVitestRuntimeEnv() && process.env.OPENCLAW_TEST_MINIMAL_GATEWAY === "1";
+    (isVitestRuntimeEnv() && process.env.OPENCLAW_TEST_MINIMAL_GATEWAY === "1") ||
+    process.env.OPENCLAW_BROWSER_SETUP_PARENT === "1";
 
   // Ensure all default port derivations (browser/canvas) see the actual runtime port.
   process.env.OPENCLAW_GATEWAY_PORT = String(port);
@@ -790,11 +794,13 @@ export async function startGatewayServer(
     openResponsesConfig,
     strictTransportSecurityHeader,
     controlUiBasePath,
-    controlUiRoot: controlUiRootOverride,
+    controlUiRoot: configuredControlUiRootOverride,
     resolvedAuth,
     tailscaleConfig,
     tailscaleMode,
   } = runtimeConfig;
+  const controlUiRootOverride =
+    process.env.OPENCLAW_BROWSER_SETUP_PARENT === "1" ? undefined : configuredControlUiRootOverride;
   const getResolvedAuth = () =>
     resolveGatewayAuth({
       authConfig:

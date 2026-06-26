@@ -15,7 +15,7 @@ optional chat channels — they just differ in how you interact with the setup.
 |                | CLI onboarding                         | macOS app onboarding      |
 | -------------- | -------------------------------------- | ------------------------- |
 | **Platforms**  | macOS, Linux, Windows (native or WSL2) | macOS only                |
-| **Interface**  | Terminal wizard                        | Guided UI in the app      |
+| **Interface**  | Browser setup or terminal fallback     | Guided UI in the app      |
 | **Best for**   | Servers, headless, full control        | Desktop Mac, visual setup |
 | **Automation** | `--non-interactive` for scripts        | Manual only               |
 | **Command**    | `openclaw onboard`                     | Launch the app            |
@@ -42,6 +42,10 @@ Run in any terminal:
 ```bash
 openclaw onboard
 ```
+
+Interactive local onboarding opens the loopback browser setup by default. Use
+`openclaw onboard --no-browser` for the terminal wizard, or use
+`--non-interactive` for scripts and headless hosts.
 
 Add `--install-daemon` to also install the background service in one step.
 

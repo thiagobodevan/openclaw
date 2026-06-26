@@ -131,4 +131,31 @@ describe("WizardSession", () => {
     }
     await session.answer(plainStep.id, "alice");
   });
+
+  test("re-emits a validated text step after an invalid answer", async () => {
+    const session = new WizardSession(async (prompter) => {
+      await prompter.text({
+        message: "Port",
+        validate: (value) => (value === "18789" ? undefined : "Enter 18789."),
+      });
+    });
+
+    const first = await session.next();
+    if (!first.step) {
+      throw new Error("expected first step");
+    }
+    await session.answer(first.step.id, "bad");
+
+    const retry = await session.next();
+    expect(retry.done).toBe(false);
+    expect(retry.step?.type).toBe("text");
+    expect(retry.step?.message).toContain("Enter 18789.");
+
+    if (!retry.step) {
+      throw new Error("expected retry step");
+    }
+    await session.answer(retry.step.id, "18789");
+    const done = await session.next();
+    expect(done.status).toBe("done");
+  });
 });

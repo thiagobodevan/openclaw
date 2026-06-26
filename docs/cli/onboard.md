@@ -33,6 +33,7 @@ Full guided onboarding for local or remote Gateway setup. Use this when you want
 
 ```bash
 openclaw onboard
+openclaw onboard --no-browser
 openclaw onboard --modern
 openclaw onboard --flow quickstart
 openclaw onboard --flow manual
@@ -41,6 +42,15 @@ openclaw onboard --import-from hermes --import-source ~/.hermes
 openclaw onboard --skip-bootstrap
 openclaw onboard --mode remote --remote-url wss://gateway-host:18789
 ```
+
+Interactive local onboarding opens the browser setup surface by default. The
+browser runs the small Gemma 4 E2B assistant locally through WebGPU while the
+OpenClaw setup wizard remains the authority for configuration, credentials,
+plugin installs, and Gateway lifecycle. Use `--no-browser` to force the
+terminal wizard. Explicit provider, flow, channel, daemon, reset, import, and
+other advanced flags automatically stay on the terminal path so their exact
+semantics are preserved. Non-interactive and remote onboarding remain
+terminal/client flows.
 
 `--flow import` uses plugin-owned migration providers such as Hermes. It only runs against a fresh OpenClaw setup; if existing config, credentials, sessions, or workspace memory/identity files are present, reset or choose a fresh setup before importing.
 

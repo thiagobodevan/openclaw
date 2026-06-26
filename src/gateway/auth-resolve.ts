@@ -69,17 +69,32 @@ export function resolveGatewayAuth(params: {
     }
   }
   const env = params.env ?? process.env;
+  const browserSetupToken =
+    env.OPENCLAW_BROWSER_SETUP_PARENT === "1"
+      ? env.OPENCLAW_BROWSER_SETUP_TOKEN?.trim()
+      : undefined;
   const tokenRef = resolveSecretInputRef({ value: authConfig.token }).ref;
   const passwordRef = resolveSecretInputRef({ value: authConfig.password }).ref;
   // Secret refs are not plaintext credentials here. Startup/runtime secret
   // resolution validates active refs before request authorization sees them.
-  const resolvedCredentials = resolveGatewayCredentialsFromValues({
-    configToken: tokenRef ? undefined : authConfig.token,
-    configPassword: passwordRef ? undefined : authConfig.password,
-    env,
-    tokenPrecedence: "config-first",
-    passwordPrecedence: "config-first", // pragma: allowlist secret
-  });
+  const resolvedCredentials = browserSetupToken
+    ? {
+        token: browserSetupToken,
+        password: resolveGatewayCredentialsFromValues({
+          configToken: tokenRef ? undefined : authConfig.token,
+          configPassword: passwordRef ? undefined : authConfig.password,
+          env,
+          tokenPrecedence: "config-first",
+          passwordPrecedence: "config-first", // pragma: allowlist secret
+        }).password,
+      }
+    : resolveGatewayCredentialsFromValues({
+        configToken: tokenRef ? undefined : authConfig.token,
+        configPassword: passwordRef ? undefined : authConfig.password,
+        env,
+        tokenPrecedence: "config-first",
+        passwordPrecedence: "config-first", // pragma: allowlist secret
+      });
   const token = resolvedCredentials.token;
   const password = resolvedCredentials.password;
   const trustedProxy = authConfig.trustedProxy;

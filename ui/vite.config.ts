@@ -225,10 +225,24 @@ function controlUiServiceWorkerBuildIdPlugin(buildId: string): Plugin {
   };
 }
 
+function controlUiLiteRtWasmAssetsPlugin(): Plugin {
+  return {
+    name: "control-ui-litert-wasm-assets",
+    apply: "build",
+    closeBundle() {
+      const packageRoot = path.dirname(require.resolve("@litert-lm/core/package.json"));
+      fs.cpSync(path.join(packageRoot, "wasm"), path.join(outDir, "litert-lm", "wasm"), {
+        recursive: true,
+      });
+    },
+  };
+}
+
 export default function controlUiViteConfig(): UserConfig {
   const envBase = process.env.OPENCLAW_CONTROL_UI_BASE_PATH?.trim();
   const base = envBase ? normalizeBase(envBase) : "./";
-  const bootstrapConfigPath = base === "./" ? "/control-ui-config.json" : `${base}control-ui-config.json`;
+  const bootstrapConfigPath =
+    base === "./" ? "/control-ui-config.json" : `${base}control-ui-config.json`;
   const controlUiBuildId = resolveControlUiBuildId();
   return {
     base,
@@ -271,6 +285,7 @@ export default function controlUiViteConfig(): UserConfig {
     plugins: [
       controlUiBrowserOnlySharedModuleAliases(),
       controlUiServiceWorkerBuildIdPlugin(controlUiBuildId),
+      controlUiLiteRtWasmAssetsPlugin(),
       {
         name: "control-ui-dev-stubs",
         configureServer(server) {

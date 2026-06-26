@@ -942,6 +942,11 @@ export async function runGatewayCommand(opts: GatewayRunOpts, hooks: GatewayRunR
       : undefined;
 
   gatewayLog.info("starting...");
+  if (process.env.OPENCLAW_BROWSER_SETUP_PARENT === "1") {
+    // The setup Gateway is owned by the parent CLI through IPC; if that
+    // process disappears, do not leave a privileged temporary listener alive.
+    process.once("disconnect", () => process.exit(0));
+  }
   startupTrace.mark("cli.gateway-loop");
   let startupConfigSnapshotReadForNextStart = startupConfigSnapshotRead;
   const deferStartupSidecars =

@@ -34,6 +34,16 @@ describe("buildControlUiCspHeader", () => {
     expect(connectSrc?.split(" ")).not.toContain("https:");
   });
 
+  it("allows fixed browser setup model origins only for setup pages", () => {
+    const csp = buildControlUiCspHeader({ allowBrowserSetupModel: true });
+    const connectSrc = csp.split("; ").find((directive) => directive.startsWith("connect-src "));
+    expect(connectSrc).toContain("https://huggingface.co");
+    expect(connectSrc).toContain("https://*.hf.co");
+    expect(connectSrc).not.toContain("https://cdn.jsdelivr.net");
+    expect(csp).toContain("wasm-unsafe-eval");
+    expect(csp).toContain("worker-src 'self'");
+  });
+
   it("limits image loading to same-origin, data, and managed blob URLs", () => {
     const csp = buildControlUiCspHeader();
     expect(csp).toContain("img-src 'self' data: blob:");

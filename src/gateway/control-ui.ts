@@ -116,6 +116,8 @@ function contentTypeForExt(ext: string): string {
       return "text/plain; charset=utf-8";
     case ".webmanifest":
       return "application/manifest+json; charset=utf-8";
+    case ".wasm":
+      return "application/wasm";
     default:
       return "application/octet-stream";
   }
@@ -142,6 +144,7 @@ const STATIC_ASSET_EXTENSIONS = new Set([
   ".ico",
   ".txt",
   ".webmanifest",
+  ".wasm",
 ]);
 
 const CONTROL_UI_NAMESPACE_PREFIX = "/__openclaw__/";
@@ -197,9 +200,12 @@ function controlUiAvatarResolutionMeta(resolved: ControlUiAvatarResolution | nul
   };
 }
 
-function applyControlUiSecurityHeaders(res: ServerResponse) {
+function applyControlUiSecurityHeaders(
+  res: ServerResponse,
+  opts?: { allowBrowserSetupModel?: boolean },
+) {
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Content-Security-Policy", buildControlUiCspHeader());
+  res.setHeader("Content-Security-Policy", buildControlUiCspHeader(opts));
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
 }
@@ -758,13 +764,21 @@ function serveResolvedFile(res: ServerResponse, filePath: string, body: Buffer) 
   res.end(body);
 }
 
-function serveResolvedIndexHtml(res: ServerResponse, body: string, basePath?: string) {
+function serveResolvedIndexHtml(
+  res: ServerResponse,
+  body: string,
+  basePath?: string,
+  opts?: { allowBrowserSetupModel?: boolean },
+) {
   const prepared = rewriteControlUiIndexHtmlPublicAssetHrefs(body, basePath ?? "");
   const hashes = computeInlineScriptHashes(prepared);
   if (hashes.length > 0) {
     res.setHeader(
       "Content-Security-Policy",
-      buildControlUiCspHeader({ inlineScriptHashes: hashes }),
+      buildControlUiCspHeader({
+        inlineScriptHashes: hashes,
+        allowBrowserSetupModel: opts?.allowBrowserSetupModel,
+      }),
     );
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -943,7 +957,11 @@ export async function handleControlUiHttpRequest(
     return true;
   }
 
-  applyControlUiSecurityHeaders(res);
+  const allowBrowserSetupModel =
+    pathname === `${basePath}/setup` && url.searchParams.get("openclawSetup") === "1";
+  applyControlUiSecurityHeaders(res, {
+    allowBrowserSetupModel,
+  });
 
   if (matchesControlUiBootstrapConfigPath(pathname, basePath)) {
     if (
@@ -1085,7 +1103,9 @@ export async function handleControlUiHttpRequest(
         return true;
       }
       if (path.basename(safeFile.path) === "index.html") {
-        serveResolvedIndexHtml(res, await readOpenedFileText(safeFile.fd), basePath);
+        serveResolvedIndexHtml(res, await readOpenedFileText(safeFile.fd), basePath, {
+          allowBrowserSetupModel,
+        });
         return true;
       }
       serveResolvedFile(res, safeFile.path, await readOpenedFile(safeFile.fd));
@@ -1113,7 +1133,9 @@ export async function handleControlUiHttpRequest(
       if (respondHeadForFile(req, res, safeIndex.path)) {
         return true;
       }
-      serveResolvedIndexHtml(res, await readOpenedFileText(safeIndex.fd), basePath);
+      serveResolvedIndexHtml(res, await readOpenedFileText(safeIndex.fd), basePath, {
+        allowBrowserSetupModel,
+      });
       return true;
     } finally {
       fs.closeSync(safeIndex.fd);

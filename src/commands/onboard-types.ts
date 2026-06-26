@@ -44,6 +44,8 @@ export type OnboardOptions = OnboardDynamicProviderOptions & {
   flow?: "quickstart" | "advanced" | "manual" | "import";
   workspace?: string;
   nonInteractive?: boolean;
+  /** Use the browser setup surface when local interactive onboarding starts. */
+  browser?: boolean;
   /** Required for non-interactive setup; skips the interactive risk prompt when true. */
   acceptRisk?: boolean;
   reset?: boolean;

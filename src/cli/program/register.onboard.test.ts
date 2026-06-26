@@ -83,7 +83,14 @@ describe("registerOnboardCommand", () => {
     await runCli(["onboard"]);
 
     expect(setupWizardOptions().installDaemon).toBeUndefined();
+    expect(setupWizardOptions().browser).toBe(true);
     expect(mocks.runCrestodian).not.toHaveBeenCalled();
+  });
+
+  it("forwards --no-browser to the terminal onboarding path", async () => {
+    await runCli(["onboard", "--no-browser"]);
+
+    expect(setupWizardOptions().browser).toBe(false);
   });
 
   it("sets installDaemon from explicit install flags and prioritizes --skip-daemon", async () => {
