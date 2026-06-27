@@ -1704,6 +1704,9 @@ export async function handleSendChat(
     if (!queued) {
       return;
     }
+    if (waitingForModel) {
+      host.requestUpdate?.();
+    }
 
     if (modelSwitchReady !== true && !(await modelSwitchReady)) {
       if (host.sessionKey === submittedSessionKey) {
