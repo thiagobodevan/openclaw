@@ -4,6 +4,7 @@ import { guard } from "lit/directives/guard.js";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
+import { styleMap } from "lit/directives/style-map.js";
 import type {
   SessionWorkspaceListResult,
   SessionGoal,
@@ -154,6 +155,7 @@ export type ChatProps = {
   canvasPluginSurfaceUrl?: string | null;
   embedSandboxMode?: EmbedSandboxMode;
   allowExternalEmbedUrls?: boolean;
+  chatMessageMaxWidth?: string | null;
   assistantName: string;
   assistantAvatar: string | null;
   userName?: string | null;
@@ -2706,6 +2708,9 @@ export function renderChat(props: ChatProps) {
   return html`
     <section
       class="card chat"
+      style=${styleMap(
+        props.chatMessageMaxWidth ? { "--chat-message-max-width": props.chatMessageMaxWidth } : {},
+      )}
       @drop=${(e: DragEvent) => handleDrop(e, props)}
       @dragover=${(e: DragEvent) => e.preventDefault()}
     >

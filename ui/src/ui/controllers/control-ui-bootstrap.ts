@@ -1,16 +1,9 @@
+import type { ControlUiEmbedSandboxMode } from "../../../../src/gateway/control-ui-contract.js";
 // Control UI controller manages control ui bootstrap gateway state.
-import {
-  CONTROL_UI_BOOTSTRAP_CONFIG_PATH,
-  type ControlUiBootstrapConfig,
-  type ControlUiEmbedSandboxMode,
-} from "../../../../src/gateway/control-ui-contract.js";
-import { normalizeBasePath } from "../../app-routes.ts";
 import { loadLocalAssistantIdentity } from "../../app/assistant-identity.ts";
-import { normalizeAssistantIdentity } from "../../lib/assistant-identity.ts";
-import { setUiTimeFormatPreference } from "../../lib/format.ts";
+import { loadApplicationConfig } from "../../app/config.ts";
 import { normalizeAgentId, parseAgentSessionKey } from "../../lib/sessions/session-key.ts";
 import { normalizeOptionalString } from "../../lib/string-coerce.ts";
-import { resolveControlUiAuthCandidates } from "../control-ui-auth.ts";
 
 export type ControlUiBootstrapState = {
   basePath: string;
@@ -60,87 +53,30 @@ export async function loadControlUiBootstrapConfig(
   state: ControlUiBootstrapState,
   opts?: { applyIdentity?: boolean; skipWithoutAuthCandidate?: boolean },
 ) {
-  if (typeof window === "undefined") {
+  const config = await loadApplicationConfig({
+    basePath: state.basePath ?? "",
+    auth: state,
+    skipWithoutAuthCandidate: opts?.skipWithoutAuthCandidate,
+  });
+  if (!config) {
     return;
   }
-  if (typeof fetch !== "function") {
-    return;
+  if (opts?.applyIdentity !== false) {
+    const activeAgentId = resolveActiveAgentId(state);
+    const bootstrapAgentId = resolveBootstrapAgentId(config.assistantIdentity.agentId);
+    if (!activeAgentId || !bootstrapAgentId || activeAgentId === bootstrapAgentId) {
+      state.assistantName = config.assistantIdentity.name;
+      state.assistantAvatar = config.assistantIdentity.avatar;
+      state.assistantAvatarSource = config.assistantIdentity.avatarSource;
+      state.assistantAvatarStatus = config.assistantIdentity.avatarStatus;
+      state.assistantAvatarReason = config.assistantIdentity.avatarReason;
+      state.assistantAgentId = config.assistantIdentity.agentId;
+    }
+    applyLocalAssistantAvatarOverride(state);
   }
-
-  const basePath = normalizeBasePath(state.basePath ?? "");
-  const url = basePath
-    ? `${basePath}${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`
-    : CONTROL_UI_BOOTSTRAP_CONFIG_PATH;
-
-  try {
-    const resolvedUrl = new URL(url, window.location.origin);
-    const sameOrigin = resolvedUrl.origin === window.location.origin;
-    const authCandidates = sameOrigin ? resolveControlUiAuthCandidates(state) : [];
-    if (opts?.skipWithoutAuthCandidate && sameOrigin && authCandidates.length === 0) {
-      return;
-    }
-    // If credentials are available, try them in priority order; on 401/403
-    // retry with the next candidate — recovers from a stale `settings.token`
-    // when the live session is authenticated via `password` (or vice versa).
-    // If no credentials are available, fall through with no Authorization
-    // header so bootstrap still works on auth-disabled deployments.
-    const attempts: string[] = authCandidates.length > 0 ? authCandidates : [""];
-    let res: Response | null = null;
-    for (const candidate of attempts) {
-      const headers: Record<string, string> = { Accept: "application/json" };
-      if (candidate) {
-        headers.Authorization = `Bearer ${candidate}`;
-      }
-      res = await fetch(url, { method: "GET", headers, credentials: "same-origin" });
-      if (res.ok) {
-        break;
-      }
-      if (res.status !== 401 && res.status !== 403) {
-        return;
-      }
-    }
-    if (!res || !res.ok) {
-      return;
-    }
-    const parsed = (await res.json()) as ControlUiBootstrapConfig;
-    if (opts?.applyIdentity !== false) {
-      const activeAgentId = resolveActiveAgentId(state);
-      const bootstrapAgentId = resolveBootstrapAgentId(parsed.assistantAgentId ?? null);
-      if (!activeAgentId || !bootstrapAgentId || activeAgentId === bootstrapAgentId) {
-        const normalized = normalizeAssistantIdentity({
-          agentId: parsed.assistantAgentId ?? null,
-          name: parsed.assistantName,
-          avatar: parsed.assistantAvatar ?? null,
-          avatarSource: parsed.assistantAvatarSource ?? null,
-          avatarStatus: parsed.assistantAvatarStatus ?? null,
-          avatarReason: parsed.assistantAvatarReason ?? null,
-        });
-        state.assistantName = normalized.name;
-        state.assistantAvatar = normalized.avatar;
-        state.assistantAvatarSource = normalized.avatarSource ?? null;
-        state.assistantAvatarStatus = normalized.avatarStatus ?? null;
-        state.assistantAvatarReason = normalized.avatarReason ?? null;
-        state.assistantAgentId = normalized.agentId ?? null;
-      }
-      applyLocalAssistantAvatarOverride(state);
-    }
-    state.serverVersion = parsed.serverVersion ?? null;
-    state.localMediaPreviewRoots = Array.isArray(parsed.localMediaPreviewRoots)
-      ? parsed.localMediaPreviewRoots.filter((value): value is string => typeof value === "string")
-      : [];
-    state.embedSandboxMode =
-      parsed.embedSandbox === "trusted"
-        ? "trusted"
-        : parsed.embedSandbox === "strict"
-          ? "strict"
-          : "scripts";
-    state.allowExternalEmbedUrls = parsed.allowExternalEmbedUrls === true;
-    state.chatMessageMaxWidth =
-      typeof parsed.chatMessageMaxWidth === "string" && parsed.chatMessageMaxWidth.trim()
-        ? parsed.chatMessageMaxWidth
-        : null;
-    setUiTimeFormatPreference(parsed.timeFormat);
-  } catch {
-    // Ignore bootstrap failures; UI will update identity after connecting.
-  }
+  state.serverVersion = config.serverVersion;
+  state.localMediaPreviewRoots = config.localMediaPreviewRoots;
+  state.embedSandboxMode = config.embedSandboxMode;
+  state.allowExternalEmbedUrls = config.allowExternalEmbedUrls;
+  state.chatMessageMaxWidth = config.chatMessageMaxWidth;
 }
