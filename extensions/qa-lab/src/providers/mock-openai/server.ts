@@ -2615,7 +2615,7 @@ async function buildResponsesPayload(
   if (/memory tools check/i.test(prompt)) {
     if (!toolOutput) {
       return buildToolCallEventsWithArgs("memory_search", {
-        query: "project codename ORBIT-9",
+        query: "hidden project codename",
         maxResults: 3,
       });
     }
