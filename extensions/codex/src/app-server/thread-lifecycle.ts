@@ -30,6 +30,7 @@ import {
   buildCodexPluginAppsConfigPatchFromPolicyContext,
   isCodexPluginThreadBindingStale,
   mergeCodexThreadConfigs,
+  requiresUserReviewerForAskPolicy,
   type CodexPluginThreadConfig,
 } from "./plugin-thread-config.js";
 import { isCodexAppServerProfilerEnabled } from "./profiler-flag.js";
@@ -1414,6 +1415,7 @@ export function buildTurnStartParams(
     skillsCollaborationInstructions?: string;
     memoryCollaborationInstructions?: string;
     heartbeatCollaborationInstructions?: string;
+    pluginAppPolicyContext?: CodexAppServerThreadBinding["pluginAppPolicyContext"];
   },
 ): CodexTurnStartParams {
   const modelSelection = resolveCodexAppServerRequestModelSelection({
@@ -1430,7 +1432,11 @@ export function buildTurnStartParams(
     input: buildUserInput(params, options.promptText),
     cwd: options.cwd,
     approvalPolicy: options.appServer.approvalPolicy,
-    approvalsReviewer: options.appServer.approvalsReviewer,
+    approvalsReviewer: resolveCodexThreadApprovalsReviewer(
+      options.appServer,
+      undefined,
+      options.pluginAppPolicyContext,
+    ),
     ...(useThreadPermissionProfile
       ? {}
       : {
@@ -1455,11 +1461,17 @@ export function buildTurnStartParams(
   };
 }
 
-function resolveCodexThreadApprovalsReviewer(
+export function resolveCodexThreadApprovalsReviewer(
   appServer: CodexAppServerRuntimeOptions,
   config?: JsonObject,
+  pluginAppPolicyContext?: CodexAppServerThreadBinding["pluginAppPolicyContext"],
 ): CodexAppServerRuntimeOptions["approvalsReviewer"] {
-  return config?.approvals_reviewer === "user" ? "user" : appServer.approvalsReviewer;
+  const pluginAppsRequireUserReviewer = requiresUserReviewerForAskPolicy(
+    pluginAppPolicyContext?.apps ?? {},
+  );
+  return config?.approvals_reviewer === "user" || pluginAppsRequireUserReviewer
+    ? "user"
+    : appServer.approvalsReviewer;
 }
 
 function codexThreadSandboxOrPermissions(

@@ -536,6 +536,7 @@ async function handleSlackExecApprovalInteraction(params: {
   ctx: SlackMonitorContext;
   parsed: ParsedSlackBlockAction;
   pluginInteractionData: string;
+  startedAtMs: number;
   respond?: SlackBlockActionRespond;
 }): Promise<boolean> {
   const approval = parseExecApprovalCommandText(params.pluginInteractionData);
@@ -560,6 +561,9 @@ async function handleSlackExecApprovalInteraction(params: {
     : execApprovalAuthorizedSender || resolveUnprefixedAsPlugin;
   const allowPluginFallback =
     !isPluginApproval && execApprovalAuthorizedSender && pluginApprovalAuthorizedSender;
+  params.ctx.runtime.log?.(
+    `slack:interaction approval checkpoint=authorized id=${approval.approvalId} action=${params.parsed.actionId} user=${params.parsed.userId} messageTs=${params.parsed.messageTs ?? "unknown"} authorized=${authorized} pluginApprover=${pluginApprovalAuthorizedSender} execApprover=${execApprovalAuthorizedSender} elapsedMs=${Date.now() - params.startedAtMs}`,
+  );
   if (!authorized) {
     params.ctx.runtime.log?.(
       `slack:interaction drop exec approval user=${params.parsed.userId} (not authorized)`,
@@ -569,6 +573,9 @@ async function handleSlackExecApprovalInteraction(params: {
   }
 
   try {
+    params.ctx.runtime.log?.(
+      `slack:interaction approval checkpoint=resolve-start id=${approval.approvalId} action=${params.parsed.actionId} user=${params.parsed.userId} messageTs=${params.parsed.messageTs ?? "unknown"} elapsedMs=${Date.now() - params.startedAtMs}`,
+    );
     await resolveApprovalOverGateway({
       cfg: params.ctx.cfg,
       approvalId: approval.approvalId,
@@ -578,6 +585,9 @@ async function handleSlackExecApprovalInteraction(params: {
       ...(resolveUnprefixedAsPlugin ? { resolveMethod: "plugin" as const } : {}),
       clientDisplayName: `Slack approval (${params.parsed.userId.trim() || "unknown"})`,
     });
+    params.ctx.runtime.log?.(
+      `slack:interaction approval checkpoint=resolve-complete id=${approval.approvalId} action=${params.parsed.actionId} user=${params.parsed.userId} messageTs=${params.parsed.messageTs ?? "unknown"} elapsedMs=${Date.now() - params.startedAtMs}`,
+    );
   } catch (error) {
     params.ctx.runtime.log?.(
       `slack:interaction exec approval resolve failed id=${approval.approvalId}: ${String(error)}`,
@@ -890,9 +900,15 @@ async function handleSlackBlockAction(params: {
   formatSystemEvent: (payload: Record<string, unknown>) => string;
 }): Promise<void> {
   const { ack, body, action, respond } = params.args;
+  const startedAtMs = Date.now();
+  params.ctx.runtime.log?.(
+    `slack:interaction block-action checkpoint=callback actionType=${typeof action === "object" && action !== null && "type" in action ? String(action.type) : "unknown"}`,
+  );
   await ack();
   if (params.ctx.shouldDropMismatchedSlackEvent?.(body)) {
-    params.ctx.runtime.log?.("slack:interaction drop block action payload (mismatched app/team)");
+    params.ctx.runtime.log?.(
+      `slack:interaction block-action checkpoint=dropped-mismatched elapsedMs=${Date.now() - startedAtMs}`,
+    );
     return;
   }
   const parsed = parseSlackBlockAction({
@@ -901,6 +917,9 @@ async function handleSlackBlockAction(params: {
     log: params.ctx.runtime.log,
   });
   if (!parsed) {
+    params.ctx.runtime.log?.(
+      `slack:interaction block-action checkpoint=parse-failed elapsedMs=${Date.now() - startedAtMs}`,
+    );
     return;
   }
   params.trackEvent?.();
@@ -909,10 +928,14 @@ async function handleSlackBlockAction(params: {
     summary: parsed.actionSummary,
   });
   if (pluginInteractionData && isSlackReplyActionId(parsed.actionId)) {
+    params.ctx.runtime.log?.(
+      `slack:interaction approval checkpoint=received action=${parsed.actionId} user=${parsed.userId} messageTs=${parsed.messageTs ?? "unknown"} elapsedMs=${Date.now() - startedAtMs}`,
+    );
     const handledExecApproval = await handleSlackExecApprovalInteraction({
       ctx: params.ctx,
       parsed,
       pluginInteractionData,
+      startedAtMs,
       respond,
     });
     if (handledExecApproval) {
@@ -975,8 +998,10 @@ export function registerSlackBlockActionHandler(params: {
   formatSystemEvent: (payload: Record<string, unknown>) => string;
 }): void {
   if (typeof params.ctx.app.action !== "function") {
+    params.ctx.runtime.log?.("slack:interaction block-action checkpoint=registration-unavailable");
     return;
   }
+  params.ctx.runtime.log?.("slack:interaction block-action checkpoint=registered");
   params.ctx.app.action(/.+/, async (args: SlackActionMiddlewareArgs) => {
     await handleSlackBlockAction({
       ctx: params.ctx,

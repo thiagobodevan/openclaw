@@ -1504,6 +1504,52 @@ export async function runCodexAppServerAttempt(
     client = startupResult.client;
     thread = startupResult.thread;
     pluginAppServer = startupResult.pluginAppServer;
+    if (thread.lifecycle.action === "started") {
+      const activeThreadReviewerPolicyContext = resolveCodexModelBackedReviewerPolicyContext({
+        provider: params.provider,
+        model: params.modelId,
+        bindingModelProvider: thread.modelProvider,
+        bindingModel: thread.model,
+        nativeAuthProfile: isCodexAppServerNativeAuthProfile({
+          authProfileId: startupAuthProfileId,
+          authProfileStore: params.authProfileStore,
+          agentDir,
+          config: params.config,
+        }),
+      });
+      const activeThreadConfiguredAppServer = resolveCodexAppServerRuntimeOptions({
+        pluginConfig,
+        execPolicy,
+        modelProvider: activeThreadReviewerPolicyContext.modelProvider,
+        model: activeThreadReviewerPolicyContext.model,
+        config: params.config,
+        agentDir,
+        openClawSandboxActive: sandbox?.enabled === true,
+      });
+      const activeThreadAppServer = resolveCodexAppServerForModelProvider({
+        appServer: activeThreadConfiguredAppServer,
+        provider: activeThreadReviewerPolicyContext.modelProvider,
+        model: activeThreadReviewerPolicyContext.model,
+        config: params.config,
+        env: process.env,
+        agentDir,
+      });
+      const previousApprovalsReviewer = pluginAppServer.approvalsReviewer;
+      pluginAppServer = {
+        ...pluginAppServer,
+        approvalsReviewer: activeThreadAppServer.approvalsReviewer,
+      };
+      if (pluginAppServer.approvalsReviewer !== previousApprovalsReviewer) {
+        embeddedAgentLog.info(
+          "codex app-server approval reviewer updated from active thread model provider",
+          {
+            from: previousApprovalsReviewer,
+            to: pluginAppServer.approvalsReviewer,
+            modelProvider: activeThreadReviewerPolicyContext.modelProvider,
+          },
+        );
+      }
+    }
     sandboxExecEnvironmentAcquired = Boolean(startupResult.sandboxEnvironment);
     codexEnvironmentSelection = startupResult.environmentSelection;
     codexExecutionCwd = startupResult.executionCwd;
@@ -2458,6 +2504,7 @@ export async function runCodexAppServerAttempt(
       memoryCollaborationInstructions: workspaceBootstrapContext.memoryCollaborationInstructions,
       heartbeatCollaborationInstructions:
         workspaceBootstrapContext.heartbeatCollaborationInstructions,
+      pluginAppPolicyContext: thread.pluginAppPolicyContext,
     });
     codexModelCallDiagnostics.setRequestPayloadBytes(utf8JsonByteLength(turnStartParams));
     const startedTurn = assertCodexTurnStartResponse(

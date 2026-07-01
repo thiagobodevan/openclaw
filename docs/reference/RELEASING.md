@@ -1,17 +1,121 @@
 ---
-summary: "Release lanes, operator checklist, validation boxes, version naming, and cadence"
-title: "Release policy"
+summary: "Maintainer release process, channels, validation, publication, recovery, and closeout"
+title: "Release process"
 read_when:
   - Looking for public release channel definitions
-  - Running release validation or package acceptance
-  - Looking for version naming and cadence
+  - Preparing, publishing, verifying, or recovering a release
+  - Looking for version naming, release ownership, or cadence
 ---
 
-OpenClaw has three public release lanes:
+This page is the public, source-backed maintainer process for OpenClaw releases.
+It covers the repository release, the separately operated native and container
+artifacts, and the evidence required before promotion. Credentials, secret
+locations, emergency rollback commands, and private release infrastructure stay
+in the maintainer-only runbook.
+
+OpenClaw has three public update lanes:
 
 - stable: tagged releases that publish to npm `beta` by default, or to npm `latest` when explicitly requested
 - beta: prerelease tags that publish to npm `beta`
 - dev: the moving head of `main`
+
+The npm dist-tags are authoritative for package installs. Git installs use Git
+tags for stable and beta, while dev follows `main`. See [Release
+channels](/install/development-channels) for user-facing update behavior.
+
+## Before you begin
+
+Release operators need all of the following:
+
+- A clean checkout of this repository, Node.js `22.19+` (Node 24 recommended),
+  the repository-pinned pnpm version, Git, and GitHub CLI authentication.
+- Permission to push `release/YYYY.M.PATCH` and release tags, dispatch GitHub
+  Actions, and approve the protected `npm-release` environment.
+- Access to the private maintainer runbook for signing, notarization, npm
+  dist-tag recovery, rollback drills, and release-ops workflow ownership.
+- For stable: an approved, published, non-prerelease Windows Node source
+  release and its pinned x64/ARM64 installer digests.
+- For stable macOS: access to the restricted release-ops repository and its
+  Apple signing, notarization, Sparkle, and public-repository credentials.
+- Current release-channel QA credentials in GitHub environments. Do not move
+  those secrets into local commands or the public repository.
+- Current `RELEASE_ROLLBACK_DRILL_ID` and `RELEASE_ROLLBACK_DRILL_DATE`
+  repository variables before stable closeout; the drill must be no more than
+  90 days old.
+
+OpenClaw npm and plugin npm publication use GitHub trusted publishing. The
+normal publish path does not use a local npm token. Npm dist-tag mutation is a
+separate restricted release-ops operation because it still requires a token.
+
+## Know which release you are operating
+
+Do not treat every artifact in this repository as part of one version train.
+
+| Release surface    | Normal trigger                                                                                  | Published output                                                                                                                                                        | Coupling                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Repository release | Maintainer dispatches `OpenClaw Release Publish` for an existing tag                            | `openclaw` on npm, all publishable official plugins on npm and ClawHub, GitHub release notes and immutable evidence; stable also promotes signed Windows Hub installers | One coordinated release; core npm waits for plugin npm success                                    |
+| Container images   | A non-alpha `v*` tag push triggers `Docker Release`; manual dispatch is recovery-only           | Multi-architecture version, slim, and browser images in GHCR; a stable tag also advances the moving stable image tags                                                   | Uses the same Git tag, but failure is recovered by exact-tag backfill rather than npm republish   |
+| macOS app          | Restricted release-ops validation, preflight, and publish workflows                             | Signed and notarized zip, dmg, dSYM zip, and stable-only Sparkle appcast                                                                                                | Required for stable; normally skipped for beta; public `macOS Release` only validates the handoff |
+| Windows Hub        | `OpenClaw Release Publish` dispatches `Windows Node Release` for stable                         | Signed x64/ARM64 installers and checksum manifest on the canonical GitHub release                                                                                       | Required for stable; source binaries come from an exact approved Windows Node release             |
+| iOS and Android    | Separate Fastlane/store workflows using `apps/ios/version.json` and `apps/android/version.json` | TestFlight/App Store and Play/third-party artifacts                                                                                                                     | Independent mobile trains; not automatically published by an OpenClaw repository tag              |
+| Plugin-only repair | Direct child workflow or `OpenClaw Release Publish` with core npm disabled and selected plugins | Selected plugin packages on npm and/or ClawHub                                                                                                                          | Recovery path only; do not use selected scope for a repository release                            |
+
+The root `package.json` is the repository release version source. `pnpm
+release:prep` synchronizes publishable plugin versions and other generated
+release state from it. The macOS package reads the root version. iOS and Android
+remain independently pinned; their store procedures are documented in
+`apps/ios/README.md` and `apps/android/README.md`.
+
+## Separate operator decisions from automation
+
+Maintainers own the irreversible decisions: choose the train and channel,
+curate release notes, create the release branch and immutable tag, approve
+protected environments, select signed Windows inputs, review performance and
+validation evidence, promote dist-tags, publish announcements, and decide on a
+rollback or forward fix.
+
+Automation owns repeatable mechanics: generated-file checks, package and
+dependency evidence, Full Release Validation fan-out, prepared-tarball reuse,
+trusted npm publication, plugin and ClawHub orchestration, GitHub draft creation,
+Windows asset verification, tag-triggered container publication, post-publish
+evidence, and stable-main closeout verification.
+
+No tag push publishes npm by itself. Core npm publication starts only from a
+manual `OpenClaw Release Publish` dispatch and a protected environment approval.
+
+## Happy-path checklist
+
+- [ ] Choose the exact stable or beta version. Confirm the previous stable/beta
+      tags and npm versions; ignore alpha-only tags when advancing the train.
+- [ ] Start from current green `main`. Rewrite the target `CHANGELOG.md`
+      section from all merged PRs and direct commits since the last reachable
+      release tag, commit it on `main`, and create `release/YYYY.M.PATCH` from
+      that exact commit.
+- [ ] Set the root version for the intended tag, run `pnpm release:prep`, review
+      every generated change, and commit the release preparation on the release
+      branch. Do not change the independently pinned mobile versions unless a
+      mobile release is also intended.
+- [ ] Run the local pretag gate with a real placeholder replacement:
+      `RELEASE_TAG=<vYYYY.M.PATCH[-beta.N]> pnpm release:fast-pretag-check`.
+- [ ] Push the release branch, require exact-SHA CI and release gates, then
+      create and push the immutable release tag from that release-branch commit.
+- [ ] Run `pnpm release:candidate -- --tag <tag>` from the matching release
+      branch. For stable, also pass
+      `--windows-node-tag <exact-windows-node-tag>`. Save the successful npm
+      preflight and Full Release Validation run IDs.
+- [ ] Review the candidate helper output, performance signal, dependency
+      evidence, plugin plans, and native inputs. Dispatch the exact
+      `OpenClaw Release Publish` command printed by the helper and approve the
+      `npm-release` environment.
+- [ ] Verify npm, plugin npm, ClawHub, the GitHub release body and evidence
+      assets, and the tag-triggered container run. Run the published-package
+      beta roster before stable promotion.
+- [ ] For stable, complete Windows promotion, macOS release-ops publish,
+      `appcast.xml`, npm `latest` promotion when needed, and stable-main
+      closeout. Verify the immutable closeout manifest and checksum.
+- [ ] Announce the release and record any partial failure or waived evidence.
+      A red required workflow, a draft GitHub release, or missing stable asset
+      means the release is not complete.
 
 ## Version naming
 
@@ -61,7 +165,7 @@ OpenClaw has three public release lanes:
 - Detailed release procedure, approvals, credentials, and recovery notes are
   maintainer-only
 
-## Release operator checklist
+## Detailed repository release flow
 
 This checklist is the public shape of the release flow. Private credentials,
 signing, notarization, dist-tag recovery, and emergency rollback details stay in
@@ -80,8 +184,8 @@ the maintainer-only release runbook.
    intentionally carried.
 4. Create `release/YYYY.M.PATCH` from current `main`; do not do normal release work
    directly on `main`.
-5. Bump every required version location for the intended tag, then run
-   `pnpm release:prep`. It refreshes plugin versions, plugin inventory, config
+5. Set the root `package.json` version for the intended tag, then run
+   `pnpm release:prep`. It refreshes plugin versions, shrinkwraps, plugin inventory, config
    schema, bundled channel config metadata, config docs baseline, plugin SDK
    exports, and plugin SDK API baseline in the right order. Commit any generated
    drift before tagging. Then run the local deterministic preflight:
@@ -157,6 +261,32 @@ the maintainer-only release runbook.
     dist-tag promotion when needed, verify the generated GitHub release page,
     run the release announcement steps, then complete [Stable main
     closeout](#stable-main-closeout) before calling a stable release finished.
+
+## Prepare changelog and release notes
+
+`CHANGELOG.md` is release-owned. Ordinary feature and fix PRs do not add their
+own release entries.
+
+1. Before each beta or stable candidate, rebuild the target
+   `## YYYY.M.PATCH` section from Git history between the last reachable release
+   tag and the target SHA. Include merged PRs and direct commits, deduplicate
+   overlapping changes, preserve issue/PR references and contributor credit,
+   and omit internal-only implementation noise from user-facing bullets.
+2. Use `### Highlights`, `### Changes`, and `### Fixes`. A beta such as
+   `vYYYY.M.PATCH-beta.N` uses the stable-base `## YYYY.M.PATCH` section; do not
+   create beta-specific headings.
+3. Commit the changelog rewrite on `main` before creating the release branch.
+   Refresh the same section after any rebase or backport that changes the
+   candidate contents.
+4. The publish workflow uses the complete matching changelog section for the
+   GitHub release body. Do not replace it with highlights-only notes. The macOS
+   appcast path uses `scripts/changelog-to-html.sh` to render the same release
+   section.
+5. Before publish, review compatibility records in
+   `src/plugins/compat/registry.ts` and
+   `src/commands/doctor/shared/deprecation-compat.ts`.
+   Remove expired runtime compatibility only when the supported upgrade path is
+   still repaired by doctor, or record the owner-approved reason it remains.
 
 ## Stable main closeout
 
@@ -910,17 +1040,111 @@ CLI (`op`) commands only inside a dedicated tmux session. Do not call `op`
 directly from the main agent shell; keeping it inside tmux makes prompts,
 alerts, and OTP handling observable and prevents repeated host alerts.
 
+## Verify publication and promotion
+
+Verification must prove the immutable version, not only a moving channel.
+
+1. Run the repository verifier against the exact published version:
+
+   ```bash
+   node --import tsx scripts/openclaw-npm-postpublish-verify.ts <YYYY.M.PATCH[-beta.N]>
+   ```
+
+2. Confirm the exact npm version, integrity, provenance, and expected dist-tag.
+   A moving `beta` or `latest` lookup is useful only after the exact-version
+   proof succeeds.
+3. Inspect the GitHub release. Its body must match the complete changelog
+   section, and its assets must include dependency evidence, the release
+   manifest and checksum, and post-publish evidence and checksum. Stable must
+   also include the signed Windows installers/checksum and macOS zip, dmg, and
+   dSYM zip.
+4. Inspect the recorded child workflow run IDs in the post-publish evidence.
+   The Full Release Validation, plugin npm, OpenClaw npm, optional ClawHub, and
+   optional Telegram runs must resolve to the intended release SHA and expected
+   conclusions.
+5. Confirm `Docker Release` succeeded for the tag. Stable tags update the moving
+   stable container aliases; beta tags publish versioned images without moving
+   them.
+6. For stable, verify npm `latest`, `appcast.xml` on `main`, the packaged macOS
+   short/build versions, the canonical Windows assets, and the stable closeout
+   manifest/checksum before announcing completion.
+
+The immutable GitHub release evidence is the primary incident-response record.
+Do not rely on a chat transcript, a moving dist-tag, or the current state of a
+release branch as proof of what shipped.
+
+## Recovery and rollback rules
+
+- Published npm versions and pushed release tags are immutable. If code must
+  change after publication, cut the next `-beta.N` or a stable correction
+  `YYYY.M.PATCH-N`; never overwrite or republish the old identity.
+- If npm publication succeeded but later orchestration failed, do not rerun the
+  same npm publish. Verify the exact registry version, reuse the original child
+  run IDs, and repair the draft/evidence/asset state around the published
+  package.
+- Prefer a forward fix over deleting public release history. Keep an incomplete
+  GitHub release as a draft until all required evidence and stable assets are
+  present.
+- Roll back a channel by moving the npm dist-tag to a previously verified
+  immutable version through the restricted release-ops workflow. Do not publish
+  a duplicate package to simulate a rollback.
+- Recover containers with a manual `Docker Release` backfill for the exact
+  existing tag. Do not cut a new npm release solely because container
+  publication failed.
+- Recover macOS packaging with the original tag and the approved release branch
+  when the source delta is limited to packaging, signing, notarization, or
+  validation machinery. A source-code hotfix that changes the shipped package
+  requires a correction release.
+- A stable rollback is a product and release-owner decision because npm,
+  GitHub, containers, Windows assets, the Sparkle feed, and stable-main evidence
+  must stay coherent. Use the private runbook for the credentialed commands and
+  record which immutable predecessor was restored.
+
+## Troubleshoot partial releases
+
+| Symptom                                                                            | What it means                                                                                | Safe recovery                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local generated or pretag check fails                                              | The candidate is not internally consistent                                                   | Fix the release branch, rerun `pnpm release:prep`, commit the generated changes, and rerun the failed checks before tagging                                                                              |
+| Full Release Validation is red                                                     | Candidate behavior or packaging evidence is incomplete                                       | Fix on the release branch and rerun the smallest affected lane; rerun the full umbrella whenever the fix invalidates shared candidate evidence                                                           |
+| Npm preflight succeeded, but the candidate SHA changed                             | Prepared tarball and evidence no longer describe the candidate                               | Discard the old run IDs and rerun preflight and Full Release Validation for the new exact SHA                                                                                                            |
+| Plugin npm publish fails before core npm                                           | The coordinated repository release cannot safely publish core                                | Repair the failed plugin publication or package ownership issue; do not switch to selected scope or publish core without all publishable official plugins                                                |
+| ClawHub is partial or red                                                          | Some plugin sidecar packages did not verify                                                  | Use the recorded preview/publish results to retry only missing packages. Do not republish npm packages that already exist                                                                                |
+| OpenClaw npm child succeeded, parent failed during immediate registry verification | Registry propagation or later evidence assembly failed after the immutable package existed   | Confirm the exact version with a cache-bypassed registry read, run the post-publish verifier, and repair the existing draft/evidence with the original run IDs; never rerun npm publish for that version |
+| GitHub release is still a draft                                                    | Post-publish proof, plugin/ClawHub completion, or stable native assets are incomplete        | Inspect the parent and child runs, repair the missing evidence or assets, then publish the existing draft only after verification passes                                                                 |
+| Stable Windows promotion fails                                                     | Source tag, digest map, Authenticode signer, or canonical target assets did not verify       | Keep the GitHub release draft. Correct the approved source release or digest input and rerun `Windows Node Release` for the exact tags                                                                   |
+| `Docker Release` fails after tag push                                              | Npm may be healthy, but the versioned container is missing or unverifiable                   | Fix the container workflow and manually backfill the exact existing tag through the protected `docker-release` environment                                                                               |
+| macOS publish fails after npm succeeds                                             | Native packaging is incomplete; npm must not be republished                                  | Repair release-ops, rerun mac validation/preflight/publish for the original tag and allowed source branch, then verify assets and appcast                                                                |
+| Appcast direct push is blocked                                                     | Stable binaries may exist, but the production Sparkle feed is not closed out                 | Use the appcast PR created or updated by automation, merge it, then rerun stable-main verification                                                                                                       |
+| Stable closeout skips or fails                                                     | `main`, immutable evidence, performance/soak proof, or rollback-drill metadata is incomplete | Correct the specific state, update private drill metadata when required, and use manual dispatch only to repair or replay the evidence-backed closeout                                                   |
+| Mobile store upload fails                                                          | The independent iOS or Android train failed                                                  | Repair and rerun that store lane using its pinned mobile version; do not roll back or republish the repository release unless it is actually affected                                                    |
+
+For any failure after a public side effect, write down the exact immutable
+version, tag SHA, workflow run IDs, published registries, GitHub release state,
+and missing evidence before taking recovery action.
+
 ## Public references
 
-- [`.github/workflows/full-release-validation.yml`](https://github.com/openclaw/openclaw/blob/main/.github/workflows/full-release-validation.yml)
-- [`.github/workflows/package-acceptance.yml`](https://github.com/openclaw/openclaw/blob/main/.github/workflows/package-acceptance.yml)
-- [`.github/workflows/openclaw-npm-release.yml`](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-npm-release.yml)
-- [`.github/workflows/openclaw-release-checks.yml`](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-release-checks.yml)
-- [`.github/workflows/openclaw-cross-os-release-checks-reusable.yml`](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-cross-os-release-checks-reusable.yml)
-- [`scripts/resolve-openclaw-package-candidate.mjs`](https://github.com/openclaw/openclaw/blob/main/scripts/resolve-openclaw-package-candidate.mjs)
-- [`scripts/openclaw-npm-release-check.ts`](https://github.com/openclaw/openclaw/blob/main/scripts/openclaw-npm-release-check.ts)
-- [`scripts/package-mac-dist.sh`](https://github.com/openclaw/openclaw/blob/main/scripts/package-mac-dist.sh)
-- [`scripts/make_appcast.sh`](https://github.com/openclaw/openclaw/blob/main/scripts/make_appcast.sh)
+- [Full Release Validation workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/full-release-validation.yml)
+- [Package Acceptance workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/package-acceptance.yml)
+- [OpenClaw Release Publish workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-release-publish.yml)
+- [OpenClaw npm workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-npm-release.yml)
+- [Plugin npm workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/plugin-npm-release.yml)
+- [Plugin ClawHub workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/plugin-clawhub-release.yml)
+- [Release Checks workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-release-checks.yml)
+- [Docker Release workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/docker-release.yml)
+- [Public macOS handoff workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/macos-release.yml)
+- [Windows Node promotion workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/windows-node-release.yml)
+- [Stable main closeout workflow](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-stable-main-closeout.yml)
+- [Cross-OS release checks](https://github.com/openclaw/openclaw/blob/main/.github/workflows/openclaw-cross-os-release-checks-reusable.yml)
+- [Generated release preflight](https://github.com/openclaw/openclaw/blob/main/scripts/release-preflight.mjs)
+- [Release-candidate checklist](https://github.com/openclaw/openclaw/blob/main/scripts/release-candidate-checklist.mjs)
+- [Package candidate resolver](https://github.com/openclaw/openclaw/blob/main/scripts/resolve-openclaw-package-candidate.mjs)
+- [Npm release check](https://github.com/openclaw/openclaw/blob/main/scripts/openclaw-npm-release-check.ts)
+- [Post-publish verifier](https://github.com/openclaw/openclaw/blob/main/scripts/openclaw-npm-postpublish-verify.ts)
+- [macOS fallback packager](https://github.com/openclaw/openclaw/blob/main/scripts/package-mac-dist.sh)
+- [Sparkle appcast generator](https://github.com/openclaw/openclaw/blob/main/scripts/make_appcast.sh)
+- [iOS release guide](https://github.com/openclaw/openclaw/blob/main/apps/ios/README.md)
+- [Android release guide](https://github.com/openclaw/openclaw/blob/main/apps/android/README.md)
 
 Maintainers use the private release docs in
 [`openclaw/maintainers/release/README.md`](https://github.com/openclaw/maintainers/blob/main/release/README.md)

@@ -4075,8 +4075,12 @@ describe("runCodexAppServerAttempt", () => {
     const workspaceDir = path.join(tempDir, "workspace");
     const agentDir = path.join(tempDir, "agent");
     const pluginConfig = {
+      appServer: {
+        mode: "guardian" as const,
+      },
       codexPlugins: {
         enabled: true,
+        allow_destructive_actions: "ask" as const,
         plugins: {
           "google-calendar": {
             marketplaceName: "openai-curated",
@@ -4185,6 +4189,9 @@ describe("runCodexAppServerAttempt", () => {
           },
         };
       }
+      if (method === "config/read") {
+        return { config: {} };
+      }
       if (method === "thread/start") {
         return threadStartResult("thread-1");
       }
@@ -4253,14 +4260,22 @@ describe("runCodexAppServerAttempt", () => {
     const requestCalls = request.mock.calls as unknown as Array<[string, unknown, unknown?]>;
     const threadStart = requestCalls.find(([method]) => method === "thread/start");
     const threadStartParams = threadStart?.[1] as
-      | { approvalPolicy?: { granular?: { mcp_elicitations?: boolean } } }
+      | {
+          approvalPolicy?: { granular?: { mcp_elicitations?: boolean } };
+          approvalsReviewer?: string;
+        }
       | undefined;
     expect(threadStartParams?.approvalPolicy?.granular?.mcp_elicitations).toBe(true);
+    expect(threadStartParams?.approvalsReviewer).toBe("user");
     const turnStart = requestCalls.find(([method]) => method === "turn/start");
     const turnStartParams = turnStart?.[1] as
-      | { approvalPolicy?: { granular?: { mcp_elicitations?: boolean } } }
+      | {
+          approvalPolicy?: { granular?: { mcp_elicitations?: boolean } };
+          approvalsReviewer?: string;
+        }
       | undefined;
     expect(turnStartParams?.approvalPolicy?.granular?.mcp_elicitations).toBe(true);
+    expect(turnStartParams?.approvalsReviewer).toBe("user");
 
     await notify({
       method: "turn/completed",
@@ -5477,6 +5492,32 @@ describe("runCodexAppServerAttempt", () => {
     const turnRequestParams = turnRequest?.params as Record<string, unknown> | undefined;
     expect(turnRequestParams?.approvalPolicy).toBe("on-request");
     expect(turnRequestParams?.approvalsReviewer).toBe("user");
+  });
+
+  it("enables Guardian on the first turn after a fresh thread confirms the OpenAI provider", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const { requests, waitForMethod, completeTurn } = createStartedThreadHarness();
+    const params = createParams(sessionFile, workspaceDir);
+
+    const run = runCodexAppServerAttempt(params, {
+      pluginConfig: {
+        appServer: {
+          mode: "guardian",
+        },
+      },
+    });
+    await waitForMethod("turn/start");
+    await completeTurn({ threadId: "thread-1", turnId: "turn-1" });
+    await run;
+
+    const startRequest = requests.find((request) => request.method === "thread/start");
+    const startRequestParams = startRequest?.params as Record<string, unknown> | undefined;
+    expect(startRequestParams?.approvalsReviewer).toBe("user");
+
+    const turnRequest = requests.find((request) => request.method === "turn/start");
+    const turnRequestParams = turnRequest?.params as Record<string, unknown> | undefined;
+    expect(turnRequestParams?.approvalsReviewer).toBe("auto_review");
   });
 
   it("uses human approval instead of Guardian for custom OpenAI-compatible endpoints", async () => {
