@@ -16,14 +16,13 @@ const SESSION_MEMORY_ROLE_DIRECTIVE_BLOCK_RE = /<(system|assistant|user)\b[^>]*>
 const SESSION_MEMORY_ROLE_DIRECTIVE_TAG_RE = /<\/?(?:system|assistant|user)\b[^>]*>/gi;
 const SESSION_MEMORY_MEDIA_PLACEHOLDER_RE = /(^|\n)\s*<media:[^>]+>(?:\s*\([^)]*\))?\s*/gi;
 const SESSION_MEMORY_TRAILING_NO_REPLY_RE = /(?:^|\n)\s*NO_REPLY\s*$/i;
-
-// Strip orphan plain-text role-token lines (e.g. a line containing only "user",
-// "assistant", or "system") that leak from quantized-local-model SSE streams.
-// These are distinct from XML role directives (/<system>...</system>/ etc.) which
-// are already removed above by SESSION_MEMORY_ROLE_DIRECTIVE_BLOCK/TAG_RE.
-// The /m flag anchors ^/$ to line boundaries so we only match lines whose sole
-// content after trimming is a bare role word (optionally followed by a colon).
-const SESSION_MEMORY_ORPHAN_ROLE_LINE_RE = /^\s*(?:user|assistant|system)\s*:?\s*$/gim;
+const SESSION_MEMORY_LINE_BREAK_RE = /\r\n|[\r\n\u2028\u2029]/g;
+const SESSION_MEMORY_ROLE_LINE_RE = new RegExp(
+  `(?:^|${SESSION_MEMORY_LINE_BREAK_RE.source})` +
+    String.raw`[ \t]*(?:user|assistant|system)[ \t]*:?[ \t]*` +
+    `(?=${SESSION_MEMORY_LINE_BREAK_RE.source}|$)`,
+  "i",
+);
 
 function isNoReplyMarker(text: string): boolean {
   const trimmed = text.trim();
@@ -39,11 +38,12 @@ export function sanitizeSessionMemoryTranscriptText(text: string): string | null
     .replace(SESSION_MEMORY_ROLE_DIRECTIVE_BLOCK_RE, "")
     .replace(SESSION_MEMORY_ROLE_DIRECTIVE_TAG_RE, "")
     .replace(SESSION_MEMORY_MEDIA_PLACEHOLDER_RE, "$1")
-    .replace(SESSION_MEMORY_TRAILING_NO_REPLY_RE, "")
-    .replace(SESSION_MEMORY_ORPHAN_ROLE_LINE_RE, "")
-    .trim();
+    .replace(SESSION_MEMORY_TRAILING_NO_REPLY_RE, "");
+  const withoutBoundaryBlankLines = withoutArtifacts
+    .replace(/^(?:[ \t]*(?:\r\n|[\r\n]))+/, "")
+    .replace(/(?:(?:\r\n|[\r\n])[ \t]*)+$/, "");
 
-  return withoutArtifacts || null;
+  return withoutBoundaryBlankLines.trim() ? withoutBoundaryBlankLines : null;
 }
 
 function extractTextMessageContent(content: unknown): string | undefined {
@@ -65,6 +65,16 @@ function extractTextMessageContent(content: unknown): string | undefined {
   return undefined;
 }
 
+function formatTranscriptMessage(role: "user" | "assistant", text: string): string {
+  if (role === "assistant" && SESSION_MEMORY_ROLE_LINE_RE.test(text)) {
+    // Keep model bytes intact inside one container. Role-shaped lines become
+    // non-standalone, and open code fences end at this message boundary.
+    const quoted = `> ${text.replace(SESSION_MEMORY_LINE_BREAK_RE, (lineBreak) => `${lineBreak}> `)}`;
+    return `**assistant:**\n\n${quoted}\n`;
+  }
+  return `${role}: ${text}`;
+}
+
 export async function getRecentSessionContent(
   sessionFilePath: string,
   messageCount = 15,
@@ -74,7 +84,7 @@ export async function getRecentSessionContent(
     const lines = content.trim().split("\n");
 
     const allMessages: string[] = [];
-    let lastAssistantText: string | undefined;
+    let lastAssistantCanonicalText: string | undefined;
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
@@ -92,22 +102,25 @@ export async function getRecentSessionContent(
             if (role === "user") {
               // New turn: reset even when slash commands are omitted from
               // memory, so later standalone delivery mirrors are preserved.
-              lastAssistantText = undefined;
+              lastAssistantCanonicalText = undefined;
             }
             const text = extractTextMessageContent(msg.content);
             const sanitized = text ? sanitizeSessionMemoryTranscriptText(text) : null;
+            const canonicalText = sanitized?.trim();
             // Skip delivery-mirror rows only when they duplicate the preceding
             // assistant text. Delivery-mirror rows with unique visible content
             // (e.g., message-tool replies) are preserved.
             if (isOpenClawDeliveryMirrorAssistantMessage(msg)) {
-              if (sanitized && sanitized === lastAssistantText) {
+              if (canonicalText && canonicalText === lastAssistantCanonicalText) {
                 continue;
               }
             }
-            if (sanitized && !sanitized.startsWith("/")) {
-              allMessages.push(`${role}: ${sanitized}`);
+            if (sanitized && canonicalText && !canonicalText.startsWith("/")) {
+              allMessages.push(formatTranscriptMessage(role, sanitized));
               if (role === "assistant") {
-                lastAssistantText = sanitized;
+                // Delivery mirrors trim outer whitespace at write time. Keep
+                // display bytes lossless, but deduplicate their canonical form.
+                lastAssistantCanonicalText = canonicalText;
               }
             }
           }
@@ -117,7 +130,7 @@ export async function getRecentSessionContent(
       }
     }
 
-    return allMessages.slice(-messageCount).join("\n");
+    return allMessages.slice(-messageCount).join("\n").replace(/\n+$/, "");
   } catch {
     return null;
   }
