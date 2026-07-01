@@ -56,13 +56,18 @@ function createModelUsageProviderIds(
   registry: PluginRegistry,
   pluginId: string,
 ): ReadonlySet<string> {
-  const providerIds = new Set<string>();
+  const owners = new Map<string, string | null>();
   for (const entry of registry.providers) {
-    if (entry.pluginId !== pluginId) {
+    const providerId = normalizeProviderId(entry.provider.id);
+    if (!providerId) {
       continue;
     }
-    const providerId = normalizeProviderId(entry.provider.id);
-    if (providerId) {
+    const owner = owners.get(providerId);
+    owners.set(providerId, owner === undefined || owner === entry.pluginId ? entry.pluginId : null);
+  }
+  const providerIds = new Set<string>();
+  for (const [providerId, owner] of owners) {
+    if (owner === pluginId) {
       providerIds.add(providerId);
     }
   }

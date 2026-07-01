@@ -423,7 +423,9 @@ describe("startPluginServices", () => {
     };
     const handle = await startPluginServices({
       registry: createRegistry([usageService], "usage-plugin", "workspace", false, [
-        { provider: createProvider("openai") },
+        { provider: createProvider("anthropic") },
+        { provider: createProvider("OpenAI") },
+        { pluginId: "other-plugin", provider: createProvider("openai") },
       ]),
       config,
     });
@@ -453,8 +455,8 @@ describe("startPluginServices", () => {
       },
     );
     emitModelUsageEvent(config, {
-      sessionKey: "other-provider",
-      provider: "anthropic",
+      sessionKey: "colliding-provider",
+      provider: "openai",
       usage: { total: 1 },
     });
     emitModelUsageEvent(config, {
@@ -462,7 +464,7 @@ describe("startPluginServices", () => {
       sessionId: "session-1",
       channel: "slack",
       agentId: "main",
-      provider: "openai",
+      provider: "anthropic",
       model: "gpt-5.5",
       usage: {
         input: 10,
@@ -495,7 +497,7 @@ describe("startPluginServices", () => {
         sessionId: "session-1",
         channel: "slack",
         agentId: "main",
-        provider: "openai",
+        provider: "anthropic",
         model: "gpt-5.5",
         usage: {
           input: 10,
