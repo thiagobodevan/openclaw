@@ -67,6 +67,11 @@ type DiagnosticLogCode = {
   functionName?: string;
   siteId?: string;
 };
+export type DiagnosticLogSource = {
+  filePath?: string;
+  line?: number;
+  functionName?: string;
+};
 
 const MAX_DIAGNOSTIC_LOG_BINDINGS_JSON_CHARS = 8 * 1024;
 const MAX_DIAGNOSTIC_LOG_MESSAGE_CHARS = 4 * 1024;
@@ -100,8 +105,10 @@ const DIAGNOSTIC_LOG_SEMANTIC_SOURCE_KEYS = new Set([
   "log.outcome",
   "log.reason",
   "__openclawDiagnosticLogSemantics",
+  "__openclawDiagnosticLogSource",
 ]);
 const DIAGNOSTIC_LOG_SEMANTICS_FIELD = "__openclawDiagnosticLogSemantics";
+const DIAGNOSTIC_LOG_SOURCE_FIELD = "__openclawDiagnosticLogSource";
 const DIAGNOSTIC_LOG_SEMANTICS_TOKEN = `${Date.now()}:${Math.random()}`;
 const defaultHostnameResolver: HostnameResolver = () => os.hostname();
 let hostnameResolver: HostnameResolver = defaultHostnameResolver;
@@ -122,12 +129,26 @@ type AttachedDiagnosticLogSemantics = {
   fields: DiagnosticLogSemantics;
   proof: string;
 };
+type AttachedDiagnosticLogSource = {
+  fields: DiagnosticLogSource;
+  proof: string;
+};
+const STRIPPED_DIAGNOSTIC_LOG_VALUE = Symbol("strippedDiagnosticLogValue");
 
 function readAttachedDiagnosticLogSemantics(
   source: Record<string, unknown> | undefined,
 ): DiagnosticLogSemantics | undefined {
   const candidate = source?.[DIAGNOSTIC_LOG_SEMANTICS_FIELD] as
     | AttachedDiagnosticLogSemantics
+    | undefined;
+  return candidate?.proof === DIAGNOSTIC_LOG_SEMANTICS_TOKEN ? candidate.fields : undefined;
+}
+
+function readAttachedDiagnosticLogSource(
+  source: Record<string, unknown> | undefined,
+): DiagnosticLogSource | undefined {
+  const candidate = source?.[DIAGNOSTIC_LOG_SOURCE_FIELD] as
+    | AttachedDiagnosticLogSource
     | undefined;
   return candidate?.proof === DIAGNOSTIC_LOG_SEMANTICS_TOKEN ? candidate.fields : undefined;
 }
@@ -145,6 +166,17 @@ export function attachDiagnosticLogSemantics<T extends Record<string, unknown>>(
 
 export function hasDiagnosticLogSemantics(source: Record<string, unknown> | undefined): boolean {
   return Boolean(readAttachedDiagnosticLogSemantics(source));
+}
+
+export function attachDiagnosticLogSource<T extends Record<string, unknown>>(
+  source: T,
+  diagnosticSource: DiagnosticLogSource,
+): T {
+  source[DIAGNOSTIC_LOG_SOURCE_FIELD] = {
+    fields: diagnosticSource,
+    proof: DIAGNOSTIC_LOG_SEMANTICS_TOKEN,
+  };
+  return source;
 }
 
 export function splitDiagnosticLogSemanticFields(source: Record<string, unknown> | undefined): {
@@ -413,19 +445,44 @@ function readDiagnosticLogSemanticValue(
   return semantics?.[key];
 }
 
-function stripDiagnosticLogSemanticsFromValue(value: unknown): unknown {
-  if (!isPlainLogRecordObject(value) || !hasDiagnosticLogSemantics(value)) {
+function stripDiagnosticLogInternalFieldsFromValue(
+  value: unknown,
+): unknown | typeof STRIPPED_DIAGNOSTIC_LOG_VALUE {
+  if (
+    !isPlainLogRecordObject(value) ||
+    (!hasDiagnosticLogSemantics(value) && !readAttachedDiagnosticLogSource(value))
+  ) {
     return value;
   }
   const copy = { ...value };
   delete copy[DIAGNOSTIC_LOG_SEMANTICS_FIELD];
+  delete copy[DIAGNOSTIC_LOG_SOURCE_FIELD];
+  if (Object.keys(copy).length === 0) {
+    return STRIPPED_DIAGNOSTIC_LOG_VALUE;
+  }
   return copy;
 }
 
 function stripDiagnosticLogSemanticsFromRecord<T extends LogObj>(record: T): T {
   const copy = { ...record };
   for (const key of Object.keys(copy)) {
-    copy[key] = stripDiagnosticLogSemanticsFromValue(copy[key]);
+    const stripped = stripDiagnosticLogInternalFieldsFromValue(copy[key]);
+    if (stripped === STRIPPED_DIAGNOSTIC_LOG_VALUE) {
+      delete copy[key];
+    } else {
+      copy[key] = stripped;
+    }
+  }
+  const numericEntries = Object.entries(copy)
+    .filter(([key]) => /^\d+$/u.test(key))
+    .toSorted((a, b) => Number(a[0]) - Number(b[0]));
+  if (numericEntries.some(([key], index) => key !== String(index))) {
+    for (const [key] of numericEntries) {
+      delete copy[key];
+    }
+    numericEntries.forEach(([, value], index) => {
+      copy[String(index)] = value;
+    });
   }
   return copy;
 }
@@ -764,15 +821,24 @@ function buildDiagnosticLogRecord(logObj: TsLogRecord) {
   addDiagnosticLogAttributesFrom(attributes, attributeState, bindings);
   addDiagnosticLogAttributesFrom(attributes, attributeState, structuredBindings);
 
+  const diagnosticSource = readAttachedDiagnosticLogSource(structuredBindings);
+  const hasDiagnosticSource = Boolean(diagnosticSource);
   const code: DiagnosticLogCode = {};
-  if (meta?.path?.fileLine) {
-    const line = Number(meta.path.fileLine);
+  const sourceLine = diagnosticSource?.line ?? meta?.path?.fileLine;
+  if (sourceLine !== undefined) {
+    const line = Number(sourceLine);
     if (Number.isFinite(line)) {
       code.line = line;
     }
   }
-  if (meta?.path?.method) {
-    code.functionName = sanitizeDiagnosticLogText(meta.path.method, MAX_DIAGNOSTIC_LOG_NAME_CHARS);
+  const sourceFunctionName = hasDiagnosticSource
+    ? diagnosticSource?.functionName
+    : meta?.path?.method;
+  if (sourceFunctionName) {
+    code.functionName = sanitizeDiagnosticLogText(
+      sourceFunctionName,
+      MAX_DIAGNOSTIC_LOG_NAME_CHARS,
+    );
   }
 
   const loggerName = normalizeDiagnosticLogName(meta?.name);
@@ -840,7 +906,7 @@ function buildDiagnosticLogRecord(logObj: TsLogRecord) {
     diagnosticLogEventFromCode(category, logLevelName, code),
   );
   const siteId = diagnosticLogSiteId({
-    filePath: meta?.path?.filePath,
+    filePath: diagnosticSource?.filePath ?? meta?.path?.filePath,
     line: code.line,
     functionName: code.functionName,
     category,
