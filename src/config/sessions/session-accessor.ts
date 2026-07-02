@@ -14,7 +14,7 @@ import {
 } from "../../gateway/session-store-key.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { resolveRequiredHomeDir } from "../../infra/home-dir.js";
-import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import { normalizeAgentId, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import type {
   SessionTranscriptUpdate,
@@ -138,6 +138,8 @@ export type SessionAccessScope = {
 };
 
 export type LogicalSessionAccessScope = {
+  /** Explicit owner for ambiguous global session keys. */
+  agentId?: string;
   /** Runtime config whose session store rules define the logical session owner. */
   cfg: OpenClawConfig;
   /** Environment override used when resolving configured/discovered agent stores. */
@@ -820,7 +822,12 @@ function resolveSessionEntryStoreTarget(
 ): ResolvedSessionEntryStoreTarget {
   const requestedKey = scope.sessionKey.trim();
   const canonicalKey = resolveSessionStoreKey({ cfg: scope.cfg, sessionKey: requestedKey });
-  const agentId = resolveSessionStoreAgentId(scope.cfg, canonicalKey);
+  // Global scope collapses every agent's main alias to one key. Preserve the
+  // caller's selected owner so lookup cannot fall back to the default agent.
+  const agentId =
+    canonicalKey === "global" && scope.agentId?.trim()
+      ? normalizeAgentId(scope.agentId)
+      : resolveSessionStoreAgentId(scope.cfg, canonicalKey);
   const scanTargets = buildLogicalSessionEntryCandidateKeys({
     agentId,
     canonicalKey,

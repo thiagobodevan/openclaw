@@ -1285,6 +1285,39 @@ describe("session accessor file-backed seam", () => {
     );
   });
 
+  it("uses the explicit owner when a global key is ambiguous", async () => {
+    const stateDir = path.join(tempDir, "global-state");
+    const env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
+    const storeTemplate = path.join(stateDir, "agents", "{agentId}", "sessions", "sessions.json");
+    const cfg = {
+      session: { scope: "global", store: storeTemplate },
+      agents: { list: [{ id: "personal", default: true }, { id: "work" }] },
+    } satisfies OpenClawConfig;
+    const personalStorePath = storeTemplate.replace("{agentId}", "personal");
+    const workStorePath = storeTemplate.replace("{agentId}", "work");
+    const now = Date.now();
+    await saveSessionStore(personalStorePath, {
+      global: { sessionId: "personal-global", updatedAt: now },
+    });
+    await saveSessionStore(workStorePath, {
+      global: { sessionId: "work-global", updatedAt: now },
+    });
+
+    const resolved = resolveSessionEntryAccessTarget({
+      cfg,
+      env,
+      agentId: "work",
+      sessionKey: "global",
+    });
+
+    expect(resolved).toMatchObject({
+      agentId: "work",
+      canonicalKey: "global",
+      entry: { sessionId: "work-global" },
+      storeKey: "global",
+    });
+  });
+
   it("applies restart recovery replacements without exposing mutable store rows", async () => {
     fs.writeFileSync(
       storePath,

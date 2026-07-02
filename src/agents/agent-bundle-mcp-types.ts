@@ -90,15 +90,17 @@ export type SessionMcpRuntimeManager = {
   getOrCreate: (params: {
     sessionId: string;
     sessionKey?: string;
+    agentId?: string;
     workspaceDir: string;
     cfg?: OpenClawConfig;
   }) => Promise<SessionMcpRuntime>;
-  bindSessionKey: (sessionKey: string, sessionId: string) => void;
-  resolveSessionId: (sessionKey: string) => string | undefined;
+  bindSessionKey: (sessionKey: string, sessionId: string, agentId?: string) => void;
+  resolveSessionId: (sessionKey: string, agentId?: string) => string | undefined;
   /** Looks up an existing runtime only; must not create runtimes or connect transports. */
   peekSession: (params: {
     sessionId?: string;
     sessionKey?: string;
+    agentId?: string;
   }) => SessionMcpRuntime | undefined;
   disposeSession: (sessionId: string) => Promise<void>;
   disposeAll: () => Promise<void>;

@@ -40,6 +40,15 @@ let sessionsSendA2ADeps: {
   callGateway: GatewayCaller;
 } = defaultSessionsSendA2ADeps;
 
+function isSameAnnounceAudience(left: AnnounceTarget, right: AnnounceTarget): boolean {
+  return (
+    left.channel === right.channel &&
+    left.to === right.to &&
+    left.accountId === right.accountId &&
+    left.threadId === right.threadId
+  );
+}
+
 async function deliverAnnounceReply(params: {
   announceTarget: AnnounceTarget;
   message: string;
@@ -73,13 +82,18 @@ async function deliverAnnounceReply(params: {
 }
 
 export async function runSessionsSendA2AFlow(params: {
+  targetGatewayAgentId?: string;
   targetSessionKey: string;
+  targetIdentitySessionKey?: string;
   displayKey: string;
   message: string;
   announceTimeoutMs: number;
   maxPingPongTurns: number;
   requesterSessionKey?: string;
+  requesterIdentitySessionKey?: string;
+  requesterGatewayAgentId?: string;
   requesterChannel?: GatewayMessageChannel;
+  revalidateAdmission: () => Promise<boolean>;
   baseline?: AssistantReplySnapshot;
   roundOneReply?: string;
   waitRunId?: string;
@@ -95,8 +109,12 @@ export async function runSessionsSendA2AFlow(params: {
         callGateway: sessionsSendA2ADeps.callGateway,
       });
       if (wait.status === "ok") {
+        if (!(await params.revalidateAdmission())) {
+          return;
+        }
         const latestSnapshot = await readLatestAssistantReplySnapshot({
           sessionKey: params.targetSessionKey,
+          agentId: params.targetGatewayAgentId,
           callGateway: sessionsSendA2ADeps.callGateway,
         });
         const baselineFingerprint = params.baseline?.fingerprint;
@@ -115,46 +133,69 @@ export async function runSessionsSendA2AFlow(params: {
       return;
     }
 
-    const announceTarget = await resolveAnnounceTarget({
+    if (!(await params.revalidateAdmission())) {
+      return;
+    }
+    let announceTarget = await resolveAnnounceTarget({
       sessionKey: params.targetSessionKey,
       displayKey: params.displayKey,
+      agentId: params.targetGatewayAgentId,
     });
     const targetChannel = announceTarget?.channel ?? "unknown";
+    const requesterIdentitySessionKey =
+      params.requesterIdentitySessionKey ?? params.requesterSessionKey;
+    const targetIdentitySessionKey = params.targetIdentitySessionKey ?? params.targetSessionKey;
+    const sameSession =
+      Boolean(requesterIdentitySessionKey) &&
+      requesterIdentitySessionKey === targetIdentitySessionKey;
 
     // A same-session send is a human-facing source-channel reply, not a true
     // agent-to-agent announcement. Asking the same session to decide whether to
     // announce can learn stale ANNOUNCE_SKIP patterns from its own history and
     // silently drop a normal channel response.
-    if (
-      announceTarget &&
-      params.requesterSessionKey &&
-      params.requesterSessionKey === params.targetSessionKey &&
-      params.requesterChannel === announceTarget.channel
-    ) {
+    if (announceTarget && sameSession && params.requesterChannel === announceTarget.channel) {
       if (params.waitRunId && !params.roundOneReply && !params.baseline) {
         return;
       }
+      if (!(await params.revalidateAdmission())) {
+        return;
+      }
+      const currentAnnounceTarget = await resolveAnnounceTarget({
+        sessionKey: params.targetSessionKey,
+        displayKey: params.displayKey,
+        agentId: params.targetGatewayAgentId,
+      });
+      if (
+        !currentAnnounceTarget ||
+        !isSameAnnounceAudience(announceTarget, currentAnnounceTarget)
+      ) {
+        return;
+      }
+      if (!(await params.revalidateAdmission())) {
+        return;
+      }
       await deliverAnnounceReply({
-        announceTarget,
+        announceTarget: currentAnnounceTarget,
         message: latestReply,
         runContextId,
       });
       return;
     }
 
-    if (
-      params.maxPingPongTurns > 0 &&
-      params.requesterSessionKey &&
-      params.requesterSessionKey !== params.targetSessionKey
-    ) {
-      let currentSessionKey = params.requesterSessionKey;
-      let nextSessionKey = params.targetSessionKey;
+    if (params.maxPingPongTurns > 0 && params.requesterSessionKey && !sameSession) {
+      let currentRole: "requester" | "target" = "requester";
       let incomingMessage = latestReply;
       for (let turn = 1; turn <= params.maxPingPongTurns; turn += 1) {
-        const currentRole =
-          currentSessionKey === params.requesterSessionKey ? "requester" : "target";
+        const currentSessionKey =
+          currentRole === "requester" ? params.requesterSessionKey : params.targetSessionKey;
+        const currentAgentId =
+          currentRole === "requester"
+            ? params.requesterGatewayAgentId
+            : params.targetGatewayAgentId;
+        const sourceSessionKey =
+          currentRole === "requester" ? targetIdentitySessionKey : requesterIdentitySessionKey;
         const replyPrompt = buildAgentToAgentReplyContext({
-          requesterSessionKey: params.requesterSessionKey,
+          requesterSessionKey: requesterIdentitySessionKey,
           requesterChannel: params.requesterChannel,
           targetSessionKey: params.displayKey,
           targetChannel,
@@ -162,15 +203,20 @@ export async function runSessionsSendA2AFlow(params: {
           turn,
           maxTurns: params.maxPingPongTurns,
         });
+        // Either side can execute this turn. Revalidate the pair immediately
+        // before work so a removed or rebound requester cannot resume later.
+        if (!(await params.revalidateAdmission())) {
+          return;
+        }
         const replyText = await runAgentStep({
+          agentId: currentAgentId,
           sessionKey: currentSessionKey,
           message: incomingMessage,
           extraSystemPrompt: replyPrompt,
           timeoutMs: params.announceTimeoutMs,
           lane: resolveNestedAgentLaneForSession(currentSessionKey),
-          sourceSessionKey: nextSessionKey,
-          sourceChannel:
-            nextSessionKey === params.requesterSessionKey ? params.requesterChannel : targetChannel,
+          sourceSessionKey,
+          sourceChannel: currentRole === "target" ? params.requesterChannel : targetChannel,
           sourceTool: "sessions_send",
         });
         if (!replyText || isReplySkip(replyText) || isNonDeliverableSessionsReply(replyText)) {
@@ -178,14 +224,12 @@ export async function runSessionsSendA2AFlow(params: {
         }
         latestReply = replyText;
         incomingMessage = replyText;
-        const swap = currentSessionKey;
-        currentSessionKey = nextSessionKey;
-        nextSessionKey = swap;
+        currentRole = currentRole === "requester" ? "target" : "requester";
       }
     }
 
     const announcePrompt = buildAgentToAgentAnnounceContext({
-      requesterSessionKey: params.requesterSessionKey,
+      requesterSessionKey: requesterIdentitySessionKey,
       requesterChannel: params.requesterChannel,
       targetSessionKey: params.displayKey,
       targetChannel,
@@ -193,14 +237,18 @@ export async function runSessionsSendA2AFlow(params: {
       roundOneReply: primaryReply,
       latestReply,
     });
+    if (!(await params.revalidateAdmission())) {
+      return;
+    }
     const announceReply = await runAgentStep({
+      agentId: params.targetGatewayAgentId,
       sessionKey: params.targetSessionKey,
       message: "Agent-to-agent announce step.",
       extraSystemPrompt: announcePrompt,
       timeoutMs: params.announceTimeoutMs,
       lane: resolveNestedAgentLaneForSession(params.targetSessionKey),
       transcriptMessage: "",
-      sourceSessionKey: params.requesterSessionKey,
+      sourceSessionKey: requesterIdentitySessionKey,
       sourceChannel: params.requesterChannel,
       sourceTool: "sessions_send",
     });
@@ -211,8 +259,25 @@ export async function runSessionsSendA2AFlow(params: {
       !isAnnounceSkip(announceReply) &&
       !isNonDeliverableSessionsReply(announceReply)
     ) {
+      if (!(await params.revalidateAdmission())) {
+        return;
+      }
+      const currentAnnounceTarget = await resolveAnnounceTarget({
+        sessionKey: params.targetSessionKey,
+        displayKey: params.displayKey,
+        agentId: params.targetGatewayAgentId,
+      });
+      if (
+        !currentAnnounceTarget ||
+        !isSameAnnounceAudience(announceTarget, currentAnnounceTarget)
+      ) {
+        return;
+      }
+      if (!(await params.revalidateAdmission())) {
+        return;
+      }
       await deliverAnnounceReply({
-        announceTarget,
+        announceTarget: currentAnnounceTarget,
         message: announceReply,
         runContextId,
       });

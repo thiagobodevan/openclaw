@@ -30,7 +30,11 @@ export type SessionOrigin = {
   from?: string;
   to?: string;
   nativeChannelId?: string;
+  nativeSenderId?: string;
   nativeDirectUserId?: string;
+  /** External provider that owns the persisted native identity fields. */
+  nativeProvider?: string;
+  parentConversationId?: string;
   accountId?: string;
   threadId?: string | number;
 };

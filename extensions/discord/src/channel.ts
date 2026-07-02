@@ -73,7 +73,10 @@ import {
 import { withAbortTimeout } from "./monitor/timeouts.js";
 import { looksLikeDiscordTargetId, normalizeDiscordMessagingTarget } from "./normalize.js";
 import { discordOutbound } from "./outbound-adapter.js";
-import { resolveDiscordOutboundSessionRoute } from "./outbound-session-route.js";
+import {
+  resolveDiscordCurrentConversationRoute,
+  resolveDiscordOutboundSessionRoute,
+} from "./outbound-session-route.js";
 import type { DiscordProbe } from "./probe.js";
 import { getDiscordRuntime } from "./runtime.js";
 import { discordSecurityAdapter } from "./security.js";
@@ -348,6 +351,7 @@ export const discordPlugin: ChannelPlugin<ResolvedDiscordAccount, DiscordProbe> 
         },
         buildCrossContextPresentation: buildDiscordCrossContextPresentation,
         resolveOutboundSessionRoute: (params) => resolveDiscordOutboundSessionRoute(params),
+        resolveCurrentConversationRoute: (params) => resolveDiscordCurrentConversationRoute(params),
         targetResolver: {
           looksLikeId: looksLikeDiscordTargetId,
           hint: "<channelId|user:ID|channel:ID>",

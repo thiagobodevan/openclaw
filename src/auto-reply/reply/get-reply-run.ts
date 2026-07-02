@@ -857,7 +857,7 @@ export async function runPreparedReply(
     if (!useFastReplyRuntime && heartbeatRunScope !== "commitment-only") {
       const eventsBlock = await drainFormattedSystemEvents({
         cfg,
-        sessionKey,
+        sessionKey: ctx.SystemEventSessionKey ?? sessionKey,
         isMainSession,
         isNewSession,
         suppressHeartbeatOwnedEvents: isHeartbeat,

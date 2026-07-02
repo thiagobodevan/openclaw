@@ -63,12 +63,19 @@ export type HeartbeatWakeConversation = {
   groupChannel?: string;
   groupSpace?: string;
   senderId?: string;
-  /** Channel-owned, side-effect-free current route lookup for deferred admission. */
-  resolveCurrentRoute: (cfg: OpenClawConfig) => {
-    agentId: string;
-    sessionKey: string;
-    matchedBy: AgentRouteMatch;
-  } | null;
+  /** Channel-owned, read-only current route lookup for deferred admission. */
+  resolveCurrentRoute: (cfg: OpenClawConfig) =>
+    | {
+        agentId: string;
+        sessionKey: string;
+        matchedBy: AgentRouteMatch;
+      }
+    | null
+    | Promise<{
+        agentId: string;
+        sessionKey: string;
+        matchedBy: AgentRouteMatch;
+      } | null>;
 };
 
 export type HeartbeatWakeRequest = {

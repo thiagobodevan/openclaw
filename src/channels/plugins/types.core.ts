@@ -669,14 +669,24 @@ export type ChannelMessagingAdapter = {
    */
   resolveCurrentConversationRoute?: (params: {
     cfg: OpenClawConfig;
+    /** Persisted target owner being revalidated against current channel policy. */
+    agentId?: string;
     accountId?: string | null;
     target: string;
     /** Native conversation id when the delivery target addresses a member instead. */
     conversationId?: string | null;
+    /** Native parent conversation id used by routes inherited from a parent. */
+    parentConversationId?: string | null;
     chatType: ChatType;
+    /** Provider-native organization or workspace id used by team-scoped routes. */
+    groupSpace?: string | null;
     threadId?: string | number | null;
     senderId?: string | null;
-  }) => ChannelCurrentConversationRoute | Promise<ChannelCurrentConversationRoute | null> | null;
+  }) =>
+    | ChannelCurrentConversationRoute
+    | Promise<ChannelCurrentConversationRoute | null | undefined>
+    | null
+    | undefined;
 };
 
 export type ChannelAgentPromptAdapter = {

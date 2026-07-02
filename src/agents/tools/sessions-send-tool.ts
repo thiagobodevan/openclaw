@@ -9,11 +9,14 @@ import { finiteSecondsToTimerSafeMilliseconds } from "@openclaw/normalization-co
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { Type } from "typebox";
 import { readAcpSessionMeta } from "../../acp/runtime/session-meta.js";
+import { getRuntimeConfig } from "../../config/config.js";
+import { resolveSessionEntryAccessTarget } from "../../config/sessions/session-accessor.js";
 import { parseSessionThreadInfoFast } from "../../config/sessions/thread-info.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isInterSessionIdentityTransitionAllowed } from "../../routing/conversation-identity.js";
+import { resolvePersistedConversationIdentityContext } from "../../routing/persisted-conversation-identity.js";
 import {
   normalizeAgentId,
   resolveAgentIdFromSessionKey,
@@ -46,7 +49,6 @@ import {
   isLiveOwnedSessionTarget,
   isRequesterParentOfNativeSubagentSession,
 } from "../session-target-identity.js";
-import { loadSessionEntryByKey } from "../subagent-announce-delivery.js";
 import {
   describeSessionsSendTool,
   SESSIONS_SEND_TOOL_DISPLAY_SUMMARY,
@@ -75,6 +77,52 @@ const SessionsSendToolSchema = Type.Object({
 type GatewayCaller = typeof callGateway;
 const SESSIONS_SEND_REPLY_HISTORY_LIMIT = 50;
 const SESSIONS_SEND_MESSAGE_ALIASES = ["SendMessage", "content", "text"] as const;
+
+type SessionParticipantAdmission =
+  | {
+      allowed: true;
+      access: ReturnType<typeof resolveSessionEntryAccessTarget>;
+      liveOwned: boolean;
+    }
+  | {
+      allowed: false;
+      reason: "agent_removed" | "stale_route";
+    };
+
+type InterSessionAdmission =
+  | {
+      allowed: true;
+      requesterIdentitySessionKey: string;
+      targetAccess: ReturnType<typeof resolveSessionEntryAccessTarget>;
+      targetIsLiveOwned: boolean;
+    }
+  | {
+      allowed: false;
+      reason:
+        | "identity_transition"
+        | "requester_agent_removed"
+        | "requester_stale_route"
+        | "target_agent_removed"
+        | "target_stale_route";
+    };
+
+function describeInterSessionAdmissionDenial(
+  reason: Extract<InterSessionAdmission, { allowed: false }>["reason"],
+): string {
+  if (reason === "requester_agent_removed") {
+    return "Requesting agent is no longer configured.";
+  }
+  if (reason === "requester_stale_route") {
+    return "Requesting conversation identity is no longer authorized.";
+  }
+  if (reason === "target_agent_removed") {
+    return "Target agent is no longer configured.";
+  }
+  if (reason === "identity_transition") {
+    return "Inter-session identity transition denied.";
+  }
+  return "Target conversation identity is no longer authorized.";
+}
 
 function normalizeSessionsSendArguments(args: unknown): Record<string, unknown> {
   const params =
@@ -115,11 +163,15 @@ function resolveConfiguredAgentMainSessionKey(params: {
 }
 
 function isConfiguredAgentMainSessionKey(params: {
+  agentId?: string;
   cfg: OpenClawConfig;
   sessionKey: string;
   mainKey: string;
 }): boolean {
-  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+  if (params.sessionKey === "global" && params.cfg.session?.scope === "global") {
+    return true;
+  }
+  const agentId = params.agentId ?? resolveAgentIdFromSessionKey(params.sessionKey);
   return (
     params.sessionKey ===
     resolveConfiguredAgentMainSessionKey({
@@ -130,15 +182,184 @@ function isConfiguredAgentMainSessionKey(params: {
   );
 }
 
+function resolveAgentMainOwnershipKey(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  mainKey: string;
+}): string {
+  const configuredKey = resolveConfiguredAgentMainSessionKey(params);
+  return configuredKey && configuredKey !== "global"
+    ? configuredKey
+    : `agent:${normalizeAgentId(params.agentId)}:main`;
+}
+
+function resolveRequesterIdentitySessionKey(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  mainKey: string;
+  sessionKey: string;
+}): string {
+  if (parseAgentSessionKey(params.sessionKey)) {
+    return params.sessionKey;
+  }
+  if (params.sessionKey === "global") {
+    return resolveAgentMainOwnershipKey(params);
+  }
+  return toAgentStoreSessionKey({
+    agentId: params.agentId,
+    requestKey: params.sessionKey,
+    mainKey: params.mainKey,
+  });
+}
+
+async function resolveCurrentSessionParticipantAdmission(params: {
+  cfg: OpenClawConfig;
+  mainKey: string;
+  requesterSessionKey: string;
+  agentId?: string;
+  sessionKey: string;
+}): Promise<SessionParticipantAdmission> {
+  const normalizedSessionKey = params.sessionKey.trim().toLowerCase();
+  const isPerSenderMainAlias =
+    params.sessionKey !== "global" &&
+    !parseAgentSessionKey(params.sessionKey) &&
+    (normalizedSessionKey === "main" || normalizedSessionKey === params.mainKey.toLowerCase());
+  const accessSessionKey =
+    isPerSenderMainAlias && params.agentId
+      ? resolveAgentMainOwnershipKey({
+          cfg: params.cfg,
+          agentId: params.agentId,
+          mainKey: params.mainKey,
+        })
+      : params.sessionKey;
+  const access = resolveSessionEntryAccessTarget({
+    cfg: params.cfg,
+    sessionKey: accessSessionKey,
+    agentId: params.agentId,
+  });
+  if (params.agentId && access.agentId !== normalizeAgentId(params.agentId)) {
+    return { allowed: false, reason: "agent_removed" };
+  }
+  const ownershipKey =
+    access.canonicalKey === "global" && params.agentId
+      ? resolveAgentMainOwnershipKey({
+          cfg: params.cfg,
+          agentId: params.agentId,
+          mainKey: params.mainKey,
+        })
+      : access.canonicalKey;
+  if (
+    !isConfiguredOrLiveOwnedSessionTarget({
+      cfg: params.cfg,
+      requesterSessionKey: params.requesterSessionKey,
+      targetSessionKey: ownershipKey,
+    })
+  ) {
+    return { allowed: false, reason: "agent_removed" };
+  }
+  const liveOwned = isLiveOwnedSessionTarget({
+    requesterSessionKey: params.requesterSessionKey,
+    targetSessionKey: ownershipKey,
+  });
+  if (!liveOwned) {
+    const identitySessionKey = resolveRunScopedIdentitySessionKey(access.canonicalKey);
+    const identityAccess =
+      identitySessionKey === access.canonicalKey
+        ? access
+        : resolveSessionEntryAccessTarget({
+            cfg: params.cfg,
+            sessionKey: identitySessionKey,
+            agentId: access.agentId,
+          });
+    const identity = await resolvePersistedConversationIdentityContext({
+      cfg: params.cfg,
+      agentId: identityAccess.agentId,
+      sessionKey: identityAccess.canonicalKey,
+      sessionEntry: identityAccess.entry,
+      // Audienceless agent/main sessions are internal tool targets. Persisted
+      // channel audiences must still match their current service route.
+      audienceless: "internal",
+      requireAgentSessionKey: identityAccess.canonicalKey !== "global",
+    });
+    if (!identity.decision.allowed) {
+      return { allowed: false, reason: "stale_route" };
+    }
+  }
+  return { allowed: true, access, liveOwned };
+}
+
+async function resolveCurrentInterSessionAdmission(params: {
+  cfg: OpenClawConfig;
+  mainKey: string;
+  requesterAgentId: string;
+  requesterSessionKey: string;
+  targetAgentId?: string;
+  targetSessionKey: string;
+}): Promise<InterSessionAdmission> {
+  const requester = await resolveCurrentSessionParticipantAdmission({
+    cfg: params.cfg,
+    mainKey: params.mainKey,
+    requesterSessionKey: params.requesterSessionKey,
+    agentId: params.requesterAgentId,
+    sessionKey: params.requesterSessionKey,
+  });
+  if (!requester.allowed) {
+    return {
+      allowed: false,
+      reason:
+        requester.reason === "agent_removed" ? "requester_agent_removed" : "requester_stale_route",
+    };
+  }
+  const requesterIdentitySessionKey = resolveRequesterIdentitySessionKey({
+    cfg: params.cfg,
+    agentId: requester.access.agentId,
+    mainKey: params.mainKey,
+    sessionKey: requester.access.canonicalKey,
+  });
+  const target = await resolveCurrentSessionParticipantAdmission({
+    cfg: params.cfg,
+    mainKey: params.mainKey,
+    requesterSessionKey: params.requesterSessionKey,
+    agentId: params.targetAgentId,
+    sessionKey: params.targetSessionKey,
+  });
+  if (!target.allowed) {
+    return {
+      allowed: false,
+      reason: target.reason === "agent_removed" ? "target_agent_removed" : "target_stale_route",
+    };
+  }
+  if (
+    !isInterSessionIdentityTransitionAllowed({
+      config: params.cfg,
+      sourceSessionKey: requesterIdentitySessionKey,
+      sourceTool: "sessions_send",
+      targetAgentId: target.access.agentId,
+      targetIsLiveOwnedChild: target.liveOwned,
+    })
+  ) {
+    return { allowed: false, reason: "identity_transition" };
+  }
+  return {
+    allowed: true,
+    requesterIdentitySessionKey,
+    targetAccess: target.access,
+    targetIsLiveOwned: target.liveOwned,
+  };
+}
+
 async function ensureConfiguredAgentMainSession(params: {
+  agentId?: string;
   cfg: OpenClawConfig;
   callGateway: GatewayCaller;
+  revalidateAdmission: () => Promise<boolean>;
   sessionKey: string;
   mainKey: string;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: true } | { ok: false; error: string; status: "error" | "forbidden" }> {
   if (
     !isConfiguredAgentMainSessionKey({
       cfg: params.cfg,
+      agentId: params.agentId,
       sessionKey: params.sessionKey,
       mainKey: params.mainKey,
     })
@@ -149,23 +370,33 @@ async function ensureConfiguredAgentMainSession(params: {
   try {
     await params.callGateway({
       method: "sessions.resolve",
-      params: { key: params.sessionKey },
+      params: {
+        key: params.sessionKey,
+        ...(params.sessionKey === "global" && params.agentId ? { agentId: params.agentId } : {}),
+      },
       timeoutMs: 10_000,
     });
     return { ok: true };
   } catch {
+    if (!(await params.revalidateAdmission())) {
+      return {
+        ok: false,
+        status: "forbidden",
+        error: "Conversation identity is no longer authorized.",
+      };
+    }
     try {
       await params.callGateway({
         method: "sessions.create",
         params: {
           key: params.sessionKey,
-          agentId: resolveAgentIdFromSessionKey(params.sessionKey),
+          agentId: params.agentId ?? resolveAgentIdFromSessionKey(params.sessionKey),
         },
         timeoutMs: 10_000,
       });
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: formatErrorMessage(err) };
+      return { ok: false, status: "error", error: formatErrorMessage(err) };
     }
   }
 }
@@ -183,6 +414,25 @@ function isPendingErrorAgentWaitTimeout(result: AgentWaitResult): boolean {
 function isRunScopedAgentSessionKey(sessionKey: string): boolean {
   const parsed = parseAgentSessionKey(normalizeOptionalString(sessionKey));
   return Boolean(parsed && /(?:^|:)run:[^:]+(?::|$)/.test(parsed.rest));
+}
+
+function resolveRunScopedIdentitySessionKey(sessionKey: string): string {
+  const parsed = parseAgentSessionKey(normalizeOptionalString(sessionKey));
+  if (!parsed) {
+    return sessionKey;
+  }
+  const runMarker = ":run:";
+  const runMarkerIndex = parsed.rest.lastIndexOf(runMarker);
+  if (runMarkerIndex <= 0) {
+    return sessionKey;
+  }
+  const runId = parsed.rest.slice(runMarkerIndex + runMarker.length);
+  if (!runId || runId.includes(":")) {
+    return sessionKey;
+  }
+  // Active runs inherit the audience admitted for their durable parent. Keep
+  // the run key for dispatch, but never treat `:run:<id>` as part of a peer id.
+  return `agent:${parsed.agentId}:${parsed.rest.slice(0, runMarkerIndex)}`;
 }
 
 function resolveCronRunScopedFallbackSessionKey(sessionKey: string): string | undefined {
@@ -223,6 +473,7 @@ async function startAgentRun(params: {
   runId: string;
   sendParams: Record<string, unknown>;
   sessionKey: string;
+  revalidateAdmission: (targetSessionKey: string) => Promise<boolean>;
   deliveryTimeoutMs?: number;
   allowActiveRunQueueDelivery?: boolean;
 }): Promise<
@@ -235,7 +486,29 @@ async function startAgentRun(params: {
     }
   | { ok: false; result: ReturnType<typeof jsonResult> }
 > {
+  const revalidate = async (targetSessionKey: string) => {
+    if (await params.revalidateAdmission(targetSessionKey)) {
+      return null;
+    }
+    return {
+      ok: false as const,
+      result: jsonResult({
+        runId: params.runId,
+        status: "forbidden",
+        error: "Conversation identity is no longer authorized.",
+        sessionKey: params.sessionKey,
+      }),
+    };
+  };
   try {
+    const primaryTargetSessionKey =
+      typeof params.sendParams.sessionKey === "string"
+        ? params.sendParams.sessionKey
+        : params.sessionKey;
+    const initialDenial = await revalidate(primaryTargetSessionKey);
+    if (initialDenial) {
+      return initialDenial;
+    }
     const activeRunSessionId =
       params.allowActiveRunQueueDelivery && isRunScopedAgentSessionKey(params.sessionKey)
         ? resolveActiveEmbeddedRunSessionId(params.sessionKey)
@@ -261,6 +534,10 @@ async function startAgentRun(params: {
         queueOptions,
       );
       if (!queueOutcome.queued && queueOutcome.reason === "transcript_commit_wait_unsupported") {
+        const retryDenial = await revalidate(primaryTargetSessionKey);
+        if (retryDenial) {
+          return retryDenial;
+        }
         const bestEffortQueueOptions = { ...queueOptions };
         delete bestEffortQueueOptions.waitForTranscriptCommit;
         queueOutcome = await queueEmbeddedAgentMessageWithOutcomeAsync(
@@ -274,6 +551,10 @@ async function startAgentRun(params: {
       }
       const fallbackSessionKey = resolveCronRunScopedFallbackSessionKey(params.sessionKey);
       if (fallbackSessionKey && shouldFallbackCronRunScopedActiveDelivery(queueOutcome)) {
+        const fallbackDenial = await revalidate(fallbackSessionKey);
+        if (fallbackDenial) {
+          return fallbackDenial;
+        }
         const response = await params.callGateway<{ runId: string }>({
           method: "agent",
           params: {
@@ -321,6 +602,7 @@ async function startAgentRun(params: {
 
 export function createSessionsSendTool(opts?: {
   agentSessionKey?: string;
+  agentId?: string;
   agentChannel?: GatewayMessageChannel;
   sandboxed?: boolean;
   config?: OpenClawConfig;
@@ -340,16 +622,34 @@ export function createSessionsSendTool(opts?: {
       const timeoutSeconds = readNonNegativeIntegerParam(params, "timeoutSeconds") ?? 30;
       const { cfg, mainKey, alias, effectiveRequesterKey, restrictToSpawned } =
         resolveSessionToolContext(opts);
+      const requesterAgentId = normalizeAgentId(
+        opts?.agentId ?? resolveAgentIdFromSessionKey(effectiveRequesterKey),
+      );
+      const requesterAdmission = await resolveCurrentSessionParticipantAdmission({
+        cfg,
+        mainKey,
+        requesterSessionKey: effectiveRequesterKey,
+        agentId: requesterAgentId,
+        sessionKey: effectiveRequesterKey,
+      });
+      if (!requesterAdmission.allowed) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error:
+            requesterAdmission.reason === "agent_removed"
+              ? "Requesting agent is no longer configured."
+              : "Requesting conversation identity is no longer authorized.",
+        });
+      }
 
       const a2aPolicy = createAgentToAgentPolicy(cfg);
-      const sessionVisibility = resolveEffectiveSessionToolsVisibility({
-        cfg,
-        sandboxed: opts?.sandboxed === true,
-      });
 
       const sessionKeyParam = readStringParam(params, "sessionKey");
       const labelParam = normalizeOptionalString(readStringParam(params, "label"));
       const labelAgentIdParam = normalizeOptionalString(readStringParam(params, "agentId"));
+      const explicitAgentId = labelAgentIdParam ? normalizeAgentId(labelAgentIdParam) : undefined;
+      const resolvedByLabel = !sessionKeyParam && Boolean(labelParam);
 
       let sessionKey = sessionKeyParam;
       if (!sessionKey && !labelParam && labelAgentIdParam) {
@@ -368,10 +668,7 @@ export function createSessionsSendTool(opts?: {
         sessionKey = agentMainKey;
       }
       if (!sessionKey && labelParam) {
-        const requesterAgentId = resolveAgentIdFromSessionKey(effectiveRequesterKey);
-        const requestedAgentId = labelAgentIdParam
-          ? normalizeAgentId(labelAgentIdParam)
-          : undefined;
+        const requestedAgentId = explicitAgentId;
 
         if (restrictToSpawned && requestedAgentId && requestedAgentId !== requesterAgentId) {
           return jsonResult({
@@ -452,11 +749,36 @@ export function createSessionsSendTool(opts?: {
           error: "Either sessionKey or label is required",
         });
       }
+      const qualifiedAgentId = parseAgentSessionKey(sessionKey)?.agentId;
+      if (qualifiedAgentId && explicitAgentId && qualifiedAgentId !== explicitAgentId) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "error",
+          error: `agentId "${explicitAgentId}" does not match session key agent "${qualifiedAgentId}".`,
+        });
+      }
+      const normalizedSessionKey = sessionKey.trim().toLowerCase();
+      if (
+        explicitAgentId &&
+        !qualifiedAgentId &&
+        (normalizedSessionKey === "main" || normalizedSessionKey === mainKey.toLowerCase())
+      ) {
+        sessionKey = toAgentStoreSessionKey({
+          agentId: explicitAgentId,
+          requestKey: sessionKey,
+          mainKey,
+        });
+      }
+      const selectedInputAgentId = parseAgentSessionKey(sessionKey)?.agentId ?? explicitAgentId;
+      const inputOwnershipKey =
+        sessionKey === "global" && selectedInputAgentId
+          ? resolveAgentMainOwnershipKey({ cfg, agentId: selectedInputAgentId, mainKey })
+          : sessionKey;
       if (
         !isConfiguredOrLiveOwnedSessionTarget({
           cfg,
           requesterSessionKey: effectiveRequesterKey,
-          targetSessionKey: sessionKey,
+          targetSessionKey: inputOwnershipKey,
         })
       ) {
         return jsonResult({
@@ -480,6 +802,20 @@ export function createSessionsSendTool(opts?: {
           error: resolvedSession.error,
         });
       }
+      if (
+        resolvedSession.key.trim().toLowerCase() === "global" &&
+        (resolvedByLabel || resolvedSession.resolvedViaSessionId) &&
+        !explicitAgentId
+      ) {
+        // Global storage does not encode its owning agent. Indirect selectors
+        // must carry the owner so a lookup cannot redirect to the requester.
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error: "Global session targets resolved by label or session ID require agentId.",
+          ...(sessionKeyParam ? { sessionKey: sessionKeyParam } : {}),
+        });
+      }
       const visibleSession = await resolveVisibleSessionReference({
         resolvedSession,
         requesterSessionKey: effectiveRequesterKey,
@@ -498,27 +834,59 @@ export function createSessionsSendTool(opts?: {
       // Normalize sessionKey/sessionId input into a canonical session key.
       const resolvedKey = visibleSession.key;
       const displayKey = visibleSession.displayKey;
-      if (
-        !isConfiguredOrLiveOwnedSessionTarget({
-          cfg,
-          requesterSessionKey: effectiveRequesterKey,
-          targetSessionKey: resolvedKey,
-        })
-      ) {
+      const normalizedResolvedKey = resolvedKey.trim().toLowerCase();
+      const resolvedIsMainAlias =
+        normalizedResolvedKey === "global" ||
+        normalizedResolvedKey === "main" ||
+        normalizedResolvedKey === mainKey.toLowerCase() ||
+        normalizedResolvedKey === alias.toLowerCase();
+      const explicitTargetAgentId =
+        parseAgentSessionKey(unresolvedDisplayKey)?.agentId ??
+        parseAgentSessionKey(resolvedKey)?.agentId ??
+        selectedInputAgentId ??
+        (resolvedIsMainAlias ? requesterAgentId : undefined);
+      const admissionCfg = opts?.config ?? getRuntimeConfig();
+      const { mainKey: admissionMainKey, effectiveRequesterKey: admissionRequesterKey } =
+        resolveSessionToolContext({
+          agentSessionKey: opts?.agentSessionKey,
+          sandboxed: opts?.sandboxed,
+          config: admissionCfg,
+        });
+      const visibilityTargetAgentId =
+        explicitTargetAgentId ?? resolveAgentIdFromSessionKey(resolvedKey);
+      const visibilityTargetIdentityKey =
+        resolvedKey === "global"
+          ? resolveAgentMainOwnershipKey({
+              cfg: admissionCfg,
+              agentId: visibilityTargetAgentId,
+              mainKey: admissionMainKey,
+            })
+          : resolvedKey;
+      const visibilityGuard = await createSessionVisibilityGuard({
+        action: "send",
+        requesterSessionKey: admissionRequesterKey,
+        requesterAgentId,
+        visibility: resolveEffectiveSessionToolsVisibility({
+          cfg: admissionCfg,
+          sandboxed: opts?.sandboxed === true,
+        }),
+        a2aPolicy: createAgentToAgentPolicy(admissionCfg),
+      });
+      const visibilityTargetKey =
+        resolvedKey === "global" &&
+        admissionRequesterKey.trim().toLowerCase() === "global" &&
+        visibilityTargetAgentId === requesterAgentId
+          ? admissionRequesterKey
+          : visibilityTargetIdentityKey;
+      const visibilityAccess = visibilityGuard.check(visibilityTargetKey);
+      if (!visibilityAccess.allowed) {
         return jsonResult({
           runId: crypto.randomUUID(),
-          status: "forbidden",
-          error: "Target agent is no longer configured.",
+          status: visibilityAccess.status,
+          error: visibilityAccess.error,
           sessionKey: unresolvedDisplayKey,
         });
       }
-      const timeoutMs =
-        finiteSecondsToTimerSafeMilliseconds(timeoutSeconds, {
-          floorSeconds: true,
-        }) ?? 0;
-      const announceTimeoutMs = timeoutSeconds === 0 ? 30_000 : timeoutMs;
-      const idempotencyKey = crypto.randomUUID();
-      let runId: string = idempotencyKey;
       if (parseSessionThreadInfoFast(resolvedKey).threadId) {
         return jsonResult({
           runId: crypto.randomUUID(),
@@ -528,53 +896,105 @@ export function createSessionsSendTool(opts?: {
           sessionKey: unresolvedDisplayKey,
         });
       }
-      const visibilityGuard = await createSessionVisibilityGuard({
-        action: "send",
-        requesterSessionKey: effectiveRequesterKey,
-        visibility: sessionVisibility,
-        a2aPolicy,
-      });
-      const access = visibilityGuard.check(resolvedKey);
-      if (!access.allowed) {
-        return jsonResult({
-          runId: crypto.randomUUID(),
-          status: access.status,
-          error: access.error,
-          sessionKey: unresolvedDisplayKey,
-        });
-      }
-
-      const targetIsLiveOwnedChild = isLiveOwnedSessionTarget({
-        requesterSessionKey: effectiveRequesterKey,
+      const targetAdmission = await resolveCurrentInterSessionAdmission({
+        cfg: admissionCfg,
+        mainKey: admissionMainKey,
+        requesterAgentId,
+        requesterSessionKey: admissionRequesterKey,
+        targetAgentId: explicitTargetAgentId,
         targetSessionKey: resolvedKey,
       });
-      if (
-        !isInterSessionIdentityTransitionAllowed({
-          config: cfg,
-          sourceSessionKey: effectiveRequesterKey,
-          sourceTool: "sessions_send",
-          targetAgentId: resolveAgentIdFromSessionKey(resolvedKey),
-          targetIsLiveOwnedChild,
-        })
-      ) {
+      if (!targetAdmission.allowed) {
         return jsonResult({
           runId: crypto.randomUUID(),
           status: "forbidden",
-          error: "Inter-session identity transition denied.",
+          error: describeInterSessionAdmissionDenial(targetAdmission.reason),
           sessionKey: unresolvedDisplayKey,
         });
       }
+      const targetAccess = targetAdmission.targetAccess;
+      const targetAgentId = targetAccess.agentId;
+      const targetSessionKey = targetAccess.canonicalKey;
+      const revalidateBoundaryAdmission = async (params: {
+        targetAgentId: string;
+        targetSessionKey: string;
+      }): Promise<boolean> => {
+        const currentConfig = opts?.config ?? getRuntimeConfig();
+        const currentContext = resolveSessionToolContext({
+          agentSessionKey: opts?.agentSessionKey,
+          sandboxed: opts?.sandboxed,
+          config: currentConfig,
+        });
+        return (
+          await resolveCurrentInterSessionAdmission({
+            cfg: currentConfig,
+            mainKey: currentContext.mainKey,
+            requesterAgentId,
+            requesterSessionKey: currentContext.effectiveRequesterKey,
+            targetAgentId: params.targetAgentId,
+            targetSessionKey: params.targetSessionKey,
+          })
+        ).allowed;
+      };
+      const timeoutMs =
+        finiteSecondsToTimerSafeMilliseconds(timeoutSeconds, {
+          floorSeconds: true,
+        }) ?? 0;
+      const announceTimeoutMs = timeoutSeconds === 0 ? 30_000 : timeoutMs;
+      const idempotencyKey = crypto.randomUUID();
+      let runId: string = idempotencyKey;
+
+      const ensureConfig = opts?.config ?? getRuntimeConfig();
+      const ensureContext = resolveSessionToolContext({
+        agentSessionKey: opts?.agentSessionKey,
+        sandboxed: opts?.sandboxed,
+        config: ensureConfig,
+      });
+      const ensureAdmission = await resolveCurrentInterSessionAdmission({
+        cfg: ensureConfig,
+        mainKey: ensureContext.mainKey,
+        requesterAgentId,
+        requesterSessionKey: ensureContext.effectiveRequesterKey,
+        targetAgentId,
+        targetSessionKey,
+      });
+      if (!ensureAdmission.allowed) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error: describeInterSessionAdmissionDenial(ensureAdmission.reason),
+          sessionKey: unresolvedDisplayKey,
+        });
+      }
+      const ensuredTargetSessionKey = ensureAdmission.targetAccess.canonicalKey;
+      const ensuredTargetAgentId = ensureAdmission.targetAccess.agentId;
+      const ensuredTargetGatewayAgentId =
+        ensuredTargetSessionKey === "global" ? ensuredTargetAgentId : undefined;
+      const ensuredTargetIdentitySessionKey =
+        ensuredTargetSessionKey === "global"
+          ? resolveAgentMainOwnershipKey({
+              cfg: ensureConfig,
+              agentId: ensuredTargetAgentId,
+              mainKey: ensureContext.mainKey,
+            })
+          : ensuredTargetSessionKey;
 
       const ensuredSession = await ensureConfiguredAgentMainSession({
-        cfg,
+        agentId: ensuredTargetGatewayAgentId,
+        cfg: ensureConfig,
         callGateway: gatewayCall,
-        sessionKey: resolvedKey,
-        mainKey,
+        revalidateAdmission: () =>
+          revalidateBoundaryAdmission({
+            targetAgentId: ensuredTargetAgentId,
+            targetSessionKey: ensuredTargetSessionKey,
+          }),
+        sessionKey: ensuredTargetSessionKey,
+        mainKey: ensureContext.mainKey,
       });
       if (!ensuredSession.ok) {
         return jsonResult({
           runId: crypto.randomUUID(),
-          status: "error",
+          status: ensuredSession.status,
           error: ensuredSession.error,
           sessionKey: displayKey,
         });
@@ -582,7 +1002,8 @@ export function createSessionsSendTool(opts?: {
 
       const requesterSessionKey = opts?.agentSessionKey;
       const requesterChannel = opts?.agentChannel;
-      const sameSessionA2A = requesterSessionKey === resolvedKey;
+      const sameSessionA2A =
+        ensureAdmission.requesterIdentitySessionKey === ensuredTargetIdentitySessionKey;
       const isIsolatedCronRequester = isCronRunSessionKey(requesterSessionKey);
       const fallbackA2ASessionKey =
         timeoutSeconds === 0 && isIsolatedCronRequester
@@ -599,13 +1020,15 @@ export function createSessionsSendTool(opts?: {
       const baselineReply =
         timeoutSeconds !== 0
           ? await readLatestAssistantReplySnapshot({
-              sessionKey: resolvedKey,
+              agentId: ensuredTargetGatewayAgentId,
+              sessionKey: ensuredTargetSessionKey,
               limit: SESSIONS_SEND_REPLY_HISTORY_LIMIT,
               callGateway: gatewayCall,
             })
           : sameSessionA2A || isIsolatedCronRequester
             ? await readLatestAssistantReplySnapshot({
-                sessionKey: resolvedKey,
+                agentId: ensuredTargetGatewayAgentId,
+                sessionKey: ensuredTargetSessionKey,
                 limit: SESSIONS_SEND_REPLY_HISTORY_LIMIT,
                 callGateway: gatewayCall,
               }).catch(() => undefined)
@@ -613,7 +1036,7 @@ export function createSessionsSendTool(opts?: {
       // Active-run delivery can fall back to the durable cron parent. Snapshot
       // that target before dispatch so a fast reply cannot become its baseline.
       const fallbackBaselineReply =
-        fallbackA2ASessionKey && fallbackA2ASessionKey !== resolvedKey
+        fallbackA2ASessionKey && fallbackA2ASessionKey !== ensuredTargetSessionKey
           ? await readLatestAssistantReplySnapshot({
               sessionKey: fallbackA2ASessionKey,
               limit: SESSIONS_SEND_REPLY_HISTORY_LIMIT,
@@ -621,77 +1044,98 @@ export function createSessionsSendTool(opts?: {
             }).catch(() => undefined)
           : undefined;
 
+      const maxPingPongTurns = resolvePingPongTurns(admissionCfg);
+
+      const dispatchConfig = opts?.config ?? getRuntimeConfig();
+      const dispatchContext = resolveSessionToolContext({
+        agentSessionKey: opts?.agentSessionKey,
+        sandboxed: opts?.sandboxed,
+        config: dispatchConfig,
+      });
+      const dispatchAdmission = await resolveCurrentInterSessionAdmission({
+        cfg: dispatchConfig,
+        mainKey: dispatchContext.mainKey,
+        requesterAgentId,
+        requesterSessionKey: dispatchContext.effectiveRequesterKey,
+        targetAgentId,
+        targetSessionKey,
+      });
+      if (!dispatchAdmission.allowed) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error: describeInterSessionAdmissionDenial(dispatchAdmission.reason),
+          sessionKey: unresolvedDisplayKey,
+        });
+      }
+      const dispatchedRequesterIdentitySessionKey = dispatchAdmission.requesterIdentitySessionKey;
+      const dispatchedTargetSessionKey = dispatchAdmission.targetAccess.canonicalKey;
+      const dispatchedTargetAgentId = dispatchAdmission.targetAccess.agentId;
+      const dispatchedTargetIdentitySessionKey =
+        dispatchedTargetSessionKey === "global"
+          ? resolveAgentMainOwnershipKey({
+              cfg: dispatchConfig,
+              agentId: dispatchedTargetAgentId,
+              mainKey: dispatchContext.mainKey,
+            })
+          : dispatchedTargetSessionKey;
+      const dispatchedTargetGatewayAgentId =
+        dispatchedTargetSessionKey === "global" ? dispatchedTargetAgentId : undefined;
+      // Parent-owned background children report through an existing result
+      // path. Re-evaluate that skip from the same admission used for dispatch.
+      const dispatchedTargetEntry = dispatchAdmission.targetAccess.entry;
+      const dispatchedTargetAcpMeta = readAcpSessionMeta({
+        sessionKey: dispatchedTargetSessionKey,
+      });
+      const dispatchedTargetEntryWithAcp =
+        dispatchedTargetAcpMeta && dispatchedTargetEntry
+          ? { ...dispatchedTargetEntry, acp: dispatchedTargetAcpMeta }
+          : dispatchedTargetEntry;
+      const skipAcpA2AFlow = isRequesterParentOfBackgroundAcpSession(
+        dispatchedTargetEntryWithAcp,
+        dispatchContext.effectiveRequesterKey,
+      );
+      const skipNativeParentA2AFlow =
+        timeoutSeconds !== 0 &&
+        isRequesterParentOfNativeSubagentSession({
+          entry: dispatchedTargetEntry,
+          acpMeta: dispatchedTargetAcpMeta,
+          requesterSessionKey: dispatchContext.effectiveRequesterKey,
+          targetSessionKey: dispatchedTargetSessionKey,
+        });
+      const skipA2AFlow = skipAcpA2AFlow || skipNativeParentA2AFlow;
+      const delivery = skipA2AFlow
+        ? ({ status: "skipped", mode: "announce" } as const)
+        : ({ status: "pending", mode: "announce" } as const);
       const agentMessageContext = buildAgentToAgentMessageContext({
-        requesterSessionKey: opts?.agentSessionKey,
+        requesterSessionKey: dispatchedRequesterIdentitySessionKey,
         requesterChannel: opts?.agentChannel,
         targetSessionKey: displayKey,
       });
       const inputProvenance = {
         kind: "inter_session" as const,
-        sourceSessionKey: opts?.agentSessionKey,
+        sourceSessionKey: dispatchAdmission.targetIsLiveOwned
+          ? dispatchContext.effectiveRequesterKey
+          : dispatchedRequesterIdentitySessionKey,
         sourceChannel: opts?.agentChannel,
         sourceTool: "sessions_send",
       };
       const sendParams = {
         message: annotateInterSessionPromptText(message, inputProvenance),
-        sessionKey: resolvedKey,
+        ...(dispatchedTargetGatewayAgentId ? { agentId: dispatchedTargetGatewayAgentId } : {}),
+        sessionKey: dispatchedTargetSessionKey,
         idempotencyKey,
         deliver: false,
         sourceReplyDeliveryMode: "message_tool_only" as const,
         channel: INTERNAL_MESSAGE_CHANNEL,
-        lane: resolveNestedAgentLaneForSession(resolvedKey),
+        lane: resolveNestedAgentLaneForSession(dispatchedTargetSessionKey),
         extraSystemPrompt: agentMessageContext,
         inputProvenance,
       };
-      const maxPingPongTurns = resolvePingPongTurns(cfg);
-
-      // Skip the A2A ping-pong + announce flow when the current caller is the
-      // parent of a parent-owned child session it spawned itself and another
-      // parent-visible result path already exists.
-      //
-      // ACP background sessions report through the internal task completion
-      // path. Waited native subagent sends return the child reply inline. In
-      // both cases treating the child as a peer agent wakes the parent with
-      // the child's reply, can generate another user-facing response, and can
-      // forward that response back to the child as a new message — producing a
-      // ping-pong loop (bounded by maxPingPongTurns, but visible as duplicate
-      // conversation output).
-      //
-      // The skip is gated on requester ownership, not just target type: an
-      // unrelated sender that can see the same target (e.g. under
-      // `tools.sessions.visibility=all`) must still go through the normal A2A
-      // path so it actually receives a follow-up delivery.
-      const targetSessionEntry = loadSessionEntryByKey(resolvedKey);
-      const targetAcpMeta = readAcpSessionMeta({ sessionKey: resolvedKey });
-      const targetSessionEntryWithAcp =
-        targetAcpMeta && targetSessionEntry
-          ? { ...targetSessionEntry, acp: targetAcpMeta }
-          : targetSessionEntry;
-      const skipAcpA2AFlow = isRequesterParentOfBackgroundAcpSession(
-        targetSessionEntryWithAcp,
-        effectiveRequesterKey,
-      );
-      const skipNativeParentA2AFlow =
-        timeoutSeconds !== 0 &&
-        isRequesterParentOfNativeSubagentSession({
-          entry: targetSessionEntry,
-          acpMeta: targetAcpMeta,
-          requesterSessionKey: effectiveRequesterKey,
-          targetSessionKey: resolvedKey,
-        });
-      const skipA2AFlow = skipAcpA2AFlow || skipNativeParentA2AFlow;
-      // When the A2A flow is skipped, no follow-up announcement will fire and
-      // the reply (when present) is returned inline via the `reply` field.
-      // Reflect that in the metadata so the parent LLM does not wait for a
-      // second result that will never arrive.
-      const delivery = skipA2AFlow
-        ? ({ status: "skipped", mode: "announce" } as const)
-        : ({ status: "pending", mode: "announce" } as const);
-
       const startA2AFlow = (
         roundOneReply?: string,
         waitRunId?: string,
-        flowTargetSessionKey = resolvedKey,
+        flowTargetSessionKey = dispatchedTargetSessionKey,
         flowDisplayKey = displayKey,
       ) => {
         if (skipA2AFlow) {
@@ -700,7 +1144,12 @@ export function createSessionsSendTool(opts?: {
         const flowBaseline =
           flowTargetSessionKey === fallbackA2ASessionKey ? fallbackBaselineReply : baselineReply;
         void runSessionsSendA2AFlow({
+          targetGatewayAgentId: dispatchedTargetGatewayAgentId,
           targetSessionKey: flowTargetSessionKey,
+          targetIdentitySessionKey:
+            flowTargetSessionKey === dispatchedTargetSessionKey
+              ? dispatchedTargetIdentitySessionKey
+              : flowTargetSessionKey,
           displayKey: flowDisplayKey,
           message,
           announceTimeoutMs,
@@ -708,7 +1157,27 @@ export function createSessionsSendTool(opts?: {
           // requester turns, but the target-side announce still runs.
           maxPingPongTurns: isIsolatedCronRequester ? 0 : maxPingPongTurns,
           requesterSessionKey,
+          requesterIdentitySessionKey: dispatchedRequesterIdentitySessionKey,
+          requesterGatewayAgentId: requesterSessionKey === "global" ? requesterAgentId : undefined,
           requesterChannel,
+          revalidateAdmission: async () => {
+            const currentCfg = getRuntimeConfig();
+            const currentContext = resolveSessionToolContext({
+              agentSessionKey: opts?.agentSessionKey,
+              sandboxed: opts?.sandboxed,
+              config: currentCfg,
+            });
+            return (
+              await resolveCurrentInterSessionAdmission({
+                cfg: currentCfg,
+                mainKey: currentContext.mainKey,
+                requesterAgentId,
+                requesterSessionKey: currentContext.effectiveRequesterKey,
+                targetAgentId: dispatchedTargetAgentId,
+                targetSessionKey: flowTargetSessionKey,
+              })
+            ).allowed;
+          },
           baseline: flowBaseline,
           roundOneReply,
           waitRunId,
@@ -721,6 +1190,11 @@ export function createSessionsSendTool(opts?: {
           runId,
           sendParams,
           sessionKey: displayKey,
+          revalidateAdmission: (currentTargetSessionKey) =>
+            revalidateBoundaryAdmission({
+              targetAgentId: dispatchedTargetAgentId,
+              targetSessionKey: currentTargetSessionKey,
+            }),
           deliveryTimeoutMs: announceTimeoutMs,
           allowActiveRunQueueDelivery: true,
         });
@@ -744,6 +1218,11 @@ export function createSessionsSendTool(opts?: {
         runId,
         sendParams,
         sessionKey: displayKey,
+        revalidateAdmission: (currentTargetSessionKey) =>
+          revalidateBoundaryAdmission({
+            targetAgentId: dispatchedTargetAgentId,
+            targetSessionKey: currentTargetSessionKey,
+          }),
         deliveryTimeoutMs: announceTimeoutMs,
       });
       if (!start.ok) {
@@ -752,7 +1231,8 @@ export function createSessionsSendTool(opts?: {
       runId = start.runId;
       const result = await waitForAgentRunAndReadUpdatedAssistantReply({
         runId,
-        sessionKey: resolvedKey,
+        agentId: dispatchedTargetGatewayAgentId,
+        sessionKey: dispatchedTargetSessionKey,
         timeoutMs,
         limit: SESSIONS_SEND_REPLY_HISTORY_LIMIT,
         baseline: baselineReply,

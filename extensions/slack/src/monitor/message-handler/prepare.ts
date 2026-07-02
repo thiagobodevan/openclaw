@@ -1328,6 +1328,7 @@ export async function prepareSlackMessage(params: {
       spaceId: ctx.teamId || undefined,
       threadId: directThreadRoutedToDmSession ? undefined : effectiveMessageThreadId,
       nativeChannelId: message.channel,
+      nativeDirectUserId: chatType === "direct" ? senderId : undefined,
     },
     route: {
       agentId: route.agentId,

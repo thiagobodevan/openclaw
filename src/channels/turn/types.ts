@@ -77,6 +77,10 @@ export type ConversationFacts = {
   parentId?: string;
   threadId?: string;
   nativeChannelId?: string;
+  /** Provider-native author id retained for later sender-policy revalidation. */
+  nativeSenderId?: string;
+  /** Provider-native direct peer when delivery uses a separate conversation id. */
+  nativeDirectUserId?: string;
   routePeer?: {
     kind: "direct" | "group" | "channel";
     id: string;

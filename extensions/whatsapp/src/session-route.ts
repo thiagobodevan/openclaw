@@ -7,7 +7,12 @@ import {
   type ChannelCurrentConversationRouteParams,
   type ChannelOutboundSessionRouteParams,
 } from "openclaw/plugin-sdk/core";
-import { resolveAgentRoute, resolveStableSenderIsOwner } from "openclaw/plugin-sdk/routing";
+import {
+  normalizeAgentId,
+  resolveAgentRoute,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
+import { resolveWhatsAppAgentRoute } from "./group-session-key.js";
 import { resolveWhatsAppInboundPolicy } from "./inbound-policy.js";
 import {
   isWhatsAppGroupJid,
@@ -58,7 +63,7 @@ export async function resolveWhatsAppCurrentConversationRoute(
     cfg: params.cfg,
     accountId: params.accountId,
   });
-  const route = resolveConfiguredBindingRoute({
+  const configuredRoute = resolveConfiguredBindingRoute({
     cfg: params.cfg,
     route: resolveAgentRoute({
       cfg: params.cfg,
@@ -69,7 +74,26 @@ export async function resolveWhatsAppCurrentConversationRoute(
     channel: "whatsapp",
     accountId: policy.account.accountId,
     conversationId: normalized,
-  }).route;
+  });
+  let route = configuredRoute.route;
+  const broadcastAgents = configuredRoute.bindingResolution
+    ? undefined
+    : params.cfg.broadcast?.[normalized];
+  const targetAgentId = params.agentId?.trim();
+  if (
+    targetAgentId &&
+    Array.isArray(broadcastAgents) &&
+    broadcastAgents.some((agentId) => normalizeAgentId(agentId) === normalizeAgentId(targetAgentId))
+  ) {
+    route = resolveWhatsAppAgentRoute({
+      cfg: params.cfg,
+      route,
+      peerId: normalized,
+      chatType: targetChatType,
+      agentId: targetAgentId,
+      matchedBy: "config.agent",
+    });
+  }
   if (targetChatType !== "direct") {
     return route;
   }

@@ -4256,6 +4256,7 @@ async function runEmbeddedAgentInternal(
               };
               const retiredBySessionKey = await retireSessionMcpRuntimeForSessionKey({
                 sessionKey: params.sessionKey,
+                ...(params.agentId ? { agentId: params.agentId } : {}),
                 reason: "embedded-run-end",
                 onError,
               });

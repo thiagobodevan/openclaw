@@ -1,8 +1,15 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 // Whatsapp plugin module implements group session key behavior.
 import {
+  buildAgentMainSessionKey,
+  buildAgentSessionKey,
   DEFAULT_ACCOUNT_ID,
+  DEFAULT_MAIN_KEY,
+  deriveLastRoutePolicy,
   normalizeAccountId,
+  normalizeAgentId,
   resolveThreadSessionKeys,
+  type AgentRouteMatch,
   type ResolvedAgentRoute,
 } from "openclaw/plugin-sdk/routing";
 
@@ -34,6 +41,37 @@ export function resolveWhatsAppGroupSessionRoute(route: ResolvedAgentRoute): Res
     ...route,
     sessionKey: scopedSession.sessionKey,
   };
+}
+
+export function resolveWhatsAppAgentRoute(params: {
+  cfg: OpenClawConfig;
+  route: ResolvedAgentRoute;
+  peerId: string;
+  chatType: "direct" | "group" | "channel";
+  agentId: string;
+  matchedBy: AgentRouteMatch;
+}): ResolvedAgentRoute {
+  const agentId = normalizeAgentId(params.agentId);
+  const sessionKey = buildAgentSessionKey({
+    agentId,
+    channel: "whatsapp",
+    accountId: params.route.accountId,
+    peer: { kind: params.chatType, id: params.peerId },
+    dmScope: params.cfg.session?.dmScope,
+    identityLinks: params.cfg.session?.identityLinks,
+  });
+  const mainSessionKey = buildAgentMainSessionKey({
+    agentId,
+    mainKey: DEFAULT_MAIN_KEY,
+  });
+  return resolveWhatsAppGroupSessionRoute({
+    ...params.route,
+    agentId,
+    sessionKey,
+    mainSessionKey,
+    lastRoutePolicy: deriveLastRoutePolicy({ sessionKey, mainSessionKey }),
+    matchedBy: params.matchedBy,
+  });
 }
 
 export const testing = {

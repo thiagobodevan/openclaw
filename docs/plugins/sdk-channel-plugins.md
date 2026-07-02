@@ -129,13 +129,22 @@ Plugins with provider-specific target grammar should expose
 session and thread identity without using parser shims.
 If current topic or binding configuration can select a different agent, also
 expose `messaging.resolveCurrentConversationRoute(...)`. This lookup must be
-side-effect-free: return the current agent/session route, or `null` when the
-persisted target no longer resolves. Core uses it before allowing stored
+side-effect-free: return the current agent/session route, `null` when the
+persisted target no longer resolves, or `undefined` when generic bindings still
+own this target. Core uses it before allowing stored
 channel sessions to start new scheduled work. Direct-message resolvers may also
 return `senderIsOwner` when the channel can revalidate an exact current pairing
 approval; wildcard/open access is not owner proof. The optional
+`agentId` is the persisted target owner being revalidated; owner-specific
+account or broadcast routes should accept it only when current config still
+selects that agent. The optional
 `conversationId` is the persisted native conversation id when `target`
-addresses a member instead of the enclosing conversation.
+addresses a member instead of the enclosing conversation. `groupSpace` carries
+the provider-native organization or workspace id when team-scoped route rules
+depend on it. `parentConversationId` carries the native parent when current
+routing or bindings are inherited by a child conversation. Core denies stored
+child routes whose required parent metadata cannot be revalidated; one new
+inbound event refreshes older session metadata before deferred work can resume.
 
 Bundled plugins that need the same parsing before the channel registry boots
 can also expose a top-level `session-key-api.ts` file with a matching

@@ -84,7 +84,6 @@ export async function buildDiscordMessageProcessContext(params: {
     threadName,
     displayChannelSlug,
     guildInfo,
-    guildSlug,
     memberRoleIds,
     channelConfig,
     baseSessionKey,
@@ -318,6 +317,12 @@ export async function buildDiscordMessageProcessContext(params: {
           storePath,
           sessionKey: effectiveSessionKey,
         });
+  const nativeConversationId = autoThreadContext?.createdThreadId ?? messageChannelId;
+  const nativeConversationParentId = autoThreadContext
+    ? messageChannelId
+    : threadChannel
+      ? threadParentId
+      : undefined;
 
   const ctxPayload = await buildChannelInboundEventContext({
     channel: "discord",
@@ -342,10 +347,12 @@ export async function buildDiscordMessageProcessContext(params: {
     },
     conversation: {
       kind: isDirectMessage ? "direct" : "channel",
-      id: messageChannelId,
+      id: nativeConversationId,
+      nativeChannelId: nativeConversationId,
+      nativeSenderId: author.id,
       label: fromLabel,
-      spaceId: isGuildMessage ? (guildInfo?.id ?? guildSlug) || undefined : undefined,
-      parentId: threadChannel ? threadParentId : undefined,
+      spaceId: isGuildMessage ? data.guild_id || undefined : undefined,
+      parentId: nativeConversationParentId,
       threadId: threadChannel?.id ?? autoThreadContext?.createdThreadId ?? undefined,
     },
     route: {
@@ -432,6 +439,7 @@ export async function buildDiscordMessageProcessContext(params: {
       ...(isGuildMessage ? { GroupRequireMention: ctx.groupRequireMention } : {}),
       UntrustedStructuredContext: untrustedContext,
       OwnerAllowFrom: ownerAllowFrom,
+      NativeDirectUserId: isDirectMessage ? author.id : undefined,
     },
   });
   const persistedSessionKey = ctxPayload.SessionKey ?? route.sessionKey;

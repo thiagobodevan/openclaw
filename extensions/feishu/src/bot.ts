@@ -50,6 +50,7 @@ import {
 } from "./bot-runtime-api.js";
 import type { ClawdbotConfig, RuntimeEnv } from "./bot-runtime-api.js";
 import { type FeishuPermissionError, resolveFeishuSenderName } from "./bot-sender-name.js";
+import { buildFeishuBroadcastSessionKey } from "./broadcast-session.js";
 import { getChatInfo } from "./chat.js";
 import { createFeishuClient } from "./client.js";
 import { finalizeFeishuMessageProcessing, tryRecordMessagePersistent } from "./dedup.js";
@@ -280,20 +281,6 @@ export function resolveBroadcastAgents(cfg: ClawdbotConfig, peerId: string): str
     return null;
   }
   return agents as string[];
-}
-
-// Build a session key for a broadcast target agent by replacing the agent ID prefix.
-// Session keys follow the format: agent:<agentId>:<channel>:<peerKind>:<peerId>
-export function buildBroadcastSessionKey(
-  baseSessionKey: string,
-  originalAgentId: string,
-  targetAgentId: string,
-): string {
-  const prefix = `agent:${originalAgentId}:`;
-  if (baseSessionKey.startsWith(prefix)) {
-    return `agent:${targetAgentId}:${baseSessionKey.slice(prefix.length)}`;
-  }
-  return baseSessionKey;
 }
 
 /**
@@ -1624,6 +1611,8 @@ export async function handleFeishuMessage(params: {
           kind: isGroup ? "group" : "direct",
           id: ctx.chatId,
           label: isGroup && groupName && !isTopicSessionForThread ? groupName : undefined,
+          nativeChannelId: isGroup ? peerId : undefined,
+          parentId: isGroup ? (parentPeer?.id ?? undefined) : undefined,
           threadId: ctx.rootId && isTopicSessionForThread ? ctx.rootId : undefined,
         },
         route: {
@@ -1771,7 +1760,11 @@ export async function handleFeishuMessage(params: {
           return;
         }
 
-        const agentSessionKey = buildBroadcastSessionKey(route.sessionKey, route.agentId, agentId);
+        const agentSessionKey = buildFeishuBroadcastSessionKey(
+          route.sessionKey,
+          route.agentId,
+          agentId,
+        );
         const agentStorePath = core.channel.session.resolveStorePath(cfg.session?.store, {
           agentId,
         });

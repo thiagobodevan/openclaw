@@ -59,6 +59,8 @@ describe("buildChannelInboundEventContext", () => {
         label: "Room One",
         spaceId: "workspace",
         threadId: "thread-1",
+        nativeSenderId: "u1",
+        nativeDirectUserId: "u1",
       },
       route: {
         agentId: "main",
@@ -188,6 +190,8 @@ describe("buildChannelInboundEventContext", () => {
       },
       MessageThreadId: "thread-1",
       NativeChannelId: "native-room-1",
+      NativeSenderId: "u1",
+      NativeDirectUserId: "u1",
       OriginatingChannel: "test",
       OriginatingTo: "test:room:room-1",
       ThreadStarterBody: "thread starter",

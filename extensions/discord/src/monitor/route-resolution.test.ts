@@ -7,6 +7,7 @@ import { resolveDiscordNativeInteractionRouteState } from "./native-command-rout
 import {
   buildDiscordRoutePeer,
   resolveDiscordBoundConversationRoute,
+  resolveDiscordConversationBindingRoute,
   resolveDiscordConversationRoute,
   resolveDiscordEffectiveRoute,
   shouldIgnoreStaleDiscordRouteBinding,
@@ -34,6 +35,111 @@ function buildWorkerBindingConfig(peer: {
 }
 
 describe("discord route resolution helpers", () => {
+  it("uses the delivery identity for runtime DMs and the native channel for configured DMs", () => {
+    const seen = { runtime: "", configured: "" };
+    const result = resolveDiscordConversationBindingRoute({
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+      },
+      accountId: "default",
+      isDirectMessage: true,
+      isGroupDm: false,
+      directUserId: "user-1",
+      conversationId: "dm-1",
+      configuredConversationId: "dm-1",
+      runtime: {
+        lookupRuntimeConversationBindingRoute: ({ route, conversation }) => {
+          seen.runtime = conversation.conversationId;
+          return { bindingRecord: null, route };
+        },
+        resolveConfiguredBindingRoute: ({ route, conversation }) => {
+          seen.configured = conversation.conversationId;
+          const serviceRoute = {
+            ...route,
+            agentId: "service",
+            sessionKey: "agent:service:discord:direct:user-1",
+            matchedBy: "binding.channel" as const,
+          };
+          return {
+            bindingResolution: {
+              record: {
+                targetSessionKey: serviceRoute.sessionKey,
+              },
+            } as never,
+            boundSessionKey: serviceRoute.sessionKey,
+            boundAgentId: "service",
+            route: serviceRoute,
+          };
+        },
+        isPluginOwnedSessionBindingRecord: () => false,
+      },
+    });
+
+    expect(seen).toEqual({ runtime: "user:user-1", configured: "dm-1" });
+    expect(result.effectiveRoute).toMatchObject({
+      agentId: "service",
+      sessionKey: "agent:service:discord:direct:user-1",
+      matchedBy: "binding.channel",
+    });
+  });
+
+  it("drops a route-shaped runtime binding after the configured route changes agent", () => {
+    const channelId = "channel-stale-route";
+    const result = resolveDiscordConversationBindingRoute({
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "newagent" }] },
+        bindings: [
+          {
+            agentId: "newagent",
+            match: {
+              channel: "discord",
+              accountId: "default",
+              peer: { kind: "channel", id: channelId },
+            },
+          },
+        ],
+      },
+      accountId: "default",
+      isDirectMessage: false,
+      isGroupDm: false,
+      conversationId: channelId,
+      configuredConversationId: channelId,
+      runtime: {
+        lookupRuntimeConversationBindingRoute: ({ route, conversation }) => ({
+          bindingRecord: {
+            bindingId: "stale-route",
+            targetSessionKey: `agent:oldagent:discord:channel:${channelId}`,
+            targetKind: "session",
+            conversation,
+            status: "active",
+            boundAt: 1,
+          },
+          boundSessionKey: `agent:oldagent:discord:channel:${channelId}`,
+          boundAgentId: "oldagent",
+          route: {
+            ...route,
+            agentId: "oldagent",
+            sessionKey: `agent:oldagent:discord:channel:${channelId}`,
+            matchedBy: "binding.channel",
+          },
+        }),
+        resolveConfiguredBindingRoute: ({ route }) => ({
+          bindingResolution: null,
+          route,
+        }),
+        isPluginOwnedSessionBindingRecord: () => false,
+      },
+    });
+
+    expect(result.staleRuntimeBinding).toBe(true);
+    expect(result.runtimeBinding).toBeNull();
+    expect(result.effectiveRoute).toMatchObject({
+      agentId: "newagent",
+      sessionKey: `agent:newagent:discord:channel:${channelId}`,
+      matchedBy: "binding.peer",
+    });
+  });
+
   it("builds a direct peer from DM metadata", () => {
     expect(
       buildDiscordRoutePeer({

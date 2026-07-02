@@ -94,6 +94,28 @@ describe("resolveWhatsAppCurrentConversationRoute", () => {
     });
   });
 
+  it("revalidates the persisted broadcast service agent", async () => {
+    const peerId = "120363000000000000@g.us";
+    const route = await resolveWhatsAppCurrentConversationRoute({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }, { id: "service" }] },
+        broadcast: { [peerId]: ["service"] },
+      },
+      agentId: "service",
+      accountId: "default",
+      target: peerId,
+      chatType: "group",
+      senderId: "+15551234567",
+    });
+
+    expect(route).toMatchObject({
+      agentId: "service",
+      sessionKey: `agent:service:whatsapp:group:${peerId}`,
+      mainSessionKey: "agent:service:main",
+      matchedBy: "config.agent",
+    });
+  });
+
   it("does not turn wildcard pairing approval into owner proof", async () => {
     readStoreAllowFromForDmPolicyMock.mockResolvedValue(["*"]);
 

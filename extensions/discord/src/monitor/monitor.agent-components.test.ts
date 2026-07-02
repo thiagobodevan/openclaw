@@ -10,6 +10,8 @@ import {
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { peekSystemEvents, resetSystemEventsForTest } from "openclaw/plugin-sdk/test-fixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as discordClient from "../client.js";
+import * as discordApi from "../internal/api.js";
 import type {
   ButtonInteraction,
   ComponentData,
@@ -18,6 +20,7 @@ import type {
 import {
   enqueueSystemEventMock,
   readAllowFromStoreMock,
+  requestHeartbeatMock,
   resetDiscordComponentRuntimeMocks,
   upsertPairingRequestMock,
 } from "../test-support/component-runtime.js";
@@ -52,7 +55,7 @@ describe("agent components", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
     const defer = vi.fn().mockResolvedValue(undefined);
     const interaction = {
-      rawData: { channel_id: "dm-channel" },
+      rawData: { id: "interaction-1", channel_id: "dm-channel" },
       user: { id: "123456789", username: "Alice", discriminator: "1234" },
       defer,
       reply,
@@ -84,6 +87,28 @@ describe("agent components", () => {
     };
   };
 
+  const createGuildButtonInteraction = (overrides: Partial<ButtonInteraction> = {}) => {
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const interaction = {
+      rawData: {
+        id: "interaction-1",
+        channel_id: "channel-1",
+        guild_id: "guild-1",
+        member: { roles: ["operator"] },
+      },
+      channel: {
+        id: "channel-1",
+        type: ChannelType.GuildText,
+        name: "operations",
+      },
+      guild: { id: "guild-1", name: "Operations" },
+      user: { id: "123456789", username: "Alice", discriminator: "1234" },
+      reply,
+      ...overrides,
+    };
+    return { interaction: interaction as unknown as ButtonInteraction, reply };
+  };
+
   const firstReplyContent = (reply: ReturnType<typeof vi.fn>): string => {
     const [call] = reply.mock.calls;
     if (!call) {
@@ -104,7 +129,7 @@ describe("agent components", () => {
     const reply = vi.fn().mockResolvedValue(undefined);
     const defer = vi.fn().mockResolvedValue(undefined);
     const interaction = {
-      rawData: { channel_id: "group-dm-channel" },
+      rawData: { id: "interaction-1", channel_id: "group-dm-channel" },
       channel: {
         id: "group-dm-channel",
         type: ChannelType.GroupDM,
@@ -204,6 +229,46 @@ describe("agent components", () => {
       sessionKey: "agent:service:subagent:bound",
       matchedBy: "binding.channel",
     });
+  });
+
+  it("rejects plugin-owned bindings before component enqueue and wake", async () => {
+    registerSessionBindingAdapter({
+      channel: "discord",
+      accountId: "default",
+      listBySession: () => [],
+      resolveByConversation: (conversation) =>
+        conversation.conversationId === "user:123456789"
+          ? {
+              bindingId: "discord:default:user:123456789",
+              targetSessionKey: "agent:service:plugin:owned",
+              targetKind: "session",
+              conversation,
+              status: "active",
+              boundAt: 1,
+              metadata: {
+                pluginBindingOwner: "plugin",
+                pluginId: "service-plugin",
+                pluginRoot: "/plugins/service",
+              },
+            }
+          : null,
+    });
+    const button = createAgentComponentButton({
+      cfg: createCfg(),
+      accountId: "default",
+      dmPolicy: "allowlist",
+      allowFrom: ["123456789"],
+    });
+    const { interaction, reply } = createDmButtonInteraction();
+
+    await button.run(interaction, { componentId: "hello" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this button.",
+      ephemeral: true,
+    });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(requestHeartbeatMock).not.toHaveBeenCalled();
   });
 
   it("ignores persisted component routing that no longer matches the live binding", () => {
@@ -589,11 +654,195 @@ describe("agent components", () => {
       "[Discord component: hello_cid clicked by Alice#1234 (123456789)]",
       {
         sessionKey: defaultDmSessionKey,
-        contextKey: "discord:agent-button:dm-channel:hello_cid:123456789",
+        contextKey: "discord:agent-button:dm-channel:hello_cid:123456789:interaction-1",
+        contextMode: "exact",
         actor: { channel: "discord", accountId: "default", senderId: "123456789" },
+        deliveryContext: {
+          channel: "discord",
+          to: "user:123456789",
+          accountId: "default",
+        },
       },
     );
+    expect(requestHeartbeatMock).toHaveBeenCalledWith({
+      source: "channel-interaction",
+      intent: "immediate",
+      reason: "hook:discord-interaction",
+      agentId: "main",
+      sessionKey: defaultDmSessionKey,
+      heartbeat: { target: "last" },
+      conversation: expect.objectContaining({
+        messageChannel: "discord",
+        accountId: "default",
+        routeMatchedBy: "default",
+        chatType: "direct",
+        systemEventContextKey: "discord:agent-button:dm-channel:hello_cid:123456789:interaction-1",
+        senderId: "123456789",
+        resolveCurrentRoute: expect.any(Function),
+      }),
+    });
+    const currentRoute = await (
+      requestHeartbeatMock.mock.calls[0]?.[0] as {
+        conversation: { resolveCurrentRoute: (cfg: OpenClawConfig) => Promise<unknown> };
+      }
+    ).conversation.resolveCurrentRoute(createCfg());
+    expect(currentRoute).toMatchObject({
+      agentId: "main",
+      sessionKey: defaultDmSessionKey,
+      matchedBy: "default",
+    });
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
+  });
+
+  it("uses one agent-qualified component queue key for a global service main", async () => {
+    const serviceRoute = {
+      agentId: "service",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:service:main",
+      mainSessionKey: "global",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.peer" as const,
+    };
+    vi.spyOn(conversationBindingRuntime, "resolveConfiguredBindingRoute").mockReturnValue({
+      route: serviceRoute,
+      boundAgentId: "service",
+      boundSessionKey: serviceRoute.sessionKey,
+      bindingResolution: null,
+    } as never);
+    const button = createAgentComponentButton({
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+        session: { scope: "global", mainKey: "work" },
+      },
+      accountId: "default",
+      dmPolicy: "allowlist",
+      allowFrom: ["123456789"],
+    });
+    const { interaction } = createDmButtonInteraction();
+
+    await button.run(interaction, { componentId: "hello" } as ComponentData);
+
+    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ sessionKey: "agent:service:work" }),
+    );
+    expect(requestHeartbeatMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "service",
+        sessionKey: "agent:service:work",
+      }),
+    );
+    const currentRoute = await (
+      requestHeartbeatMock.mock.calls[0]?.[0] as {
+        conversation: { resolveCurrentRoute: (cfg: OpenClawConfig) => Promise<unknown> };
+      }
+    ).conversation.resolveCurrentRoute({
+      agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+      session: { scope: "global", mainKey: "work" },
+    });
+    expect(currentRoute).toMatchObject({
+      agentId: "service",
+      sessionKey: "agent:service:work",
+    });
+  });
+
+  it.each([
+    { name: "role removal", memberRoles: [] as string[], lookupError: false },
+    { name: "role lookup failure", memberRoles: [] as string[], lookupError: true },
+  ])("revalidates deferred component admission after $name", async (testCase) => {
+    vi.spyOn(discordClient, "createDiscordRestClient").mockReturnValue({
+      token: "test-token",
+      rest: { get: vi.fn() } as never,
+      account: {} as never,
+    });
+    const getMember = vi.spyOn(discordApi, "getGuildMember");
+    if (testCase.lookupError) {
+      getMember.mockRejectedValue(new Error("unavailable"));
+    } else {
+      getMember.mockResolvedValue({ roles: testCase.memberRoles } as never);
+    }
+    const cfg: OpenClawConfig = {
+      agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+      bindings: [
+        {
+          agentId: "service",
+          match: {
+            channel: "discord",
+            accountId: "default",
+            guildId: "guild-1",
+            roles: ["operator"],
+          },
+        },
+      ],
+    };
+    const button = createAgentComponentButton({
+      cfg,
+      accountId: "default",
+      discordConfig: { groupPolicy: "open" } as DiscordAccountConfig,
+    });
+    const { interaction } = createGuildButtonInteraction();
+
+    await button.run(interaction, { componentId: "restart" } as ComponentData);
+
+    expect(requestHeartbeatMock).toHaveBeenCalledOnce();
+    const wake = requestHeartbeatMock.mock.calls[0]?.[0] as {
+      agentId: string;
+      conversation: {
+        resolveCurrentRoute: (currentCfg: OpenClawConfig) => Promise<{
+          agentId: string;
+        } | null>;
+      };
+    };
+    expect(wake.agentId).toBe("service");
+    const currentRoute = await wake.conversation.resolveCurrentRoute(cfg);
+    expect(discordApi.getGuildMember).toHaveBeenCalledWith(
+      expect.anything(),
+      "guild-1",
+      "123456789",
+    );
+    if (testCase.lookupError) {
+      expect(currentRoute).toBeNull();
+    } else {
+      expect(currentRoute).toMatchObject({ agentId: "personal" });
+    }
+  });
+
+  it("isolates repeated component events by interaction id", async () => {
+    const button = createAgentComponentButton({
+      cfg: createCfg(),
+      accountId: "default",
+      dmPolicy: "allowlist",
+      allowFrom: ["123456789"],
+    });
+    const first = createDmButtonInteraction();
+    const second = createDmButtonInteraction({
+      rawData: { id: "interaction-2", channel_id: "dm-channel" },
+    } as Partial<ButtonInteraction>);
+
+    await button.run(first.interaction, { componentId: "hello" } as ComponentData);
+    await button.run(second.interaction, { componentId: "hello" } as ComponentData);
+
+    expect(enqueueSystemEventMock.mock.calls.map(([, options]) => options)).toEqual([
+      expect.objectContaining({
+        contextKey: "discord:agent-button:dm-channel:hello:123456789:interaction-1",
+      }),
+      expect.objectContaining({
+        contextKey: "discord:agent-button:dm-channel:hello:123456789:interaction-2",
+      }),
+    ]);
+    expect(requestHeartbeatMock.mock.calls.map(([options]) => options)).toEqual([
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          systemEventContextKey: "discord:agent-button:dm-channel:hello:123456789:interaction-1",
+        }),
+      }),
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          systemEventContextKey: "discord:agent-button:dm-channel:hello:123456789:interaction-2",
+        }),
+      }),
+    ]);
   });
 
   it("keeps malformed percent cid values without throwing", async () => {
@@ -613,8 +862,14 @@ describe("agent components", () => {
       "[Discord component: hello%2G clicked by Alice#1234 (123456789)]",
       {
         sessionKey: defaultDmSessionKey,
-        contextKey: "discord:agent-button:dm-channel:hello%2G:123456789",
+        contextKey: "discord:agent-button:dm-channel:hello%2G:123456789:interaction-1",
+        contextMode: "exact",
         actor: { channel: "discord", accountId: "default", senderId: "123456789" },
+        deliveryContext: {
+          channel: "discord",
+          to: "user:123456789",
+          accountId: "default",
+        },
       },
     );
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();

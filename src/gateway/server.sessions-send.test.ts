@@ -55,7 +55,7 @@ function expectSessionsSendDetails(
     reply?: string;
     sessionKey?: string;
   };
-  expect(details.status).toBe("ok");
+  expect(details.status, JSON.stringify(details)).toBe("ok");
   expect(details.reply).toBe(expected.reply);
   expect(details.sessionKey).toBe(expected.sessionKey);
 }
@@ -271,6 +271,7 @@ describe("sessions_send gateway loopback", () => {
           announceTimeoutMs: 5_000,
           maxPingPongTurns: 0,
           roundOneReply: "target response",
+          revalidateAdmission: async () => true,
         });
 
         await vi.waitFor(
@@ -328,18 +329,10 @@ describe("sessions_send label lookup", () => {
         timeoutMs: 5000,
       });
 
-      const tool = createOpenClawTools({
-        config: {
-          tools: {
-            sessions: {
-              visibility: "all",
-            },
-          },
-        },
-      }).find((candidate) => candidate.name === "sessions_send");
-      if (!tool) {
-        throw new Error("missing sessions_send tool");
-      }
+      const { createSessionsSendTool } = await import("../agents/tools/sessions-send-tool.js");
+      const tool = createSessionsSendTool({
+        config: { tools: { sessions: { visibility: "all" } } },
+      });
 
       // Send using label instead of sessionKey
       const result = await tool.execute("call-by-label", {

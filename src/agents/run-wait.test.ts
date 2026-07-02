@@ -134,6 +134,20 @@ describe("readLatestAssistantReply", () => {
     expect(result.fingerprint).toContain('"timestamp":42');
   });
 
+  it("scopes ambiguous global history to the selected agent", async () => {
+    callGatewayMock.mockResolvedValue({ messages: [] });
+
+    await readLatestAssistantReplySnapshot({
+      agentId: "work",
+      sessionKey: "global",
+    });
+
+    expect(callGatewayMock).toHaveBeenCalledWith({
+      method: "chat.history",
+      params: { sessionKey: "global", agentId: "work", limit: 50 },
+    });
+  });
+
   it("reads only final_answer text from phased assistant history", async () => {
     callGatewayMock.mockResolvedValue({
       messages: [

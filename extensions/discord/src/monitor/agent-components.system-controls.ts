@@ -9,16 +9,23 @@ import {
   type ComponentData,
   type StringSelectMenuInteraction,
 } from "../internal/discord.js";
+import { resolveDiscordCurrentConversationRoute } from "../outbound-session-route.js";
 import {
   AGENT_BUTTON_KEY,
   AGENT_SELECT_KEY,
   ackComponentInteraction,
   parseAgentComponentData,
   resolveAuthorizedComponentInteraction,
+  resolveDiscordInteractionId,
   type AgentComponentContext,
   type AgentComponentMessageInteraction,
 } from "./agent-components-helpers.js";
-import { enqueueSystemEvent } from "./agent-components.deps.runtime.js";
+import {
+  canonicalizeMainSessionAlias,
+  enqueueSystemEvent,
+  requestHeartbeat,
+  resolveAgentMainSessionKey,
+} from "./agent-components.deps.runtime.js";
 
 type AgentSystemControlParams = {
   ctx: AgentComponentContext;
@@ -31,6 +38,19 @@ type AgentSystemControlParams = {
   contextKeyPrefix: string;
   formatEventText: (params: { componentId: string; username: string; userId: string }) => string;
 };
+
+function resolveAgentComponentEventSessionKey(params: {
+  cfg: AgentComponentContext["cfg"];
+  agentId: string;
+  sessionKey: string;
+}): string {
+  const canonical = canonicalizeMainSessionAlias(params);
+  // Global storage still needs an agent-qualified ephemeral queue key so the
+  // same service owner is used by enqueue, deferred admission, and wake.
+  return canonical === "global"
+    ? resolveAgentMainSessionKey({ cfg: params.cfg, agentId: params.agentId })
+    : canonical;
+}
 
 async function runAgentSystemControlInteraction(params: AgentSystemControlParams): Promise<void> {
   const parsed = parseAgentComponentData(params.data);
@@ -59,18 +79,84 @@ async function runAgentSystemControlInteraction(params: AgentSystemControlParams
   if (!authorized) {
     return;
   }
-  const { interactionCtx, admittedRoute, replyOpts } = authorized;
+  const { interactionCtx, channelCtx, admittedRoute, replyOpts } = authorized;
   const { channelId, username, userId } = interactionCtx;
   const route = admittedRoute.route;
 
   const eventText = params.formatEventText({ componentId, username, userId });
   logDebug(`${params.label}: enqueuing event for channel ${channelId}: ${eventText}`);
 
-  enqueueSystemEvent(eventText, {
+  const interactionId = resolveDiscordInteractionId(params.interaction);
+  const contextKey = `${params.contextKeyPrefix}:${channelId}:${componentId}:${userId}:${interactionId}`;
+  const eventSessionKey = resolveAgentComponentEventSessionKey({
+    cfg: params.ctx.cfg,
+    agentId: route.agentId,
     sessionKey: route.sessionKey,
-    contextKey: `${params.contextKeyPrefix}:${channelId}:${componentId}:${userId}`,
-    actor: { channel: "discord", accountId: params.ctx.accountId, senderId: userId },
   });
+  const queued = enqueueSystemEvent(eventText, {
+    sessionKey: eventSessionKey,
+    contextKey,
+    contextMode: "exact",
+    actor: { channel: "discord", accountId: params.ctx.accountId, senderId: userId },
+    deliveryContext: {
+      channel: "discord",
+      to: interactionCtx.isDirectMessage ? `user:${userId}` : `channel:${channelId}`,
+      accountId: params.ctx.accountId,
+    },
+  });
+  if (queued) {
+    requestHeartbeat({
+      source: "channel-interaction",
+      intent: "immediate",
+      reason: "hook:discord-interaction",
+      agentId: route.agentId,
+      sessionKey: eventSessionKey,
+      heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "discord",
+        accountId: params.ctx.accountId,
+        routeMatchedBy: route.matchedBy,
+        chatType: interactionCtx.isDirectMessage
+          ? "direct"
+          : interactionCtx.isGroupDm
+            ? "group"
+            : "channel",
+        systemEventContextKey: contextKey,
+        groupId: interactionCtx.isDirectMessage ? undefined : channelId,
+        groupChannel: channelCtx.channelName,
+        groupSpace: interactionCtx.rawGuildId,
+        senderId: userId,
+        resolveCurrentRoute: async (cfg) => {
+          const current = await resolveDiscordCurrentConversationRoute({
+            cfg,
+            agentId: route.agentId,
+            accountId: params.ctx.accountId,
+            target: interactionCtx.isDirectMessage ? `user:${userId}` : `channel:${channelId}`,
+            chatType: interactionCtx.isDirectMessage
+              ? "direct"
+              : interactionCtx.isGroupDm
+                ? "group"
+                : "channel",
+            conversationId: channelId,
+            parentConversationId: channelCtx.parentId,
+            groupSpace: interactionCtx.rawGuildId,
+            senderId: userId,
+          });
+          if (!current) {
+            return null;
+          }
+          return {
+            ...current,
+            sessionKey: resolveAgentComponentEventSessionKey({
+              cfg,
+              agentId: current.agentId,
+              sessionKey: current.sessionKey,
+            }),
+          };
+        },
+      },
+    });
+  }
 
   await ackComponentInteraction({
     interaction: params.interaction,

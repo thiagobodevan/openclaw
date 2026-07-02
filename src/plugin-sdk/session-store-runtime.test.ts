@@ -4,11 +4,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as jsonFiles from "../infra/json-files.js";
 import {
+  canonicalizeMainSessionAlias,
   cleanupSessionLifecycleArtifacts,
   getSessionEntry,
   listSessionEntries,
   patchSessionEntry,
   readSessionUpdatedAt,
+  resolveAgentMainSessionKey,
   saveSessionStore,
   updateSessionStore,
   updateSessionStoreEntry,
@@ -28,6 +30,14 @@ describe("session-store-runtime compatibility surface", () => {
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("exports canonical agent main keys for plugin-owned event queues", () => {
+    const cfg = { session: { scope: "global" as const, mainKey: "work" } };
+    expect(resolveAgentMainSessionKey({ cfg, agentId: "service" })).toBe("agent:service:work");
+    expect(
+      canonicalizeMainSessionAlias({ cfg, agentId: "service", sessionKey: "agent:service:main" }),
+    ).toBe("global");
   });
 
   it("keeps the public session read shape while using accessor-backed exports", async () => {

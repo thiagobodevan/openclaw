@@ -77,7 +77,10 @@ import { collectRuntimeConfigAssignments, secretTargetRegistryEntries } from "./
 import { collectFeishuSecurityAuditFindings } from "./security-audit.js";
 import { createFeishuSendReceipt } from "./send-result.js";
 import { resolveFeishuSessionConversation } from "./session-conversation.js";
-import { resolveFeishuOutboundSessionRoute } from "./session-route.js";
+import {
+  resolveFeishuCurrentConversationRoute,
+  resolveFeishuOutboundSessionRoute,
+} from "./session-route.js";
 import { feishuSetupAdapter } from "./setup-core.js";
 import { feishuSetupWizard, runFeishuLogin } from "./setup-surface.js";
 import { looksLikeFeishuId, normalizeFeishuTarget } from "./targets.js";
@@ -1245,6 +1248,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
         resolveSessionConversation: ({ kind, rawId }) =>
           resolveFeishuSessionConversation({ kind, rawId }),
         resolveOutboundSessionRoute: (params) => resolveFeishuOutboundSessionRoute(params),
+        resolveCurrentConversationRoute: (params) => resolveFeishuCurrentConversationRoute(params),
         targetResolver: {
           looksLikeId: looksLikeFeishuId,
           hint: "<chatId|user:openId|chat:chatId>",

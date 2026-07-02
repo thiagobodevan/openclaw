@@ -186,6 +186,7 @@ function resolveLatestAssistantReplySnapshot(messages: unknown[]): AssistantRepl
 
 /** Read the latest non-tool assistant message for a session. */
 export async function readLatestAssistantReplySnapshot(params: {
+  agentId?: string;
   sessionKey: string;
   limit?: number;
   callGateway?: GatewayCaller;
@@ -194,7 +195,11 @@ export async function readLatestAssistantReplySnapshot(params: {
     messages: Array<unknown>;
   }>({
     method: "chat.history",
-    params: { sessionKey: params.sessionKey, limit: params.limit ?? 50 },
+    params: {
+      sessionKey: params.sessionKey,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
+      limit: params.limit ?? 50,
+    },
   });
   return resolveLatestAssistantReplySnapshot(
     stripToolMessages(Array.isArray(history?.messages) ? history.messages : []),
@@ -203,6 +208,7 @@ export async function readLatestAssistantReplySnapshot(params: {
 
 /** Read only the latest assistant text for call sites that do not need fingerprints. */
 export async function readLatestAssistantReply(params: {
+  agentId?: string;
   sessionKey: string;
   limit?: number;
   callGateway?: GatewayCaller;
@@ -210,6 +216,7 @@ export async function readLatestAssistantReply(params: {
   return (
     await readLatestAssistantReplySnapshot({
       sessionKey: params.sessionKey,
+      agentId: params.agentId,
       limit: params.limit,
       callGateway: params.callGateway,
     })
@@ -253,6 +260,7 @@ export async function waitForAgentRun(params: {
 
 /** Wait for a run and return a reply only when it differs from the supplied baseline. */
 export async function waitForAgentRunAndReadUpdatedAssistantReply(params: {
+  agentId?: string;
   runId: string;
   sessionKey: string;
   timeoutMs: number;
@@ -271,6 +279,7 @@ export async function waitForAgentRunAndReadUpdatedAssistantReply(params: {
 
   const latestReply = await readLatestAssistantReplySnapshot({
     sessionKey: params.sessionKey,
+    agentId: params.agentId,
     limit: params.limit,
     callGateway: params.callGateway,
   });

@@ -11,6 +11,14 @@ import {
   type RoutePeer,
 } from "openclaw/plugin-sdk/routing";
 import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+import { resolveDiscordConversationIdentity } from "../conversation-identity.js";
+
+export type DiscordConversationBindingRuntime = Pick<
+  typeof import("openclaw/plugin-sdk/conversation-binding-runtime"),
+  | "isPluginOwnedSessionBindingRecord"
+  | "lookupRuntimeConversationBindingRoute"
+  | "resolveConfiguredBindingRoute"
+>;
 
 export function buildDiscordRoutePeer(params: {
   isDirectMessage: boolean;
@@ -80,6 +88,105 @@ export function resolveDiscordBoundConversationRoute(params: {
     configuredRoute: params.configuredRoute,
     matchedBy: params.matchedBy,
   });
+}
+
+export function resolveDiscordConversationBindingRoute(params: {
+  cfg: OpenClawConfig;
+  accountId?: string | null;
+  guildId?: string | null;
+  memberRoleIds?: string[];
+  isDirectMessage: boolean;
+  isGroupDm: boolean;
+  directUserId?: string | null;
+  conversationId: string;
+  configuredConversationId?: string | null;
+  parentConversationId?: string | null;
+  runtime: DiscordConversationBindingRuntime;
+}) {
+  const route = resolveDiscordConversationRoute({
+    cfg: params.cfg,
+    accountId: params.accountId,
+    guildId: params.guildId,
+    memberRoleIds: params.memberRoleIds,
+    peer: buildDiscordRoutePeer({
+      isDirectMessage: params.isDirectMessage,
+      isGroupDm: params.isGroupDm,
+      directUserId: params.directUserId,
+      conversationId: params.conversationId,
+    }),
+    parentConversationId: params.parentConversationId,
+  });
+  const bindingConversationId = params.isDirectMessage
+    ? (resolveDiscordConversationIdentity({
+        isDirectMessage: true,
+        userId: params.directUserId ?? undefined,
+      }) ?? `user:${params.directUserId}`)
+    : params.conversationId;
+  let runtimeRoute = params.runtime.lookupRuntimeConversationBindingRoute({
+    route,
+    conversation: {
+      channel: "discord",
+      accountId: route.accountId,
+      conversationId: bindingConversationId,
+      parentConversationId: params.parentConversationId ?? undefined,
+    },
+  });
+  const staleRuntimeBinding = shouldIgnoreStaleDiscordRouteBinding({
+    bindingRecord: runtimeRoute.bindingRecord,
+    route,
+  });
+  const ignoredRuntimeBinding = staleRuntimeBinding ? runtimeRoute.bindingRecord : null;
+  if (staleRuntimeBinding) {
+    runtimeRoute = {
+      bindingRecord: null,
+      route,
+    };
+  }
+  let threadBinding = runtimeRoute.bindingRecord ?? undefined;
+  const configuredConversationId = params.configuredConversationId?.trim();
+  const configuredRoute =
+    threadBinding == null && configuredConversationId
+      ? params.runtime.resolveConfiguredBindingRoute({
+          cfg: params.cfg,
+          route,
+          conversation: {
+            channel: "discord",
+            accountId: route.accountId,
+            conversationId: configuredConversationId,
+            parentConversationId: params.parentConversationId ?? undefined,
+          },
+        })
+      : null;
+  const configuredBinding = configuredRoute?.bindingResolution ?? null;
+  if (!threadBinding && configuredBinding) {
+    threadBinding = configuredBinding.record;
+  }
+  const pluginOwnedBinding = params.runtime.isPluginOwnedSessionBindingRecord(threadBinding);
+  const boundSessionKey = pluginOwnedBinding
+    ? ""
+    : (runtimeRoute.boundSessionKey ?? threadBinding?.targetSessionKey?.trim());
+  const effectiveRoute = runtimeRoute.boundSessionKey
+    ? runtimeRoute.route
+    : resolveDiscordEffectiveRoute({
+        route,
+        boundSessionKey,
+        configuredRoute,
+        matchedBy: "binding.channel",
+      });
+
+  return {
+    route,
+    bindingConversationId,
+    staleRuntimeBinding,
+    ignoredRuntimeBinding,
+    runtimeBinding: runtimeRoute.bindingRecord,
+    threadBinding,
+    configuredBinding,
+    boundSessionKey,
+    effectiveRoute,
+    boundAgentId: boundSessionKey ? effectiveRoute.agentId : undefined,
+    pluginOwnedBinding,
+  };
 }
 
 export function resolveDiscordEffectiveRoute(params: {

@@ -520,6 +520,8 @@ export function buildChannelInboundEventContext(
     CommandTurn: commandTurn,
     MessageThreadId: params.reply.messageThreadId ?? params.conversation.threadId,
     NativeChannelId: params.reply.nativeChannelId ?? params.conversation.nativeChannelId,
+    NativeSenderId: params.conversation.nativeSenderId,
+    NativeDirectUserId: params.conversation.nativeDirectUserId,
     ChannelContext: params.channelContext,
     OriginatingChannel: params.channel,
     OriginatingTo: params.reply.originatingTo ?? params.reply.to,

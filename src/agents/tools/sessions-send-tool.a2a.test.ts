@@ -7,9 +7,24 @@ import { createSessionConversationTestRegistry } from "../../test-utils/session-
 import { readLatestAssistantReplySnapshot, waitForAgentRun } from "../run-wait.js";
 import { runAgentStep } from "./agent-step.js";
 import type { SessionListRow } from "./sessions-helpers.js";
-import { runSessionsSendA2AFlow, testing } from "./sessions-send-tool.a2a.js";
+import {
+  runSessionsSendA2AFlow as runSessionsSendA2AFlowImpl,
+  testing,
+} from "./sessions-send-tool.a2a.js";
 
 const callGatewayMock = vi.hoisted(() => vi.fn());
+
+type A2AFlowParams = Parameters<typeof runSessionsSendA2AFlowImpl>[0];
+
+function runSessionsSendA2AFlow(
+  params: Omit<A2AFlowParams, "revalidateAdmission"> &
+    Partial<Pick<A2AFlowParams, "revalidateAdmission">>,
+) {
+  return runSessionsSendA2AFlowImpl({
+    revalidateAdmission: async () => true,
+    ...params,
+  });
+}
 
 vi.mock("../../gateway/call.js", () => ({
   callGateway: (opts: unknown) => callGatewayMock(opts),
@@ -358,6 +373,199 @@ describe("runSessionsSendA2AFlow announce delivery", () => {
       sessionKey: targetSessionKey,
       message: "Agent-to-agent announce step.",
     });
+  });
+
+  it("carries distinct global requester and target owners through ping-pong", async () => {
+    vi.mocked(runAgentStep)
+      .mockResolvedValueOnce("requester response")
+      .mockResolvedValueOnce("target response")
+      .mockResolvedValueOnce("ANNOUNCE_SKIP");
+
+    await runSessionsSendA2AFlow({
+      targetGatewayAgentId: "service",
+      targetSessionKey: "global",
+      targetIdentitySessionKey: "agent:service:main",
+      displayKey: "global",
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 2,
+      requesterSessionKey: "global",
+      requesterIdentitySessionKey: "agent:work:main",
+      requesterGatewayAgentId: "work",
+      requesterChannel: "webchat",
+      roundOneReply: "Worker completed successfully",
+    });
+
+    expect(vi.mocked(runAgentStep).mock.calls.map(([input]) => input)).toMatchObject([
+      { agentId: "work", sessionKey: "global", sourceSessionKey: "agent:service:main" },
+      { agentId: "service", sessionKey: "global", sourceSessionKey: "agent:work:main" },
+      { agentId: "service", sessionKey: "global", sourceSessionKey: "agent:work:main" },
+    ]);
+  });
+
+  it("revalidates a target after its announce turn before channel delivery", async () => {
+    let allowed = true;
+    vi.mocked(runAgentStep).mockImplementationOnce(async () => {
+      allowed = false;
+      return "announce this";
+    });
+    const revalidateAdmission = vi.fn(async () => allowed);
+
+    await runSessionsSendA2AFlow({
+      targetSessionKey: "agent:service:discord:channel:ops",
+      displayKey: "agent:service:discord:channel:ops",
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 0,
+      roundOneReply: "Worker completed successfully",
+      revalidateAdmission,
+    });
+
+    expect(runAgentStep).toHaveBeenCalledOnce();
+    expect(revalidateAdmission).toHaveBeenCalledTimes(3);
+    expect(gatewayCalls.find((call) => call.method === "send")).toBeUndefined();
+  });
+
+  it.each([
+    { name: "same-session reply", sameSession: true },
+    { name: "target announcement", sameSession: false },
+  ])("revalidates after resolving the $name delivery target", async ({ sameSession }) => {
+    const targetSessionKey = "agent:service:discord:channel:ops";
+    sessionListRows = [
+      {
+        key: targetSessionKey,
+        kind: "group",
+        channel: "discord",
+        deliveryContext: { channel: "discord", to: "channel:ops" },
+      },
+    ];
+    let allowed = true;
+    let targetLookups = 0;
+    callGatewayMock.mockImplementation(async (opts: CallGatewayOptions) => {
+      gatewayCalls.push(opts);
+      if (opts.method === "sessions.list") {
+        targetLookups += 1;
+        if (targetLookups === 2) {
+          allowed = false;
+        }
+        return { sessions: sessionListRows };
+      }
+      return {};
+    });
+    const revalidateAdmission = vi.fn(async () => allowed);
+
+    await runSessionsSendA2AFlow({
+      targetSessionKey,
+      targetIdentitySessionKey: targetSessionKey,
+      displayKey: targetSessionKey,
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 0,
+      requesterSessionKey: sameSession ? targetSessionKey : "agent:work:main",
+      requesterIdentitySessionKey: sameSession ? targetSessionKey : "agent:work:main",
+      requesterChannel: "discord",
+      roundOneReply: "Worker completed successfully",
+      revalidateAdmission,
+    });
+
+    expect(targetLookups).toBe(2);
+    expect(revalidateAdmission).toHaveBeenCalledTimes(sameSession ? 3 : 4);
+    expect(gatewayCalls.find((call) => call.method === "send")).toBeUndefined();
+  });
+
+  it.each([
+    { name: "same-session reply", sameSession: true },
+    { name: "target announcement", sameSession: false },
+  ])("does not follow a rebound $name audience", async ({ sameSession }) => {
+    const targetSessionKey = "agent:service:discord:channel:ops";
+    let targetLookups = 0;
+    callGatewayMock.mockImplementation(async (opts: CallGatewayOptions) => {
+      gatewayCalls.push(opts);
+      if (opts.method === "sessions.list") {
+        targetLookups += 1;
+        return {
+          sessions: [
+            {
+              key: targetSessionKey,
+              kind: "group",
+              channel: "discord",
+              deliveryContext: {
+                channel: "discord",
+                to: `channel:ops-${targetLookups}`,
+                accountId: "work",
+              },
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    await runSessionsSendA2AFlow({
+      targetSessionKey,
+      targetIdentitySessionKey: targetSessionKey,
+      displayKey: targetSessionKey,
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 0,
+      requesterSessionKey: sameSession ? targetSessionKey : "agent:work:main",
+      requesterIdentitySessionKey: sameSession ? targetSessionKey : "agent:work:main",
+      requesterChannel: "discord",
+      roundOneReply: "Worker completed successfully",
+    });
+
+    expect(targetLookups).toBe(2);
+    expect(gatewayCalls.find((call) => call.method === "send")).toBeUndefined();
+  });
+
+  it("revalidates before a deferred target ping-pong turn", async () => {
+    let allowed = true;
+    vi.mocked(runAgentStep).mockImplementationOnce(async () => {
+      allowed = false;
+      return "requester response";
+    });
+
+    await runSessionsSendA2AFlow({
+      targetSessionKey: "agent:service:discord:channel:ops",
+      targetIdentitySessionKey: "agent:service:discord:channel:ops",
+      displayKey: "agent:service:discord:channel:ops",
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 2,
+      requesterSessionKey: "agent:work:main",
+      requesterIdentitySessionKey: "agent:work:main",
+      requesterChannel: "webchat",
+      roundOneReply: "Worker completed successfully",
+      revalidateAdmission: async () => allowed,
+    });
+
+    expect(runAgentStep).toHaveBeenCalledOnce();
+    expect(gatewayCalls.find((call) => call.method === "send")).toBeUndefined();
+  });
+
+  it("revalidates before a deferred requester ping-pong turn", async () => {
+    const revalidateAdmission = vi
+      .fn<() => Promise<boolean>>()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValue(false);
+
+    await runSessionsSendA2AFlow({
+      targetSessionKey: "agent:service:discord:channel:ops",
+      targetIdentitySessionKey: "agent:service:discord:channel:ops",
+      displayKey: "agent:service:discord:channel:ops",
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 2,
+      requesterSessionKey: "agent:work:main",
+      requesterIdentitySessionKey: "agent:work:main",
+      requesterChannel: "webchat",
+      roundOneReply: "Worker completed successfully",
+      revalidateAdmission,
+    });
+
+    expect(revalidateAdmission).toHaveBeenCalledTimes(2);
+    expect(runAgentStep).not.toHaveBeenCalled();
+    expect(gatewayCalls.find((call) => call.method === "send")).toBeUndefined();
   });
 
   it.each(["NO_REPLY", "HEARTBEAT_OK", "ANNOUNCE_SKIP"])(

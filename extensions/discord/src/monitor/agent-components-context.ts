@@ -2,14 +2,14 @@
 import { ChannelType } from "discord-api-types/v10";
 import {
   ensureConfiguredBindingRouteReady,
+  isPluginOwnedSessionBindingRecord,
   lookupRuntimeConversationBindingRoute,
   resolveConfiguredBindingRoute,
   touchRuntimeConversationBindingRoute,
   type ConfiguredBindingRouteResult,
 } from "openclaw/plugin-sdk/conversation-binding-runtime";
 import { logError } from "openclaw/plugin-sdk/logging-core";
-import { resolveAgentRoute, resolveConversationIdentityMode } from "openclaw/plugin-sdk/routing";
-import { resolveDiscordConversationIdentity } from "../conversation-identity.js";
+import { resolveConversationIdentityMode } from "openclaw/plugin-sdk/routing";
 import type {
   AgentComponentContext,
   AgentComponentInteraction,
@@ -19,7 +19,7 @@ import type {
 } from "./agent-components.types.js";
 import { normalizeDiscordDisplaySlug, normalizeDiscordSlug } from "./allow-list.js";
 import { resolveDiscordChannelInfoSafe } from "./channel-access.js";
-import { shouldIgnoreStaleDiscordRouteBinding } from "./route-resolution.js";
+import { resolveDiscordConversationBindingRoute } from "./route-resolution.js";
 
 function formatUsername(user: { username: string; discriminator?: string | null }): string {
   if (user.discriminator && user.discriminator !== "0") {
@@ -49,63 +49,33 @@ type AgentComponentRouteParams = {
 };
 
 function resolveAgentComponentRouteState(params: AgentComponentRouteParams): {
-  route: ReturnType<typeof resolveAgentRoute>;
+  route: ReturnType<typeof resolveDiscordConversationBindingRoute>["effectiveRoute"];
   configuredBinding: ConfiguredBindingRouteResult["bindingResolution"];
   runtimeBinding: ReturnType<typeof lookupRuntimeConversationBindingRoute>["bindingRecord"];
+  pluginOwnedBinding: boolean;
 } {
-  const route = resolveAgentRoute({
+  const state = resolveDiscordConversationBindingRoute({
     cfg: params.ctx.cfg,
-    channel: "discord",
     accountId: params.ctx.accountId,
     guildId: params.rawGuildId,
     memberRoleIds: params.memberRoleIds,
-    peer: {
-      kind: params.isDirectMessage ? "direct" : params.isGroupDm ? "group" : "channel",
-      id: params.isDirectMessage ? params.userId : params.channelId,
-    },
-    parentPeer: params.parentId ? { kind: "channel", id: params.parentId } : undefined,
-  });
-  const conversationId =
-    (params.isDirectMessage
-      ? resolveDiscordConversationIdentity({
-          isDirectMessage: true,
-          userId: params.userId,
-        })
-      : params.channelId) ?? params.channelId;
-  const runtimeRoute = lookupRuntimeConversationBindingRoute({
-    route,
-    conversation: {
-      channel: "discord",
-      accountId: params.ctx.accountId,
-      conversationId,
-      parentConversationId: params.parentId,
-    },
-  });
-  const staleRuntimeBinding = shouldIgnoreStaleDiscordRouteBinding({
-    bindingRecord: runtimeRoute.bindingRecord,
-    route,
-  });
-  if (!staleRuntimeBinding && (runtimeRoute.boundSessionKey || runtimeRoute.bindingRecord)) {
-    return {
-      route: runtimeRoute.route,
-      configuredBinding: null,
-      runtimeBinding: runtimeRoute.bindingRecord,
-    };
-  }
-  const configuredRoute = resolveConfiguredBindingRoute({
-    cfg: params.ctx.cfg,
-    route,
-    conversation: {
-      channel: "discord",
-      accountId: params.ctx.accountId,
-      conversationId: params.channelId,
-      parentConversationId: params.parentId,
+    isDirectMessage: params.isDirectMessage,
+    isGroupDm: params.isGroupDm,
+    directUserId: params.userId,
+    conversationId: params.channelId,
+    configuredConversationId: params.channelId,
+    parentConversationId: params.parentId,
+    runtime: {
+      isPluginOwnedSessionBindingRecord,
+      lookupRuntimeConversationBindingRoute,
+      resolveConfiguredBindingRoute,
     },
   });
   return {
-    route: configuredRoute.route,
-    configuredBinding: configuredRoute.bindingResolution,
-    runtimeBinding: null,
+    route: state.effectiveRoute,
+    configuredBinding: state.configuredBinding,
+    runtimeBinding: state.runtimeBinding,
+    pluginOwnedBinding: state.pluginOwnedBinding,
   };
 }
 
@@ -115,6 +85,9 @@ export function resolveAgentComponentRoute(params: AgentComponentRouteParams) {
 
 export function resolveAgentComponentRouteAdmission(params: AgentComponentRouteParams) {
   const state = resolveAgentComponentRouteState(params);
+  if (state.pluginOwnedBinding) {
+    return null;
+  }
   const identity = resolveConversationIdentityMode({
     config: params.ctx.cfg,
     agentId: state.route.agentId,

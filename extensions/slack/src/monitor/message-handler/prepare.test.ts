@@ -1584,6 +1584,7 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     expect(prepared.replyTarget).toBe("channel:D0ACP6B1T8V");
     expect(prepared.ctxPayload.To).toBe("user:U1");
     expect(prepared.ctxPayload.NativeChannelId).toBe("D0ACP6B1T8V");
+    expect(prepared.ctxPayload.NativeDirectUserId).toBe("U1");
   });
 
   it("classifies D-prefix DMs when channel_type is missing", async () => {

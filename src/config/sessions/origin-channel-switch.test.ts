@@ -24,7 +24,9 @@ const slackTurn = {
   From: "slack:U0001",
   To: "slack:D111SLACK",
   NativeChannelId: "D111SLACK",
+  NativeSenderId: "U0001",
   NativeDirectUserId: "U0001",
+  ThreadParentId: "C000PARENT",
   AccountId: "slack-team-1",
   MessageThreadId: "1700000000.000100",
 } satisfies Partial<MsgContext>;
@@ -42,7 +44,10 @@ describe("session origin across a channel switch", () => {
   it("clears stale channel-keyed fields when provider changes and the new turn omits them", () => {
     const afterSlack = applyOrigin(undefined, slackTurn);
     expect(afterSlack.origin?.nativeChannelId).toBe("D111SLACK");
+    expect(afterSlack.origin?.nativeSenderId).toBe("U0001");
+    expect(afterSlack.origin?.nativeProvider).toBe("slack");
     expect(afterSlack.origin?.threadId).toBe("1700000000.000100");
+    expect(afterSlack.origin?.parentConversationId).toBe("C000PARENT");
 
     const afterTelegram = applyOrigin(afterSlack, telegramTurn);
 
@@ -51,7 +56,10 @@ describe("session origin across a channel switch", () => {
     expect(afterTelegram.origin?.surface).toBe("telegram");
     expect(afterTelegram.origin?.accountId).toBe("telegram-bot-1");
     expect(afterTelegram.origin?.nativeChannelId).toBeUndefined();
+    expect(afterTelegram.origin?.nativeSenderId).toBeUndefined();
     expect(afterTelegram.origin?.nativeDirectUserId).toBeUndefined();
+    expect(afterTelegram.origin?.nativeProvider).toBeUndefined();
+    expect(afterTelegram.origin?.parentConversationId).toBeUndefined();
     expect(afterTelegram.origin?.threadId).toBeUndefined();
   });
 
@@ -62,6 +70,7 @@ describe("session origin across a channel switch", () => {
 
     expect(afterTelegramAgain.origin?.provider).toBe("telegram");
     expect(afterTelegramAgain.origin?.nativeChannelId).toBeUndefined();
+    expect(afterTelegramAgain.origin?.nativeProvider).toBeUndefined();
     expect(afterTelegramAgain.origin?.threadId).toBeUndefined();
   });
 
@@ -91,6 +100,7 @@ describe("session origin across a channel switch", () => {
 
     const afterTelegram = applyOrigin(afterSlack, telegramWithChannel);
     expect(afterTelegram.origin?.nativeChannelId).toBe("C222TG");
+    expect(afterTelegram.origin?.nativeProvider).toBe("telegram");
     expect(afterTelegram.origin?.threadId).toBe(555);
   });
 
@@ -108,7 +118,27 @@ describe("session origin across a channel switch", () => {
     const afterFollowUp = applyOrigin(afterSlack, slackFollowUp);
     // Same provider: the established channel id and thread are retained when omitted.
     expect(afterFollowUp.origin?.nativeChannelId).toBe("D111SLACK");
+    expect(afterFollowUp.origin?.nativeProvider).toBe("slack");
     expect(afterFollowUp.origin?.threadId).toBe("1700000000.000100");
+    expect(afterFollowUp.origin?.parentConversationId).toBe("C000PARENT");
+  });
+
+  it("clears parent and thread identity when the native conversation changes", () => {
+    const afterThread = applyOrigin(undefined, slackTurn);
+    const afterTopLevelChannel = applyOrigin(afterThread, {
+      Provider: "slack",
+      Surface: "slack",
+      ChatType: "channel",
+      From: "slack:U0002",
+      To: "channel:C222",
+      NativeChannelId: "C222",
+      AccountId: "slack-team-1",
+    });
+
+    expect(afterTopLevelChannel.origin?.nativeChannelId).toBe("C222");
+    expect(afterTopLevelChannel.origin?.nativeDirectUserId).toBeUndefined();
+    expect(afterTopLevelChannel.origin?.parentConversationId).toBeUndefined();
+    expect(afterTopLevelChannel.origin?.threadId).toBeUndefined();
   });
 
   it("clears stale channel-keyed fields when the account changes and the new turn omits them", () => {
@@ -128,6 +158,7 @@ describe("session origin across a channel switch", () => {
     expect(afterAccountSwitch.origin?.accountId).toBe("slack-team-2");
     expect(afterAccountSwitch.origin?.nativeChannelId).toBeUndefined();
     expect(afterAccountSwitch.origin?.nativeDirectUserId).toBeUndefined();
+    expect(afterAccountSwitch.origin?.nativeProvider).toBeUndefined();
     expect(afterAccountSwitch.origin?.threadId).toBeUndefined();
   });
 
@@ -234,7 +265,9 @@ describe("session origin across a non-delivery turn", () => {
     const afterWebchat = applyOrigin(afterSlack, webchatTurn);
 
     expect(afterWebchat.origin?.nativeChannelId).toBe("D111SLACK");
+    expect(afterWebchat.origin?.nativeSenderId).toBe("U0001");
     expect(afterWebchat.origin?.nativeDirectUserId).toBe("U0001");
+    expect(afterWebchat.origin?.nativeProvider).toBe("slack");
     expect(afterWebchat.origin?.accountId).toBe("slack-team-1");
     expect(afterWebchat.origin?.threadId).toBe("1700000000.000100");
   });

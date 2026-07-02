@@ -120,6 +120,8 @@ export type MsgContext = {
   AgentRouteMatchedBy?: AgentRouteMatch;
   /** Exact queued-system-event context owned by this channel interaction. */
   SystemEventContextKey?: string;
+  /** Owner-qualified ephemeral queue key when it differs from persisted SessionKey. */
+  SystemEventSessionKey?: string;
   /**
    * Session-like key used for runtime policy (sandbox/tool policy) when the
    * conversation key intentionally remains broader, such as a main-session DM.
@@ -310,6 +312,8 @@ export type MsgContext = {
   TransportThreadId?: string | number;
   /** Platform-native channel/conversation id (e.g. Slack DM channel "D…" id). */
   NativeChannelId?: string;
+  /** Stable provider-native author id used to revalidate deferred sender policy. */
+  NativeSenderId?: string;
   /** Channel-owned metadata exposed to plugin hook context, not prompt text. */
   ChannelContext?: PluginHookChannelContext;
   /** Provider-native chat/conversation id used by channel plugins that expose `chat_id`. */

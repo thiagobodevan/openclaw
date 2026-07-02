@@ -3335,6 +3335,7 @@ describe("runPreparedReply media-only handling", () => {
   it("passes the targeted system-event context into queue draining", async () => {
     const params = baseParams();
     params.ctx.SystemEventContextKey = "slack:interaction:c1:100:approve:u1";
+    params.ctx.SystemEventSessionKey = "agent:ops:work";
     params.opts = { isHeartbeat: true };
 
     await runPreparedReply(params);
@@ -3342,6 +3343,7 @@ describe("runPreparedReply media-only handling", () => {
     expect(drainFormattedSystemEvents).toHaveBeenCalledWith(
       expect.objectContaining({
         contextKey: "slack:interaction:c1:100:approve:u1",
+        sessionKey: "agent:ops:work",
       }),
     );
   });

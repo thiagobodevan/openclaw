@@ -570,7 +570,7 @@ function resolveHeartbeatSession(
   const resolvedAgentId = normalizeAgentId(agentId ?? resolveDefaultAgentId(cfg));
   const mainSessionKey =
     scope === "global" ? "global" : resolveAgentMainSessionKey({ cfg, agentId: resolvedAgentId });
-  const storeAgentId = scope === "global" ? resolveDefaultAgentId(cfg) : resolvedAgentId;
+  const storeAgentId = resolvedAgentId;
   const storePath = resolveStorePath(sessionCfg?.store, {
     agentId: storeAgentId,
   });
@@ -973,6 +973,7 @@ ${JSON.stringify(items, null, 2)}`;
 
 type HeartbeatPreflight = HeartbeatWakePayloadFlags & {
   session: ReturnType<typeof resolveHeartbeatSession>;
+  systemEventSessionKey: string;
   pendingEventEntries: ReturnType<typeof peekSystemEventEntries>;
   turnSourceDeliveryContext: ReturnType<typeof resolveSystemEventDeliveryContext>;
   dueCommitments: CommitmentRecord[];
@@ -1038,8 +1039,12 @@ async function resolveHeartbeatPreflight(params: {
     params.heartbeat,
     params.forcedSessionKey,
   );
+  const systemEventSessionKey =
+    params.source === "channel-interaction" && params.forcedSessionKey?.trim()
+      ? params.forcedSessionKey.trim()
+      : session.sessionKey;
   const queuedSystemEvents =
-    params.runScope === "commitment-only" ? [] : peekSystemEventEntries(session.sessionKey);
+    params.runScope === "commitment-only" ? [] : peekSystemEventEntries(systemEventSessionKey);
   const normalizedSystemEventContextKey = params.systemEventContextKey?.trim().toLowerCase();
   const pendingEventEntries = queuedSystemEvents.filter((event) =>
     normalizedSystemEventContextKey
@@ -1091,6 +1096,7 @@ async function resolveHeartbeatPreflight(params: {
   const basePreflight = {
     ...wakeFlags,
     session,
+    systemEventSessionKey,
     pendingEventEntries,
     turnSourceDeliveryContext,
     dueCommitments,
@@ -1431,7 +1437,7 @@ export async function runHeartbeatOnce(opts: {
     if (!expectedSessionKey) {
       return { status: "skipped", reason: "identity-unknown_audience" };
     }
-    const currentRoute = conversation.resolveCurrentRoute(cfg);
+    const currentRoute = await conversation.resolveCurrentRoute(cfg);
     if (
       !currentRoute ||
       normalizeAgentId(currentRoute.agentId) !== agentId ||
@@ -1866,7 +1872,10 @@ export async function runHeartbeatOnce(opts: {
     if (!preflight.shouldInspectPendingEvents || inspectedSystemEventsToConsume.length === 0) {
       return;
     }
-    consumeSelectedSystemEventEntries(sessionKey, inspectedSystemEventsToConsume);
+    consumeSelectedSystemEventEntries(
+      preflight.systemEventSessionKey,
+      inspectedSystemEventsToConsume,
+    );
   };
 
   const conversation = opts.conversation;
@@ -1890,6 +1899,7 @@ export async function runHeartbeatOnce(opts: {
           GroupSpace: conversation.groupSpace,
           SenderId: conversation.senderId,
           SystemEventContextKey: conversation.systemEventContextKey,
+          SystemEventSessionKey: preflight.systemEventSessionKey,
         }
       : {}),
     ...(opts.source === "channel-interaction"

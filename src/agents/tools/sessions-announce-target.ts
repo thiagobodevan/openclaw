@@ -18,6 +18,7 @@ async function callGatewayLazy<T = unknown>(opts: CallGatewayOptions): Promise<T
 }
 
 export async function resolveAnnounceTarget(params: {
+  agentId?: string;
   sessionKey: string;
   displayKey: string;
 }): Promise<AnnounceTarget | null> {
@@ -44,6 +45,7 @@ export async function resolveAnnounceTarget(params: {
         includeGlobal: true,
         includeUnknown: true,
         limit: 200,
+        ...(params.agentId ? { agentId: params.agentId } : {}),
       },
     });
     const sessions = Array.isArray(list?.sessions) ? list.sessions : [];

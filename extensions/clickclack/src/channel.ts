@@ -23,6 +23,7 @@ import {
   resolveClickClackAccount,
   resolveDefaultClickClackAccountId,
 } from "./accounts.js";
+import { resolveClickClackAgentRoute } from "./agent-route.js";
 import { clickClackConfigSchema } from "./config-schema.js";
 import { startClickClackGatewayAccount } from "./gateway.js";
 import { sendClickClackText } from "./outbound.js";
@@ -134,6 +135,29 @@ export const clickClackPlugin: ChannelPlugin<ResolvedClickClackAccount> = create
           threadId: threadId ?? (parsed.kind === "thread" ? parsed.id : undefined),
           currentSessionKey,
           canRecoverCurrentThread: () => true,
+        });
+      },
+      resolveCurrentConversationRoute: ({ cfg, accountId, target, chatType }) => {
+        let parsed: ReturnType<typeof parseClickClackTarget>;
+        try {
+          parsed = parseClickClackTarget(target);
+        } catch {
+          return null;
+        }
+        const isDirect = chatType === "direct";
+        if (isDirect !== (parsed.chatType === "direct")) {
+          return null;
+        }
+        const account = resolveClickClackAccount({
+          cfg: cfg as CoreConfig,
+          accountId,
+        });
+        return resolveClickClackAgentRoute({
+          cfg,
+          accountId: account.accountId,
+          configuredAgentId: account.agentId,
+          target: buildClickClackTarget(parsed),
+          isDirect,
         });
       },
       resolveSessionConversation: ({ rawId }) => {

@@ -46,6 +46,7 @@ function extractAgentCommandReply(result: unknown): string | undefined {
 
 /** Sends one annotated message to a target session and returns the resulting assistant text. */
 export async function runAgentStep(params: {
+  agentId?: string;
   sessionKey: string;
   message: string;
   extraSystemPrompt: string;
@@ -72,6 +73,7 @@ export async function runAgentStep(params: {
     // Transcript-message mode must use the in-process command path to preserve transcript text.
     const result = await agentStepDeps.agentCommandFromIngress({
       message,
+      agentId: params.agentId,
       transcriptMessage: params.transcriptMessage,
       sessionKey: params.sessionKey,
       deliver: false,
@@ -87,6 +89,7 @@ export async function runAgentStep(params: {
     });
     await retireSessionMcpRuntimeForSessionKey({
       sessionKey: params.sessionKey,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
       reason: "nested-agent-step-complete",
     });
     return extractAgentCommandReply(result);
@@ -95,6 +98,7 @@ export async function runAgentStep(params: {
     method: "agent",
     params: {
       message,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
       sessionKey: params.sessionKey,
       idempotencyKey: stepIdem,
       deliver: false,
@@ -112,12 +116,14 @@ export async function runAgentStep(params: {
   // Gateway agent calls can return before the assistant reply is persisted.
   const result = await waitForAgentRunAndReadUpdatedAssistantReply({
     runId: resolvedRunId,
+    agentId: params.agentId,
     sessionKey: params.sessionKey,
     timeoutMs: Math.min(params.timeoutMs, 60_000),
   });
   if (result.status === "ok" || result.status === "error") {
     await retireSessionMcpRuntimeForSessionKey({
       sessionKey: params.sessionKey,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
       reason: "nested-agent-step-complete",
     });
   }

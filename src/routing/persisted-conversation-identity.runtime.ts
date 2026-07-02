@@ -12,10 +12,13 @@ export type PersistedPluginConversationRouteResult =
 export async function resolvePersistedPluginConversationRoute(params: {
   cfg: OpenClawConfig;
   channel: string;
+  agentId?: string;
   accountId?: string | null;
   target: string;
   conversationId?: string | null;
+  parentConversationId?: string | null;
   chatType: ChatType;
+  groupSpace?: string | null;
   threadId?: string | number | null;
   senderId?: string | null;
 }): Promise<PersistedPluginConversationRouteResult> {
@@ -29,5 +32,8 @@ export async function resolvePersistedPluginConversationRoute(params: {
     return { kind: "unsupported" };
   }
   const route = await resolver(params);
+  if (route === undefined) {
+    return { kind: "unsupported" };
+  }
   return route ? { kind: "resolved", route } : { kind: "unresolved" };
 }

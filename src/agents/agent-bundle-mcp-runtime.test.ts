@@ -1732,6 +1732,44 @@ process.on("SIGINT", shutdown);`,
     ).resolves.toBe(false);
   });
 
+  it("keeps selected-agent global runtimes isolated during retirement", async () => {
+    await getOrCreateSessionMcpRuntime({
+      sessionId: "session-global-work",
+      sessionKey: "global",
+      agentId: "work",
+      workspaceDir: "/workspace/work",
+    });
+    await getOrCreateSessionMcpRuntime({
+      sessionId: "session-global-service",
+      sessionKey: "global",
+      agentId: "service",
+      workspaceDir: "/workspace/service",
+    });
+
+    await expect(
+      retireSessionMcpRuntimeForSessionKey({
+        sessionKey: "global",
+        agentId: "work",
+        reason: "test",
+      }),
+    ).resolves.toBe(true);
+    expect(testing.getCachedSessionIds()).toEqual(["session-global-service"]);
+    await expect(
+      retireSessionMcpRuntimeForSessionKey({
+        sessionKey: "global",
+        agentId: "work",
+        reason: "test",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      retireSessionMcpRuntimeForSessionKey({
+        sessionKey: "global",
+        agentId: "service",
+        reason: "test",
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("evicts idle runtimes after the configured TTL but skips active leases", async () => {
     let now = 1_000;
     const disposed: string[] = [];

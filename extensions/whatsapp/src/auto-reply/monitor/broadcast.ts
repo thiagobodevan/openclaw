@@ -2,52 +2,13 @@
 import type { AckReactionHandle } from "openclaw/plugin-sdk/channel-feedback";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
-import { buildAgentSessionKey, deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
-import {
-  buildAgentMainSessionKey,
-  DEFAULT_MAIN_KEY,
-  normalizeAgentId,
-} from "openclaw/plugin-sdk/routing";
-import { resolveWhatsAppGroupSessionRoute } from "../../group-session-key.js";
+import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
+import { resolveWhatsAppAgentRoute } from "../../group-session-key.js";
 import { requireWhatsAppInboundAdmission } from "../../inbound/admission.js";
 import type { AdmittedWebInboundMessage } from "../../inbound/types.js";
 import { formatError } from "../../session.js";
 import { whatsappInboundLog } from "../loggers.js";
 import type { GroupHistoryEntry } from "./inbound-context.js";
-
-function buildBroadcastRouteKeys(params: {
-  cfg: OpenClawConfig;
-  msg: AdmittedWebInboundMessage;
-  route: ReturnType<typeof resolveAgentRoute>;
-  peerId: string;
-  agentId: string;
-}) {
-  const admission = requireWhatsAppInboundAdmission(params.msg);
-  const sessionKey = buildAgentSessionKey({
-    agentId: params.agentId,
-    channel: "whatsapp",
-    accountId: params.route.accountId,
-    peer: {
-      kind: admission.conversation.kind,
-      id: params.peerId,
-    },
-    dmScope: params.cfg.session?.dmScope,
-    identityLinks: params.cfg.session?.identityLinks,
-  });
-  const mainSessionKey = buildAgentMainSessionKey({
-    agentId: params.agentId,
-    mainKey: DEFAULT_MAIN_KEY,
-  });
-
-  return {
-    sessionKey,
-    mainSessionKey,
-    lastRoutePolicy: deriveLastRoutePolicy({
-      sessionKey,
-      mainSessionKey,
-    }),
-  };
-}
 
 export async function maybeBroadcastMessage(params: {
   cfg: OpenClawConfig;
@@ -97,22 +58,14 @@ export async function maybeBroadcastMessage(params: {
       whatsappInboundLog.warn(`Broadcast agent ${agentId} not found in agents.list; skipping`);
       return false;
     }
-    const routeKeys = buildBroadcastRouteKeys({
+    const agentRoute = resolveWhatsAppAgentRoute({
       cfg: params.cfg,
-      msg: params.msg,
       route: params.route,
       peerId: params.peerId,
       agentId: normalizedAgentId,
+      chatType: admission.conversation.kind,
+      matchedBy: "config.agent",
     });
-    const baseAgentRoute = {
-      ...params.route,
-      agentId: normalizedAgentId,
-      matchedBy: "config.agent" as const,
-      ...routeKeys,
-    };
-    const agentRoute = isGroupConversation
-      ? resolveWhatsAppGroupSessionRoute(baseAgentRoute)
-      : baseAgentRoute;
 
     try {
       const opts: {

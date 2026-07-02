@@ -2,12 +2,8 @@
 import { describe, expect, it } from "vitest";
 import type { ClawdbotConfig } from "../runtime-api.js";
 import { parseMessageContent } from "./bot-content.js";
-import {
-  buildBroadcastSessionKey,
-  buildFeishuAgentBody,
-  resolveBroadcastAgents,
-  toMessageResourceType,
-} from "./bot.js";
+import { buildFeishuAgentBody, resolveBroadcastAgents, toMessageResourceType } from "./bot.js";
+import { buildFeishuBroadcastSessionKey } from "./broadcast-session.js";
 
 describe("buildFeishuAgentBody", () => {
   it("builds message id, speaker, quoted content, mention context, and permission notice in order", () => {
@@ -128,16 +124,16 @@ describe("resolveBroadcastAgents", () => {
   });
 });
 
-describe("buildBroadcastSessionKey", () => {
+describe("buildFeishuBroadcastSessionKey", () => {
   it("replaces agent ID prefix in session key", () => {
-    expect(buildBroadcastSessionKey("agent:main:feishu:group:oc_group123", "main", "susan")).toBe(
-      "agent:susan:feishu:group:oc_group123",
-    );
+    expect(
+      buildFeishuBroadcastSessionKey("agent:main:feishu:group:oc_group123", "main", "susan"),
+    ).toBe("agent:susan:feishu:group:oc_group123");
   });
 
   it("handles compound peer IDs", () => {
     expect(
-      buildBroadcastSessionKey(
+      buildFeishuBroadcastSessionKey(
         "agent:main:feishu:group:oc_group123:sender:ou_user1",
         "main",
         "susan",
@@ -146,7 +142,7 @@ describe("buildBroadcastSessionKey", () => {
   });
 
   it("returns base key unchanged when prefix does not match", () => {
-    expect(buildBroadcastSessionKey("custom:key:format", "main", "susan")).toBe(
+    expect(buildFeishuBroadcastSessionKey("custom:key:format", "main", "susan")).toBe(
       "custom:key:format",
     );
   });

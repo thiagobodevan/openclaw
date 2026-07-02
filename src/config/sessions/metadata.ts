@@ -48,7 +48,10 @@ const mergeOrigin = (
         next.accountId !== existing.accountId));
   if (channelChanged) {
     delete merged.nativeChannelId;
+    delete merged.nativeSenderId;
     delete merged.nativeDirectUserId;
+    delete merged.nativeProvider;
+    delete merged.parentConversationId;
     delete merged.accountId;
     delete merged.threadId;
   }
@@ -70,11 +73,28 @@ const mergeOrigin = (
   if (next?.to) {
     merged.to = next.to;
   }
+  if (next?.nativeChannelId && next.nativeChannelId !== existing?.nativeChannelId) {
+    // Parent/thread metadata belongs to one native conversation. A same-account
+    // route switch must not carry the prior child's authority into the new peer.
+    delete merged.nativeSenderId;
+    delete merged.nativeDirectUserId;
+    delete merged.parentConversationId;
+    delete merged.threadId;
+  }
   if (next?.nativeChannelId) {
     merged.nativeChannelId = next.nativeChannelId;
   }
+  if (next?.nativeSenderId) {
+    merged.nativeSenderId = next.nativeSenderId;
+  }
   if (next?.nativeDirectUserId) {
     merged.nativeDirectUserId = next.nativeDirectUserId;
+  }
+  if ((next?.nativeChannelId || next?.nativeSenderId || next?.nativeDirectUserId) && nextProvider) {
+    merged.nativeProvider = nextProvider;
+  }
+  if (next?.parentConversationId) {
+    merged.parentConversationId = next.parentConversationId;
   }
   if (next?.accountId) {
     merged.accountId = next.accountId;
@@ -106,7 +126,9 @@ export function deriveSessionOrigin(
     typeof ctx.OriginatingTo === "string" ? ctx.OriginatingTo : ctx.To,
   );
   const nativeChannelId = normalizeOptionalString(ctx.NativeChannelId);
+  const nativeSenderId = normalizeOptionalString(ctx.NativeSenderId);
   const nativeDirectUserId = normalizeOptionalString(ctx.NativeDirectUserId);
+  const parentConversationId = normalizeOptionalString(ctx.ThreadParentId);
   const accountId = normalizeOptionalString(ctx.AccountId);
   const threadId = ctx.MessageThreadId ?? undefined;
 
@@ -132,8 +154,17 @@ export function deriveSessionOrigin(
   if (nativeChannelId) {
     origin.nativeChannelId = nativeChannelId;
   }
+  if (nativeSenderId) {
+    origin.nativeSenderId = nativeSenderId;
+  }
   if (nativeDirectUserId) {
     origin.nativeDirectUserId = nativeDirectUserId;
+  }
+  if ((nativeChannelId || nativeSenderId || nativeDirectUserId) && provider) {
+    origin.nativeProvider = provider;
+  }
+  if (parentConversationId) {
+    origin.parentConversationId = parentConversationId;
   }
   if (accountId) {
     origin.accountId = accountId;

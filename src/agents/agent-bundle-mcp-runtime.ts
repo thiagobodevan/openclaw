@@ -12,7 +12,10 @@ import type {
   jsonSchemaValidator,
 } from "@modelcontextprotocol/sdk/validation/types.js";
 import { redactSensitiveUrlLikeString } from "@openclaw/net-policy/redact-sensitive-url";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
 import { Compile } from "typebox/compile";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { toErrorObject } from "../infra/errors.js";
@@ -1016,6 +1019,13 @@ function createSessionMcpRuntimeManager(
   let idleSweepTimer: ReturnType<typeof setInterval> | undefined;
   let idleSweepInFlight: Promise<void> | undefined;
 
+  const resolveLookupKey = (sessionKey: string, agentId?: string) => {
+    const normalizedAgentId = normalizeLowercaseStringOrEmpty(agentId);
+    return normalizeLowercaseStringOrEmpty(sessionKey) === "global" && normalizedAgentId
+      ? `agent:${normalizedAgentId}:global`
+      : sessionKey;
+  };
+
   const forgetSessionKeysForSessionId = (sessionId: string) => {
     for (const [sessionKey, mappedSessionId] of sessionIdBySessionKey.entries()) {
       if (mappedSessionId === sessionId) {
@@ -1086,7 +1096,10 @@ function createSessionMcpRuntimeManager(
         ensureIdleSweepTimer();
       }
       if (params.sessionKey) {
-        sessionIdBySessionKey.set(params.sessionKey, params.sessionId);
+        sessionIdBySessionKey.set(
+          resolveLookupKey(params.sessionKey, params.agentId),
+          params.sessionId,
+        );
       }
       const { fingerprint: nextFingerprint } = loadSessionMcpConfig({
         workspaceDir: params.workspaceDir,
@@ -1146,17 +1159,19 @@ function createSessionMcpRuntimeManager(
         createInFlight.delete(params.sessionId);
       }
     },
-    bindSessionKey(sessionKey, sessionId) {
-      sessionIdBySessionKey.set(sessionKey, sessionId);
+    bindSessionKey(sessionKey, sessionId, agentId) {
+      sessionIdBySessionKey.set(resolveLookupKey(sessionKey, agentId), sessionId);
     },
-    resolveSessionId(sessionKey) {
-      return sessionIdBySessionKey.get(sessionKey);
+    resolveSessionId(sessionKey, agentId) {
+      return sessionIdBySessionKey.get(resolveLookupKey(sessionKey, agentId));
     },
     /** Synchronous lookup only; must not create runtimes or connect transports. */
     peekSession(params) {
       const sessionId =
         params.sessionId ??
-        (params.sessionKey ? sessionIdBySessionKey.get(params.sessionKey) : undefined);
+        (params.sessionKey
+          ? sessionIdBySessionKey.get(resolveLookupKey(params.sessionKey, params.agentId))
+          : undefined);
       return sessionId ? runtimesBySessionId.get(sessionId) : undefined;
     },
     async disposeSession(sessionId) {
@@ -1208,6 +1223,7 @@ export function getSessionMcpRuntimeManager(): SessionMcpRuntimeManager {
 export async function getOrCreateSessionMcpRuntime(params: {
   sessionId: string;
   sessionKey?: string;
+  agentId?: string;
   workspaceDir: string;
   cfg?: OpenClawConfig;
 }): Promise<SessionMcpRuntime> {
@@ -1218,12 +1234,15 @@ export async function getOrCreateSessionMcpRuntime(params: {
 export function peekSessionMcpRuntime(params: {
   sessionId?: string | null;
   sessionKey?: string | null;
+  agentId?: string | null;
 }): SessionMcpRuntime | undefined {
   const sessionId = normalizeOptionalString(params.sessionId);
   const sessionKey = normalizeOptionalString(params.sessionKey);
+  const agentId = normalizeOptionalString(params.agentId);
   return getSessionMcpRuntimeManager().peekSession({
     ...(sessionId ? { sessionId } : {}),
     ...(sessionKey ? { sessionKey } : {}),
+    ...(agentId ? { agentId } : {}),
   });
 }
 
@@ -1251,6 +1270,7 @@ export async function retireSessionMcpRuntime(params: {
 
 export async function retireSessionMcpRuntimeForSessionKey(params: {
   sessionKey?: string | null;
+  agentId?: string | null;
   reason: string;
   onError?: (error: unknown, sessionId: string, reason: string) => void;
 }): Promise<boolean> {
@@ -1258,7 +1278,8 @@ export async function retireSessionMcpRuntimeForSessionKey(params: {
   if (!sessionKey) {
     return false;
   }
-  const sessionId = getSessionMcpRuntimeManager().resolveSessionId(sessionKey);
+  const agentId = normalizeOptionalString(params.agentId);
+  const sessionId = getSessionMcpRuntimeManager().resolveSessionId(sessionKey, agentId);
   return await retireSessionMcpRuntime({
     sessionId,
     reason: params.reason,

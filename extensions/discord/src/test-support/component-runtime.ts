@@ -4,6 +4,10 @@ import {
   resolvePinnedMainDmOwnerFromAllowlist,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import { isSingleUseReplyToMode } from "openclaw/plugin-sdk/reply-reference";
+import {
+  canonicalizeMainSessionAlias,
+  resolveAgentMainSessionKey,
+} from "openclaw/plugin-sdk/session-store-runtime";
 import { vi, type Mock } from "vitest";
 
 type UnknownMock = Mock<(...args: unknown[]) => unknown>;
@@ -17,6 +21,7 @@ type DiscordComponentRuntimeMocks = {
   dispatchPluginInteractiveHandlerMock: AsyncUnknownMock;
   dispatchReplyMock: DispatchReplyMock;
   enqueueSystemEventMock: UnknownMock;
+  requestHeartbeatMock: UnknownMock;
   readAllowFromStoreMock: AsyncUnknownMock;
   readSessionUpdatedAtMock: UnknownMock;
   recordInboundSessionMock: AsyncUnknownMock;
@@ -31,6 +36,7 @@ const runtimeMocks = vi.hoisted(
     dispatchPluginInteractiveHandlerMock: vi.fn(),
     dispatchReplyMock: vi.fn<DispatchReplyWithBufferedBlockDispatcherFn>(),
     enqueueSystemEventMock: vi.fn(),
+    requestHeartbeatMock: vi.fn(),
     readAllowFromStoreMock: vi.fn(),
     readSessionUpdatedAtMock: vi.fn(),
     recordInboundSessionMock: vi.fn(),
@@ -45,6 +51,7 @@ export const dispatchPluginInteractiveHandlerMock: AsyncUnknownMock =
   runtimeMocks.dispatchPluginInteractiveHandlerMock;
 export const dispatchReplyMock: DispatchReplyMock = runtimeMocks.dispatchReplyMock;
 export const enqueueSystemEventMock: UnknownMock = runtimeMocks.enqueueSystemEventMock;
+export const requestHeartbeatMock: UnknownMock = runtimeMocks.requestHeartbeatMock;
 export const upsertPairingRequestMock: AsyncUnknownMock = runtimeMocks.upsertPairingRequestMock;
 export const recordInboundSessionMock: AsyncUnknownMock = runtimeMocks.recordInboundSessionMock;
 export const readSessionUpdatedAtMock: UnknownMock = runtimeMocks.readSessionUpdatedAtMock;
@@ -136,6 +143,9 @@ vi.mock("../interactive-dispatch.js", () => {
 vi.mock("../monitor/agent-components.deps.runtime.js", () => {
   return {
     enqueueSystemEvent: (...args: unknown[]) => enqueueSystemEventMock(...args),
+    requestHeartbeat: (...args: unknown[]) => requestHeartbeatMock(...args),
+    canonicalizeMainSessionAlias,
+    resolveAgentMainSessionKey,
     readSessionUpdatedAt: (...args: unknown[]) => readSessionUpdatedAtMock(...args),
     resolveStorePath: (...args: unknown[]) => resolveStorePathMock(...args),
   };
@@ -159,7 +169,8 @@ export function resetDiscordComponentRuntimeMocks() {
     duplicate: false,
   });
   dispatchReplyMock.mockClear();
-  enqueueSystemEventMock.mockClear();
+  enqueueSystemEventMock.mockReset().mockReturnValue(true);
+  requestHeartbeatMock.mockReset();
   readAllowFromStoreMock.mockClear().mockResolvedValue([]);
   readSessionUpdatedAtMock.mockClear().mockReturnValue(undefined);
   upsertPairingRequestMock.mockClear().mockResolvedValue({ code: "PAIRCODE", created: true });

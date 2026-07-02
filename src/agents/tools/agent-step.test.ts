@@ -98,6 +98,30 @@ describe("runAgentStep", () => {
     expect(bundleMcpRuntimeMocks.retireSessionMcpRuntimeForSessionKey).not.toHaveBeenCalled();
   });
 
+  it("retires only the selected agent's global bundle MCP runtime", async () => {
+    testing.setDepsForTest({
+      callGateway: async <T = unknown>(): Promise<T> => ({ runId: "run-global" }) as T,
+    });
+    runWaitMocks.waitForAgentRunAndReadUpdatedAssistantReply.mockResolvedValue({
+      status: "ok",
+      replyText: "done",
+    });
+
+    await runAgentStep({
+      agentId: "work",
+      sessionKey: "global",
+      message: "hello",
+      extraSystemPrompt: "reply briefly",
+      timeoutMs: 10_000,
+    });
+
+    expect(bundleMcpRuntimeMocks.retireSessionMcpRuntimeForSessionKey).toHaveBeenCalledWith({
+      sessionKey: "global",
+      agentId: "work",
+      reason: "nested-agent-step-complete",
+    });
+  });
+
   it("forwards explicit transcript bodies for nested bookkeeping turns", async () => {
     const gatewayCalls: CallGatewayOptions[] = [];
     const agentCommandFromIngress = vi.fn(async () => ({

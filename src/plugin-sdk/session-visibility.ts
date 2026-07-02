@@ -6,7 +6,7 @@ import {
 import { normalizeTrimmedStringList } from "../../packages/normalization-core/src/string-normalization.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway as defaultCallGateway } from "../gateway/call.js";
-import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
+import { normalizeAgentId, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 
 type GatewayCaller = typeof defaultCallGateway;
 
@@ -272,6 +272,7 @@ function treeVisibilityMessage(action: SessionAccessAction): string {
 export function createSessionVisibilityChecker(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  requesterAgentId?: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
   spawnedKeys: Set<string> | null;
@@ -280,6 +281,7 @@ export function createSessionVisibilityChecker(params: {
   const rowChecker = createSessionVisibilityRowChecker({
     action: params.action,
     requesterSessionKey: params.requesterSessionKey,
+    requesterAgentId: params.requesterAgentId,
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
   });
@@ -307,10 +309,15 @@ function rowOwnedByRequester(row: SessionVisibilityRow, requesterSessionKey: str
 export function createSessionVisibilityRowChecker(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  requesterAgentId?: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
 }): { check: (row: SessionVisibilityRow) => SessionAccessResult } {
-  const requesterAgentId = resolveAgentIdFromSessionKey(params.requesterSessionKey);
+  // Global sessions retain their raw key for ownership while the selected
+  // agent remains authoritative for cross-agent policy.
+  const requesterAgentId = params.requesterAgentId
+    ? normalizeAgentId(params.requesterAgentId)
+    : resolveAgentIdFromSessionKey(params.requesterSessionKey);
 
   const check = (row: SessionVisibilityRow): SessionAccessResult => {
     const targetSessionKey = row.key;
@@ -318,13 +325,12 @@ export function createSessionVisibilityRowChecker(params: {
     const isRequesterSession =
       targetSessionKey === params.requesterSessionKey || targetSessionKey === "current";
     const isRequesterOwned = rowOwnedByRequester(row, params.requesterSessionKey);
+    if (isRequesterSession) {
+      return { allowed: true };
+    }
     // Row ownership is stronger than agent ids: ACP children may use a backend
     // agent id while still belonging to the requester that spawned them.
-    if (
-      !isRequesterSession &&
-      isRequesterOwned &&
-      (params.visibility === "tree" || params.visibility === "all")
-    ) {
+    if (isRequesterOwned && (params.visibility === "tree" || params.visibility === "all")) {
       return { allowed: true };
     }
     const isCrossAgent = targetAgentId !== requesterAgentId;
@@ -353,7 +359,7 @@ export function createSessionVisibilityRowChecker(params: {
       return { allowed: true };
     }
 
-    if (params.visibility === "self" && !isRequesterSession) {
+    if (params.visibility === "self") {
       return {
         allowed: false,
         status: "forbidden",
@@ -361,7 +367,7 @@ export function createSessionVisibilityRowChecker(params: {
       };
     }
 
-    if (params.visibility === "tree" && !isRequesterSession && !isRequesterOwned) {
+    if (params.visibility === "tree" && !isRequesterOwned) {
       return {
         allowed: false,
         status: "forbidden",
@@ -379,6 +385,7 @@ export function createSessionVisibilityRowChecker(params: {
 export async function createSessionVisibilityGuard(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  requesterAgentId?: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
 }): Promise<{
@@ -393,6 +400,7 @@ export async function createSessionVisibilityGuard(params: {
   return createSessionVisibilityChecker({
     action: params.action,
     requesterSessionKey: params.requesterSessionKey,
+    requesterAgentId: params.requesterAgentId,
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
     spawnedKeys,

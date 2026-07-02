@@ -5,48 +5,13 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import { resolveClickClackInboundAccess, type ClickClackInboundAccess } from "./access.js";
+import { resolveClickClackAgentRoute } from "./agent-route.js";
 import { sendClickClackText } from "./outbound.js";
 import { getClickClackRuntime } from "./runtime.js";
 import { buildClickClackTarget } from "./target.js";
 import type { ClickClackMessage, CoreConfig, ResolvedClickClackAccount } from "./types.js";
 
 const CHANNEL_ID = "clickclack" as const;
-
-function resolveAccountAgentRoute(params: {
-  cfg: OpenClawConfig;
-  account: ResolvedClickClackAccount;
-  target: string;
-  isDirect: boolean;
-}) {
-  const runtime = getClickClackRuntime();
-  const route = runtime.channel.routing.resolveAgentRoute({
-    cfg: params.cfg,
-    channel: CHANNEL_ID,
-    accountId: params.account.accountId,
-    peer: {
-      kind: params.isDirect ? "direct" : "channel",
-      id: params.target,
-    },
-  });
-  const agentId = params.account.agentId ?? route.agentId;
-  if (agentId === route.agentId) {
-    return route;
-  }
-  return {
-    ...route,
-    agentId,
-    matchedBy: "config.agent" as const,
-    sessionKey: runtime.channel.routing.buildAgentSessionKey({
-      agentId,
-      channel: CHANNEL_ID,
-      accountId: params.account.accountId,
-      peer: {
-        kind: params.isDirect ? "direct" : "channel",
-        id: params.target,
-      },
-    }),
-  };
-}
 
 async function dispatchModelReply(params: {
   account: ResolvedClickClackAccount;
@@ -111,9 +76,10 @@ export async function handleClickClackInbound(params: {
       ? { chatType: "direct", kind: "dm", id: message.author_id }
       : { chatType: "group", kind: "channel", id: message.channel_id ?? "" },
   );
-  const route = resolveAccountAgentRoute({
+  const route = resolveClickClackAgentRoute({
     cfg: params.config as OpenClawConfig,
-    account: params.account,
+    accountId: params.account.accountId,
+    configuredAgentId: params.account.agentId,
     target,
     isDirect,
   });

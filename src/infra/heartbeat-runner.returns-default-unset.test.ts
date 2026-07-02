@@ -930,6 +930,145 @@ describe("runHeartbeatOnce", () => {
     }
   });
 
+  it("uses the selected agent store for global heartbeat sessions", async () => {
+    const tmpDir = await createCaseDir("hb-global-agent-store");
+    const storeTemplate = path.join(tmpDir, "agents", "{agentId}", "sessions.json");
+    const replySpy = vi.fn().mockResolvedValue([{ text: "Ops global alert" }]);
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: { heartbeat: { every: "30m" } },
+        list: [
+          { id: "personal", default: true },
+          {
+            id: "ops",
+            workspace: tmpDir,
+            heartbeat: { every: "5m", target: "whatsapp", prompt: "Ops check" },
+          },
+        ],
+      },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+      session: { scope: "global", store: storeTemplate },
+    };
+    const opsStorePath = resolveStorePath(storeTemplate, { agentId: "ops" });
+    await fs.mkdir(path.dirname(opsStorePath), { recursive: true });
+    await fs.writeFile(
+      opsStorePath,
+      JSON.stringify({
+        global: {
+          sessionId: "ops-global",
+          updatedAt: Date.now(),
+          lastChannel: "whatsapp",
+          lastTo: "120363401234567890@g.us",
+        },
+      }),
+    );
+    const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+    await runHeartbeatOnce({
+      cfg,
+      agentId: "ops",
+      deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+    });
+
+    expect(sendWhatsApp).toHaveBeenCalledOnce();
+    expectReplyCall(
+      replySpy,
+      0,
+      {
+        SessionKey: "global",
+        From: "120363401234567890@g.us",
+        To: "120363401234567890@g.us",
+      },
+      { isHeartbeat: true, suppressToolErrorWarnings: false },
+      cfg,
+    );
+  });
+
+  it("admits and consumes an owner-qualified global component event", async () => {
+    const tmpDir = await createCaseDir("hb-global-component-owner");
+    const storeTemplate = path.join(tmpDir, "agents", "{agentId}", "sessions.json");
+    const eventSessionKey = "agent:ops:work";
+    const contextKey = "discord:agent-button:channel-1:deploy:user-1:interaction-1";
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: { heartbeat: { every: "30m" } },
+        list: [
+          { id: "personal", default: true },
+          { id: "ops", workspace: tmpDir, heartbeat: { every: "5m", target: "whatsapp" } },
+        ],
+      },
+      bindings: [
+        {
+          agentId: "ops",
+          match: {
+            channel: "discord",
+            accountId: "default",
+            peer: { kind: "channel", id: "channel-1" },
+          },
+        },
+      ],
+      channels: { whatsapp: { allowFrom: ["*"] } },
+      session: { scope: "global", mainKey: "work", store: storeTemplate },
+    };
+    const opsStorePath = resolveStorePath(storeTemplate, { agentId: "ops" });
+    await fs.mkdir(path.dirname(opsStorePath), { recursive: true });
+    await fs.writeFile(
+      opsStorePath,
+      JSON.stringify({
+        global: {
+          sessionId: "ops-global-component",
+          updatedAt: Date.now(),
+          lastChannel: "whatsapp",
+          lastTo: "120363401234567890@g.us",
+        },
+      }),
+    );
+    enqueueSystemEvent("Discord component deploy clicked", {
+      sessionKey: eventSessionKey,
+      contextKey,
+      contextMode: "exact",
+      actor: { channel: "discord", accountId: "default", senderId: "user-1" },
+    });
+    const replySpy = vi.fn().mockResolvedValue({ text: "Handled component" });
+    const sendWhatsApp = vi.fn().mockResolvedValue({ messageId: "m1", toJid: "jid" });
+
+    const result = await runHeartbeatOnce({
+      cfg,
+      agentId: "ops",
+      sessionKey: eventSessionKey,
+      source: "channel-interaction",
+      intent: "immediate",
+      reason: "hook:discord-interaction",
+      conversation: {
+        messageChannel: "discord",
+        accountId: "default",
+        routeMatchedBy: "binding.channel",
+        chatType: "channel",
+        systemEventContextKey: contextKey,
+        groupId: "channel-1",
+        groupSpace: "guild-1",
+        senderId: "user-1",
+        resolveCurrentRoute: () => ({
+          agentId: "ops",
+          sessionKey: eventSessionKey,
+          matchedBy: "binding.channel",
+        }),
+      },
+      deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
+    });
+
+    expect(result.status).toBe("ran");
+    expect(replySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        SystemEventContextKey: contextKey,
+        SystemEventSessionKey: eventSessionKey,
+      }),
+      expect.any(Object),
+      cfg,
+    );
+    expect(peekSystemEventEntries(eventSessionKey)).toEqual([]);
+  });
+
   it("reuses non-default agent sessionFile from templated stores", async () => {
     const tmpDir = await createCaseDir("hb-templated-store");
     const storeTemplate = path.join(tmpDir, "agents", "{agentId}", "sessions", "sessions.json");
