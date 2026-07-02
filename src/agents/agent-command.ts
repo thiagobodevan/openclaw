@@ -74,6 +74,7 @@ import {
   isDeliverableMessageChannel,
   resolveMessageChannel,
 } from "../utils/message-channel.js";
+import { safeJsonStringify } from "../utils/safe-json.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../utils/usage-format.js";
 import { resolveAgentRuntimeConfig } from "./agent-runtime-config.js";
 import {
@@ -2662,7 +2663,7 @@ export async function agentCommandFromIngress(
     .identityContractVersion;
   if (identityContractVersion !== undefined && identityContractVersion !== 1) {
     throw new Error(
-      `Unsupported ingress identity contract version: ${String(identityContractVersion)}`,
+      `Unsupported ingress identity contract version: ${safeJsonStringify(identityContractVersion) ?? "unknown"}`,
     );
   }
   return await withAgentRunLifecycleGeneration(lifecycleGeneration, async () => {

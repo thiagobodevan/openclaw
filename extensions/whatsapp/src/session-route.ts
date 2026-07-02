@@ -3,6 +3,7 @@ import { readStoreAllowFromForDmPolicy } from "openclaw/plugin-sdk/channel-polic
 import { resolveConfiguredBindingRoute } from "openclaw/plugin-sdk/conversation-binding-runtime";
 import {
   buildChannelOutboundSessionRoute,
+  type ChannelCurrentConversationRoute,
   type ChannelCurrentConversationRouteParams,
   type ChannelOutboundSessionRouteParams,
 } from "openclaw/plugin-sdk/core";
@@ -40,7 +41,7 @@ export function resolveWhatsAppOutboundSessionRoute(params: ChannelOutboundSessi
 
 export async function resolveWhatsAppCurrentConversationRoute(
   params: ChannelCurrentConversationRouteParams,
-) {
+): Promise<ChannelCurrentConversationRoute | null> {
   const normalized = normalizeWhatsAppTarget(params.target);
   if (!normalized) {
     return null;

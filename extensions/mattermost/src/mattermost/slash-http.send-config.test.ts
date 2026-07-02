@@ -354,9 +354,8 @@ describe("slash-http cfg threading", () => {
     });
     mockState.authorizeMattermostCommandInvocation.mockReturnValueOnce({
       ok: false,
-      denyReason: "dm-pairing",
       commandAuthorized: false,
-      channelInfo: { id: "chan-1", type: "D" },
+      channelInfo: { id: "chan-1", type: "D", name: "", display_name: "" },
       kind: "direct",
       chatType: "direct",
       channelName: "",

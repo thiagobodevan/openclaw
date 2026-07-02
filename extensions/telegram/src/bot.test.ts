@@ -4012,6 +4012,7 @@ describe("createTelegramBot", () => {
     const routeSpy = vi
       .spyOn(conversationRouteRuntime, "resolveTelegramConversationRoute")
       .mockReturnValue({
+        runtimeBinding: null,
         bindingMode: {
           kind: "configured",
           binding: binding as never,
@@ -4723,6 +4724,7 @@ describe("createTelegramBot", () => {
     const routeSpy = vi
       .spyOn(conversationRouteRuntime, "resolveTelegramConversationRoute")
       .mockReturnValue({
+        runtimeBinding: null,
         bindingMode: {
           kind: "configured",
           binding: binding as never,

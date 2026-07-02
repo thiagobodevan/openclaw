@@ -151,7 +151,9 @@ const {
       bindingResolution: null,
       route: params.route,
     })),
-    ensureConfiguredBindingRouteReadyMock: vi.fn(async () => ({ ok: true as const })),
+    ensureConfiguredBindingRouteReadyMock: vi.fn<
+      (..._args: unknown[]) => Promise<{ ok: true } | { ok: false; error: string }>
+    >(async () => ({ ok: true })),
     agentCommandMock: vi.fn(
       async (
         _opts?: unknown,

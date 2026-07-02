@@ -7,6 +7,7 @@ import {
   resolveConversationIdentityMode,
 } from "../../routing/conversation-identity.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
+import { safeJsonStringify } from "../../utils/safe-json.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
 import { resolveCommandTurnTargetSessionKey } from "../command-turn-context.js";
 import type { MsgContext } from "../templating.js";
@@ -16,7 +17,9 @@ export function resolveConversationIdentityContractVersion(value: unknown): 1 | 
     return undefined;
   }
   if (value !== 1) {
-    throw new Error(`Unsupported reply identity contract version: ${String(value)}`);
+    throw new Error(
+      `Unsupported reply identity contract version: ${safeJsonStringify(value) ?? "unknown"}`,
+    );
   }
   return value;
 }

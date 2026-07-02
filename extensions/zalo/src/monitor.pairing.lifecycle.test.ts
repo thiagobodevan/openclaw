@@ -32,11 +32,12 @@ describe("Zalo pairing lifecycle", () => {
       routing: {
         resolveAgentRoute: vi.fn(() => ({
           agentId: "main",
+          channel: "zalo",
           accountId: "acct-zalo-pairing",
           sessionKey: "agent:main:zalo:direct:dm-pairing-1",
           mainSessionKey: "agent:main:main",
-          lastRoutePolicy: "session",
-          matchedBy: "binding.account",
+          lastRoutePolicy: "session" as const,
+          matchedBy: "binding.account" as const,
         })),
       },
     });
@@ -124,11 +125,12 @@ describe("Zalo pairing lifecycle", () => {
       routing: {
         resolveAgentRoute: vi.fn(() => ({
           agentId: "personal",
+          channel: "zalo",
           accountId: "acct-zalo-pairing",
           sessionKey: "agent:personal:zalo:direct:dm-personal",
           mainSessionKey: "agent:personal:main",
-          lastRoutePolicy: "session",
-          matchedBy: "default",
+          lastRoutePolicy: "session" as const,
+          matchedBy: "default" as const,
         })),
       },
     });

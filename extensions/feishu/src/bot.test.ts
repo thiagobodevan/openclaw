@@ -165,6 +165,10 @@ function buildDefaultResolveRoute(): ResolvedAgentRoute {
     matchedBy: "binding.account",
   };
 }
+
+function resolveMockRoutePeerId(input: unknown): string | undefined {
+  return (input as { peer?: { id?: string } } | undefined)?.peer?.id;
+}
 let currentRuntimeConfig = {} as ClawdbotConfig;
 
 function createFeishuBotRuntime(overrides: DeepPartial<PluginRuntime> = {}): PluginRuntime {
@@ -3641,8 +3645,8 @@ describe("handleFeishuMessage command authorization", () => {
 
   it("hydrates missing native topic thread_id before routing starter events", async () => {
     mockShouldComputeCommandAuthorized.mockReturnValue(false);
-    mockResolveAgentRoute.mockImplementation((params: { peer?: { id?: string } }) =>
-      params.peer?.id === "oc-group:topic:omt_native_topic"
+    mockResolveAgentRoute.mockImplementation((input?: unknown) =>
+      resolveMockRoutePeerId(input) === "oc-group:topic:omt_native_topic"
         ? {
             ...buildDefaultResolveRoute(),
             agentId: "topic-service",
@@ -3733,12 +3737,16 @@ describe("handleFeishuMessage command authorization", () => {
       contentType: "text",
       threadId: "omt_native_history",
     });
-    mockResolveAgentRoute.mockImplementation((params: { peer?: { id?: string } }) => ({
+    mockResolveAgentRoute.mockImplementation((input?: unknown) => ({
       ...buildDefaultResolveRoute(),
       agentId:
-        params.peer?.id === "oc-group:topic:omt_native_history" ? "topic-service" : "personal",
+        resolveMockRoutePeerId(input) === "oc-group:topic:omt_native_history"
+          ? "topic-service"
+          : "personal",
       matchedBy:
-        params.peer?.id === "oc-group:topic:omt_native_history" ? "binding.peer" : "default",
+        resolveMockRoutePeerId(input) === "oc-group:topic:omt_native_history"
+          ? "binding.peer"
+          : "default",
     }));
     const cfg = {
       agents: {
