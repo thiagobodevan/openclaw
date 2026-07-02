@@ -6,6 +6,16 @@ import { installMSTeamsTestRuntime } from "../monitor-handler.test-helpers.js";
 
 export const channelConversationId = "19:general@thread.tacv2";
 
+function withTeamsServiceIdentity(cfg: OpenClawConfig): OpenClawConfig {
+  if (cfg.agents) {
+    return cfg;
+  }
+  return {
+    ...cfg,
+    agents: { list: [{ id: "main", default: true }, { id: "teams-service" }] },
+  };
+}
+
 type MessageHandlerDepsOptions = {
   enqueueSystemEvent?: ReturnType<typeof vi.fn>;
   readAllowFromStore?: ReturnType<typeof vi.fn>;
@@ -24,6 +34,7 @@ export function createMessageHandlerDeps(
   cfg: OpenClawConfig,
   options: MessageHandlerDepsOptions = {},
 ) {
+  const testCfg = withTeamsServiceIdentity(cfg);
   const enqueueSystemEvent = options.enqueueSystemEvent ?? vi.fn();
   const readAllowFromStore = options.readAllowFromStore ?? vi.fn(async () => []);
   const upsertPairingRequest = options.upsertPairingRequest ?? vi.fn(async () => null);
@@ -66,7 +77,7 @@ export function createMessageHandlerDeps(
   } satisfies MSTeamsMessageHandlerDeps["conversationStore"];
 
   const deps: MSTeamsMessageHandlerDeps = {
-    cfg,
+    cfg: testCfg,
     runtime: { error: vi.fn() } as unknown as RuntimeEnv,
     appId: "test-app",
     app: {} as MSTeamsMessageHandlerDeps["app"],
