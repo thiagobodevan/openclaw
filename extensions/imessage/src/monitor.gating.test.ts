@@ -210,6 +210,14 @@ describe("imessage monitor gating + envelope builders", () => {
 
   it("includes reply-to context fields + suffix", async () => {
     const cfg = baseCfg();
+    cfg.bindings?.push({
+      agentId: "imessage-service",
+      match: {
+        channel: "imessage",
+        accountId: "default",
+        peer: { kind: "direct", id: "+15550001111" },
+      },
+    });
     const message: IMessagePayload = {
       id: 5,
       chat_id: 55,
