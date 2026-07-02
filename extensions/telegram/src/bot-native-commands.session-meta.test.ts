@@ -263,6 +263,12 @@ function withStableTestOwner(cfg: OpenClawConfig): OpenClawConfig {
   return cfg;
 }
 
+function createServiceAgentConfig(agentId: string): OpenClawConfig {
+  return {
+    agents: { list: [{ id: "main", default: true }, { id: agentId }] },
+  };
+}
+
 function registerAndResolveStatusHandler(params: {
   cfg: OpenClawConfig;
   allowFrom?: string[];
@@ -1192,7 +1198,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     persistentBindingMocks.ensureConfiguredBindingRouteReady.mockResolvedValue({ ok: true });
 
     const { handler } = registerAndResolveStatusHandler({
-      cfg: {},
+      cfg: createServiceAgentConfig("codex"),
       allowFrom: ["200"],
       groupAllowFrom: ["200"],
     });
@@ -1325,7 +1331,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     });
 
     const { handler } = registerAndResolveStatusHandler({
-      cfg: {},
+      cfg: createServiceAgentConfig("codex-acp"),
       allowFrom: ["200"],
       groupAllowFrom: ["200"],
     });
@@ -1361,7 +1367,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     });
 
     const { handler } = registerAndResolveStatusHandler({
-      cfg: {},
+      cfg: createServiceAgentConfig("codex-acp"),
       allowFrom: ["200"],
       groupAllowFrom: ["200"],
     });
@@ -1444,7 +1450,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     });
 
     const { handler, sendMessage } = registerAndResolveStatusHandler({
-      cfg: {},
+      cfg: createServiceAgentConfig("codex"),
       allowFrom: ["200"],
       groupAllowFrom: ["200"],
     });
@@ -1477,7 +1483,7 @@ describe("registerTelegramNativeCommands — session metadata", () => {
 
     const { handler, sendMessage } = registerAndResolveCommandHandler({
       commandName: "new",
-      cfg: {},
+      cfg: createServiceAgentConfig("codex"),
       allowFrom: [],
       groupAllowFrom: [],
       useAccessGroups: true,
