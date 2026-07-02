@@ -5859,7 +5859,7 @@ describe("workboard controller", () => {
     );
     state.loaded = true;
     state.cards = cards;
-    tasks.forEach((task, index) => state.tasksByCardId.set(cards[index]!.id, task));
+    tasks.forEach((task, index) => state.tasksByCardId.set(cards[index].id, task));
     state.lifecycleTaskRefreshFailed = true;
     state.lifecycleTaskRefreshRetryAt = Date.now();
     const client = createClient((method, params) => {
@@ -5869,7 +5869,7 @@ describe("workboard controller", () => {
         if (index === 1) {
           throw new Error("task unavailable");
         }
-        return { task: index === 0 ? { ...tasks[index]!, status: "completed" } : tasks[index] };
+        return { task: index === 0 ? { ...tasks[index], status: "completed" } : tasks[index] };
       }
       if (method === "workboard.cards.update") {
         const id = (params as { id: string }).id;
@@ -5878,7 +5878,7 @@ describe("workboard controller", () => {
       }
       return {};
     });
-    const unselectedTask = tasks[32]!;
+    const unselectedTask = tasks[32];
 
     await syncWorkboardLifecycle({
       host,
@@ -5900,12 +5900,12 @@ describe("workboard controller", () => {
       [
         "workboard.cards.update",
         expect.objectContaining({
-          id: cards[0]!.id,
+          id: cards[0].id,
           patch: expect.objectContaining({ status: "review" }),
         }),
       ],
     ]);
-    expect(state.cards.find((card) => card.id === cards[32]!.id)?.status).toBe("running");
+    expect(state.cards.find((card) => card.id === cards[32].id)?.status).toBe("running");
   });
 
   it("keeps an unconfirmed terminal task blocked after a successful bounded retry", async () => {
@@ -5944,7 +5944,7 @@ describe("workboard controller", () => {
     );
     state.loaded = true;
     state.cards = cards;
-    tasks.forEach((task, index) => state.tasksByCardId.set(cards[index]!.id, task));
+    tasks.forEach((task, index) => state.tasksByCardId.set(cards[index].id, task));
     state.lifecycleTaskRefreshFailed = true;
     state.lifecycleTaskRefreshRetryAt = Date.now();
     state.lifecycleUnconfirmedTaskIds = new Set([terminalTask.taskId]);
