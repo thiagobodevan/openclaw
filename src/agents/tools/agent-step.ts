@@ -77,6 +77,8 @@ export async function runAgentStep(params: {
       deliver: false,
       sourceReplyDeliveryMode: "message_tool_only",
       channel,
+      runContext: { isInternal: true, messageChannel: channel },
+      identityContractVersion: 1,
       lane,
       runId: stepIdem,
       extraSystemPrompt: params.extraSystemPrompt,

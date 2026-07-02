@@ -10,6 +10,11 @@ import {
   asDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
 } from "openclaw/plugin-sdk/number-runtime";
+import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  resolveConversationIdentityAdmission,
+  type ResolvedAgentRoute,
+} from "openclaw/plugin-sdk/routing";
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { isPrivateNetworkOptInEnabled } from "openclaw/plugin-sdk/ssrf-runtime";
 import type { ResolvedMattermostAccount } from "../mattermost/accounts.js";
@@ -30,6 +35,7 @@ import {
 import {
   authorizeMattermostCommandInvocation,
   normalizeMattermostAllowList,
+  resolveMattermostCommandAudience,
 } from "./monitor-auth.js";
 import {
   createMattermostReplyDeliveryBarrier,
@@ -467,42 +473,15 @@ type SlashInvocationAuth = {
 async function authorizeSlashInvocation(params: {
   account: ResolvedMattermostAccount;
   cfg: OpenClawConfig;
-  client: ReturnType<typeof createMattermostClient>;
+  channelInfo: MattermostChannel;
   commandText: string;
   channelId: string;
   senderId: string;
   senderName: string;
   log?: (msg: string) => void;
 }): Promise<SlashInvocationAuth> {
-  const { account, cfg, client, commandText, channelId, senderId, senderName, log } = params;
+  const { account, cfg, channelInfo, commandText, channelId, senderId, senderName } = params;
   const core = getMattermostRuntime();
-
-  // Resolve channel info so we can enforce DM vs group/channel policies.
-  let channelInfo: MattermostChannel | null = null;
-  try {
-    channelInfo = await fetchMattermostChannel(client, channelId);
-  } catch (err) {
-    log?.(
-      `mattermost: slash channel lookup failed for ${sanitizeMattermostLogValue(channelId)}: ${sanitizeCommandLookupError(err)}`,
-    );
-  }
-
-  if (!channelInfo) {
-    return {
-      ok: false,
-      denyResponse: {
-        response_type: "ephemeral",
-        text: "Temporary error: unable to determine channel type. Please try again.",
-      },
-      commandAuthorized: false,
-      channelInfo: null,
-      kind: "channel",
-      chatType: "channel",
-      channelName: "",
-      channelDisplay: "",
-      roomLabel: `#${channelId}`,
-    };
-  }
 
   const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
     cfg,
@@ -666,10 +645,63 @@ export function createSlashCommandHttpHandler(params: SlashHttpHandlerParams) {
     const senderId = payload.user_id;
     const senderName = payload.user_name ?? senderId;
 
+    let channelInfo: MattermostChannel | null = null;
+    try {
+      channelInfo = await fetchMattermostChannel(client, channelId);
+    } catch (err) {
+      log?.(
+        `mattermost: slash channel lookup failed for ${sanitizeMattermostLogValue(channelId)}: ${sanitizeCommandLookupError(err)}`,
+      );
+    }
+    const audience = resolveMattermostCommandAudience({ channelId, channelInfo });
+    if (!audience) {
+      sendJsonResponse(res, 200, {
+        response_type: "ephemeral",
+        text: "Temporary error: unable to determine channel type. Please try again.",
+      });
+      return;
+    }
+    const teamId = audience.channelInfo.team_id ?? payload.team_id;
+    const core = getMattermostRuntime();
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "mattermost",
+      accountId: account.accountId,
+      teamId,
+      peer: {
+        kind: audience.kind,
+        id: audience.kind === "direct" ? senderId : channelId,
+      },
+    });
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg,
+      ctx: {
+        AgentId: route.agentId,
+        SessionKey: route.sessionKey,
+        AgentRouteMatchedBy: route.matchedBy,
+        AccountId: route.accountId ?? account.accountId,
+        ChatType: audience.chatType,
+        ChatId: audience.kind === "direct" ? undefined : channelId,
+        GroupChannel:
+          audience.kind === "direct" ? undefined : audience.channelDisplay || audience.roomLabel,
+        GroupSpace: audience.kind === "direct" ? undefined : teamId,
+        SenderId: senderId,
+        Provider: "mattermost",
+        Surface: "mattermost",
+      },
+    });
+    if (!identityDecision.allowed) {
+      sendJsonResponse(res, 200, {
+        response_type: "ephemeral",
+        text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+      });
+      return;
+    }
+
     const auth = await authorizeSlashInvocation({
       account,
       cfg,
-      client,
+      channelInfo: audience.channelInfo,
       commandText,
       channelId,
       senderId,
@@ -707,7 +739,8 @@ export function createSlashCommandHttpHandler(params: SlashHttpHandlerParams) {
         channelId,
         senderId,
         senderName,
-        teamId: payload.team_id,
+        teamId,
+        route,
         triggerId: payload.trigger_id,
         kind: auth.kind,
         chatType: auth.chatType,
@@ -742,6 +775,7 @@ async function handleSlashCommandAsync(params: {
   senderId: string;
   senderName: string;
   teamId: string;
+  route: ResolvedAgentRoute;
   kind: "direct" | "group" | "channel";
   chatType: "direct" | "group" | "channel";
   channelName: string;
@@ -761,6 +795,7 @@ async function handleSlashCommandAsync(params: {
     senderId,
     senderName,
     teamId,
+    route,
     kind,
     chatType,
     channelName: _channelName,
@@ -771,17 +806,6 @@ async function handleSlashCommandAsync(params: {
     log,
   } = params;
   const core = getMattermostRuntime();
-
-  const route = core.channel.routing.resolveAgentRoute({
-    cfg,
-    channel: "mattermost",
-    accountId: account.accountId,
-    teamId,
-    peer: {
-      kind,
-      id: kind === "direct" ? senderId : channelId,
-    },
-  });
 
   const fromLabel =
     kind === "direct"
@@ -848,6 +872,7 @@ async function handleSlashCommandAsync(params: {
           : `mattermost:channel:${channelId}`,
     To: to,
     SessionKey: route.sessionKey,
+    AgentRouteMatchedBy: route.matchedBy,
     AccountId: route.accountId,
     ChatType: chatType,
     ConversationLabel: fromLabel,
@@ -938,6 +963,7 @@ async function handleSlashCommandAsync(params: {
         dispatcher,
         replyOptions: {
           ...replyOptions,
+          identityContractVersion: 1,
           disableBlockStreaming:
             typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
           onModelSelected,

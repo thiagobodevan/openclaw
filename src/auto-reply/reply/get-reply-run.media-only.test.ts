@@ -170,7 +170,7 @@ const ROOM_EVENT_MESSAGE_TOOL_DIRECTIVE =
 function baseParams(
   overrides: Partial<Parameters<typeof runPreparedReply>[0]> = {},
 ): Parameters<typeof runPreparedReply>[0] {
-  return {
+  const base: Parameters<typeof runPreparedReply>[0] = {
     ctx: {
       Body: "",
       RawBody: "",
@@ -179,6 +179,7 @@ function baseParams(
       OriginatingChannel: "slack",
       OriginatingTo: "C123",
       ChatType: "group",
+      AgentRouteMatchedBy: "binding.team",
     },
     sessionCtx: {
       Body: "",
@@ -189,8 +190,16 @@ function baseParams(
       ChatType: "group",
       OriginatingChannel: "slack",
       OriginatingTo: "C123",
+      AgentRouteMatchedBy: "binding.team",
     },
-    cfg: { session: {}, channels: {}, agents: { defaults: {} } },
+    cfg: {
+      session: {},
+      channels: {},
+      agents: {
+        defaults: {},
+        list: [{ id: "personal", default: true }, { id: "default" }],
+      },
+    },
     agentId: "default",
     agentDir: "/tmp/agent",
     agentCfg: {},
@@ -239,8 +248,14 @@ function baseParams(
     sessionKey: "session-key",
     workspaceDir: "/tmp/workspace",
     abortedLastRun: false,
+  };
+  const params = {
+    ...base,
     ...overrides,
   };
+  params.ctx.AgentRouteMatchedBy ??= "binding.team";
+  params.sessionCtx.AgentRouteMatchedBy ??= "binding.team";
+  return params;
 }
 
 function ownerParams(): Parameters<typeof runPreparedReply>[0] {
@@ -324,6 +339,44 @@ describe("runPreparedReply media-only handling", () => {
     await loadFreshGetReplyRunModuleForTest();
 
     expect(storeRuntimeLoads).not.toHaveBeenCalled();
+  });
+
+  it("keeps a trusted heartbeat in its existing personal session", async () => {
+    const params = baseParams();
+    params.agentId = "personal";
+    params.cfg = {
+      agents: { list: [{ id: "personal", default: true }] },
+      channels: {},
+      session: {},
+    };
+    params.ctx.Provider = "heartbeat";
+    params.sessionCtx.Provider = "heartbeat";
+    params.ctx.AgentRouteMatchedBy = "default";
+    params.sessionCtx.AgentRouteMatchedBy = "default";
+    params.opts = { isHeartbeat: true };
+
+    await runPreparedReply(params);
+
+    expect(runReplyAgent).toHaveBeenCalledOnce();
+  });
+
+  it("carries an explicit service binding into the prepared run", async () => {
+    const params = baseParams();
+    params.agentId = "team-ops";
+    params.cfg = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "team-ops" }],
+      },
+      channels: {},
+      session: {},
+    };
+    params.ctx.AgentRouteMatchedBy = "binding.team";
+    params.sessionCtx.AgentRouteMatchedBy = "binding.team";
+
+    await runPreparedReply(params);
+
+    const call = requireRunReplyAgentCall();
+    expect(call.followupRun.run.routeMatchedBy).toBe("binding.team");
   });
 
   it("passes approved elevated defaults to the runner", async () => {
@@ -539,7 +592,7 @@ describe("runPreparedReply media-only handling", () => {
     expect(directContextParams?.sessionCtx?.ChatType).toBe("direct");
     expect(directContextParams?.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(buildInboundUserContextPrefix).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         Body: "yo",
         BodyStripped: "yo",
         ThreadHistoryBody: "Earlier direct message",
@@ -550,7 +603,7 @@ describe("runPreparedReply media-only handling", () => {
         OriginatingTo: "telegram-direct-test-id",
         InboundHistory: undefined,
         ThreadStarterBody: undefined,
-      },
+      }),
       expect.anything(),
     );
   });
@@ -3277,6 +3330,20 @@ describe("runPreparedReply media-only handling", () => {
     const call = requireRunReplyAgentCall();
     expect(call.commandBody).toContain("System: [t] Model switched.");
     expect(call.followupRun.run.extraSystemPrompt ?? "").not.toContain("Runtime System Events");
+  });
+
+  it("passes the targeted system-event context into queue draining", async () => {
+    const params = baseParams();
+    params.ctx.SystemEventContextKey = "slack:interaction:c1:100:approve:u1";
+    params.opts = { isHeartbeat: true };
+
+    await runPreparedReply(params);
+
+    expect(drainFormattedSystemEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextKey: "slack:interaction:c1:100:approve:u1",
+      }),
+    );
   });
 
   it("does not drain queued system events for commitment-only heartbeat runs", async () => {

@@ -5,7 +5,9 @@ import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 export type IMessageReactionSystemEventDecision = {
   text: string;
   contextKey: string;
+  senderNormalized: string;
   route: {
+    accountId: string;
     sessionKey: string;
   };
   reaction: {
@@ -24,6 +26,11 @@ export function enqueueIMessageReactionSystemEvent(params: {
   const queued = enqueueSystemEvent(decision.text, {
     sessionKey: decision.route.sessionKey,
     contextKey: decision.contextKey,
+    actor: {
+      channel: "imessage",
+      accountId: decision.route.accountId,
+      senderId: decision.senderNormalized,
+    },
   });
   runtime.log?.(
     `imessage: reaction system event ${queued ? "queued" : "deduped"} session=${

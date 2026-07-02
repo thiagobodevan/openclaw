@@ -93,6 +93,14 @@ describe("registerSlackReactionEvents", () => {
       expectedCalls: 1,
     },
     {
+      name: "drops an external DM actor even when transport policy is open",
+      input: {
+        overrides: { dmPolicy: "open", allowFrom: ["*"] },
+        event: buildReactionEvent({ user: "U_GUEST" }),
+      },
+      expectedCalls: 0,
+    },
+    {
       name: "blocks DM reaction system events when dmPolicy is disabled",
       input: { overrides: { dmPolicy: "disabled" } },
       expectedCalls: 0,
@@ -231,6 +239,7 @@ describe("registerSlackReactionEvents", () => {
     expect(reactionQueueMock).toHaveBeenCalledWith(expect.any(String), {
       sessionKey: "agent:main:main",
       contextKey: "slack:reaction:added:D1:123.456:U1:thumbsup",
+      actor: { channel: "slack", accountId: "default", senderId: "U1" },
     });
   });
 
@@ -283,11 +292,16 @@ describe("registerSlackReactionEvents", () => {
     expect(reactionQueueMock).not.toHaveBeenCalled();
   });
 
-  it("passes sender context when resolving reaction session keys", async () => {
+  it("drops identity-denied reactions before provider-backed authorization", async () => {
     reactionQueueMock.mockClear();
-    const harness = createSlackSystemEventTestHarness();
-    const resolveSessionKey = vi.fn().mockReturnValue("agent:ops:main");
-    harness.ctx.resolveSlackSystemEventSessionKey = resolveSessionKey;
+    const harness = createSlackSystemEventTestHarness({
+      dmPolicy: "open",
+      allowFrom: ["*"],
+    });
+    const resolveChannelName = vi.fn(harness.ctx.resolveChannelName);
+    const resolveUserName = vi.fn(harness.ctx.resolveUserName);
+    harness.ctx.resolveChannelName = resolveChannelName;
+    harness.ctx.resolveUserName = resolveUserName;
     registerSlackReactionEvents({ ctx: harness.ctx });
     const handler = requireReactionHandler(
       harness.getHandler("reaction_added") as ReactionHandler | null,
@@ -295,14 +309,45 @@ describe("registerSlackReactionEvents", () => {
     );
 
     await handler({
-      event: buildReactionEvent({ user: "U777", channel: "D123" }),
+      event: buildReactionEvent({ user: "U_GUEST", channel: "D123" }),
       body: {},
     });
 
-    expect(resolveSessionKey).toHaveBeenCalledWith({
+    expect(resolveChannelName).not.toHaveBeenCalled();
+    expect(resolveUserName).not.toHaveBeenCalled();
+    expect(reactionQueueMock).not.toHaveBeenCalled();
+  });
+
+  it("passes sender identity when admitting the reaction route", async () => {
+    reactionQueueMock.mockClear();
+    const harness = createSlackSystemEventTestHarness();
+    const resolveRouteReady = vi.fn().mockResolvedValue({
+      sessionKey: "agent:ops:main",
+      agentId: "ops",
+      matchedBy: "binding.peer",
+      chatType: "direct",
+    });
+    harness.ctx.resolveSlackSystemEventRouteReady = resolveRouteReady;
+    registerSlackReactionEvents({ ctx: harness.ctx });
+    const handler = requireReactionHandler(
+      harness.getHandler("reaction_added") as ReactionHandler | null,
+      "added",
+    );
+
+    await handler({
+      event: buildReactionEvent({ user: "U1", channel: "D123" }),
+      body: {},
+    });
+
+    expect(resolveRouteReady).toHaveBeenCalledWith({
       channelId: "D123",
       channelType: "im",
-      senderId: "U777",
+      senderId: "U1",
+      senderIsOwner: true,
     });
+    expect(reactionQueueMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ sessionKey: "agent:ops:main" }),
+    );
   });
 });

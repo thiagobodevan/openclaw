@@ -13,9 +13,11 @@ export {
 } from "../bindings/records.js";
 export {
   ensureConfiguredBindingRouteReady,
+  lookupRuntimeConversationBindingRoute,
   resolveConfiguredBindingRoute,
   type ConfiguredBindingRouteResult,
   resolveRuntimeConversationBindingRoute,
+  touchRuntimeConversationBindingRoute,
   type RuntimeConversationBindingRouteResult,
 } from "../channels/plugins/binding-routing.js";
 export {

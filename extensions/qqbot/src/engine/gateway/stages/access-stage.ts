@@ -1,4 +1,6 @@
 // Qqbot plugin module implements access stage behavior.
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import type { QQBotInboundAccess } from "../../adapter/index.js";
 import type { InboundContext, InboundPipelineDeps } from "../inbound-context.js";
 import type { QueuedMessage } from "../message-queue.js";
@@ -11,7 +13,7 @@ type AccessStageResult =
       peerId: string;
       qualifiedTarget: string;
       fromAddress: string;
-      route: { sessionKey: string; accountId: string; agentId?: string };
+      route: ReturnType<InboundPipelineDeps["runtime"]["channel"]["routing"]["resolveAgentRoute"]>;
       access: QQBotInboundAccess;
     }
   | { kind: "block"; context: InboundContext };
@@ -60,6 +62,42 @@ export async function runAccessStage(
         qualifiedTarget,
         fromAddress: qualifiedTarget,
         access,
+      }),
+    };
+  }
+
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: cfg as OpenClawConfig,
+    ctx: {
+      AgentId: route.agentId,
+      SessionKey: route.sessionKey,
+      AgentRouteMatchedBy: route.matchedBy,
+      AccountId: route.accountId ?? account.accountId,
+      ChatType: isGroupChat ? "group" : "direct",
+      ChatId: isGroupChat ? peerId : undefined,
+      GroupChannel: isGroupChat ? peerId : undefined,
+      SenderId: event.senderId,
+      Provider: "qqbot",
+      Surface: "qqbot",
+      CommandAuthorized: access.commandAccess?.authorized,
+    },
+  });
+  if (!identityDecision.allowed) {
+    log?.info(
+      `Blocked qqbot inbound identity: reason=${identityDecision.reason} ` +
+        `senderId=${event.senderId} accountId=${account.accountId} isGroup=${isGroupChat}`,
+    );
+    return {
+      kind: "block",
+      context: buildBlockedInboundContext({
+        event,
+        route,
+        isGroupChat,
+        peerId,
+        qualifiedTarget,
+        fromAddress: qualifiedTarget,
+        access,
+        blockReason: identityDecision.reason,
       }),
     };
   }

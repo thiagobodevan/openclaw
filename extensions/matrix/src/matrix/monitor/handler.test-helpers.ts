@@ -1,6 +1,7 @@
 // Matrix helper module supports handler helpers behavior.
 import type { PreparedInboundReply } from "openclaw/plugin-sdk/channel-inbound";
 import { finalizeInboundContext as finalizeCoreInboundContext } from "openclaw/plugin-sdk/reply-runtime";
+import type { AgentRouteMatch } from "openclaw/plugin-sdk/routing";
 import { vi, type Mock } from "vitest";
 import type { RuntimeEnv, RuntimeLogger } from "../../runtime-api.js";
 import type {
@@ -20,6 +21,10 @@ const DEFAULT_ROUTE = {
   sessionKey: "agent:ops:main",
   mainSessionKey: "agent:ops:main",
   matchedBy: "binding.account" as const,
+};
+
+type MatrixHandlerTestRoute = Omit<typeof DEFAULT_ROUTE, "matchedBy"> & {
+  matchedBy: AgentRouteMatch;
 };
 
 type MatrixHandlerTestHarnessOptions = {
@@ -64,7 +69,7 @@ type MatrixHandlerTestHarnessOptions = {
   shouldHandleTextCommands?: () => boolean;
   hasControlCommand?: MatrixMonitorHandlerParams["core"]["channel"]["text"]["hasControlCommand"];
   resolveMarkdownTableMode?: () => string;
-  resolveAgentRoute?: () => typeof DEFAULT_ROUTE;
+  resolveAgentRoute?: () => MatrixHandlerTestRoute;
   resolveStorePath?: () => string;
   readSessionUpdatedAt?: () => number | undefined;
   recordInboundSession?: (...args: unknown[]) => Promise<void>;
@@ -111,7 +116,7 @@ type MatrixHandlerTestHarness = {
   handler: ReturnType<typeof createMatrixRoomMessageHandler>;
   readAllowFromStore: MatrixMonitorHandlerParams["core"]["channel"]["pairing"]["readAllowFromStore"];
   recordInboundSession: (...args: unknown[]) => Promise<void>;
-  resolveAgentRoute: () => typeof DEFAULT_ROUTE;
+  resolveAgentRoute: () => MatrixHandlerTestRoute;
   runPrepared: MatrixRunPreparedMock;
   upsertPairingRequest: MatrixMonitorHandlerParams["core"]["channel"]["pairing"]["upsertPairingRequest"];
 };

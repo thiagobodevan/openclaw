@@ -16,6 +16,7 @@ import type { ImageContent } from "../../../llm/types.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { PluginHookChannelContext } from "../../../plugins/hook-types.js";
 import type { CommandQueueEnqueueFn } from "../../../process/command-queue.types.js";
+import type { AgentRouteMatch } from "../../../routing/resolve-route.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
 import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.types.js";
 import type { SkillSnapshot } from "../../../skills/types.js";
@@ -65,6 +66,7 @@ export type RunEmbeddedAgentParams = {
   /** Session-like key for sandbox and tool-policy resolution. Defaults to sessionKey. */
   sandboxSessionKey?: string;
   agentId?: string;
+  routeMatchedBy?: AgentRouteMatch;
   messageChannel?: string;
   messageProvider?: string;
   chatType?: ChatType;

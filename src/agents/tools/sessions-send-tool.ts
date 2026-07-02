@@ -10,12 +10,11 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { Type } from "typebox";
 import { readAcpSessionMeta } from "../../acp/runtime/session-meta.js";
 import { parseSessionThreadInfoFast } from "../../config/sessions/thread-info.js";
-import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { isInterSessionIdentityTransitionAllowed } from "../../routing/conversation-identity.js";
 import {
-  isSubagentSessionKey,
   normalizeAgentId,
   resolveAgentIdFromSessionKey,
   toAgentStoreSessionKey,
@@ -42,6 +41,11 @@ import {
   readLatestAssistantReplySnapshot,
   waitForAgentRunAndReadUpdatedAssistantReply,
 } from "../run-wait.js";
+import {
+  isConfiguredOrLiveOwnedSessionTarget,
+  isLiveOwnedSessionTarget,
+  isRequesterParentOfNativeSubagentSession,
+} from "../session-target-identity.js";
 import { loadSessionEntryByKey } from "../subagent-announce-delivery.js";
 import {
   describeSessionsSendTool,
@@ -164,31 +168,6 @@ async function ensureConfiguredAgentMainSession(params: {
       return { ok: false, error: formatErrorMessage(err) };
     }
   }
-}
-
-type SessionsSendRouteEntry = Pick<SessionEntry, "acp" | "parentSessionKey" | "spawnedBy">;
-
-function isRequesterParentOfNativeSubagentSession(params: {
-  entry: SessionsSendRouteEntry | null | undefined;
-  acpMeta?: unknown;
-  requesterSessionKey: string | null | undefined;
-  targetSessionKey: string;
-}): boolean {
-  if (
-    !params.entry ||
-    params.acpMeta ||
-    params.entry.acp ||
-    !isSubagentSessionKey(params.targetSessionKey)
-  ) {
-    return false;
-  }
-  const requester = normalizeOptionalString(params.requesterSessionKey);
-  if (!requester) {
-    return false;
-  }
-  const spawnedBy = normalizeOptionalString(params.entry.spawnedBy);
-  const parentSessionKey = normalizeOptionalString(params.entry.parentSessionKey);
-  return requester === spawnedBy || requester === parentSessionKey;
 }
 
 function isTerminalAgentWaitTimeout(result: AgentWaitResult): boolean {
@@ -473,6 +452,20 @@ export function createSessionsSendTool(opts?: {
           error: "Either sessionKey or label is required",
         });
       }
+      if (
+        !isConfiguredOrLiveOwnedSessionTarget({
+          cfg,
+          requesterSessionKey: effectiveRequesterKey,
+          targetSessionKey: sessionKey,
+        })
+      ) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error: "Target agent is no longer configured.",
+          sessionKey,
+        });
+      }
       const resolvedSession = await resolveSessionReference({
         sessionKey,
         alias,
@@ -505,6 +498,20 @@ export function createSessionsSendTool(opts?: {
       // Normalize sessionKey/sessionId input into a canonical session key.
       const resolvedKey = visibleSession.key;
       const displayKey = visibleSession.displayKey;
+      if (
+        !isConfiguredOrLiveOwnedSessionTarget({
+          cfg,
+          requesterSessionKey: effectiveRequesterKey,
+          targetSessionKey: resolvedKey,
+        })
+      ) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error: "Target agent is no longer configured.",
+          sessionKey: unresolvedDisplayKey,
+        });
+      }
       const timeoutMs =
         finiteSecondsToTimerSafeMilliseconds(timeoutSeconds, {
           floorSeconds: true,
@@ -533,6 +540,27 @@ export function createSessionsSendTool(opts?: {
           runId: crypto.randomUUID(),
           status: access.status,
           error: access.error,
+          sessionKey: unresolvedDisplayKey,
+        });
+      }
+
+      const targetIsLiveOwnedChild = isLiveOwnedSessionTarget({
+        requesterSessionKey: effectiveRequesterKey,
+        targetSessionKey: resolvedKey,
+      });
+      if (
+        !isInterSessionIdentityTransitionAllowed({
+          config: cfg,
+          sourceSessionKey: effectiveRequesterKey,
+          sourceTool: "sessions_send",
+          targetAgentId: resolveAgentIdFromSessionKey(resolvedKey),
+          targetIsLiveOwnedChild,
+        })
+      ) {
+        return jsonResult({
+          runId: crypto.randomUUID(),
+          status: "forbidden",
+          error: "Inter-session identity transition denied.",
           sessionKey: unresolvedDisplayKey,
         });
       }

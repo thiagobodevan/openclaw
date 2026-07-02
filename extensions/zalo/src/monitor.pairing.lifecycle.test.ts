@@ -29,6 +29,16 @@ describe("Zalo pairing lifecycle", () => {
         shouldComputeCommandAuthorized: vi.fn(() => false),
         resolveCommandAuthorizedFromAuthorizers: vi.fn(() => false),
       },
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "main",
+          accountId: "acct-zalo-pairing",
+          sessionKey: "agent:main:zalo:direct:dm-pairing-1",
+          mainSessionKey: "agent:main:main",
+          lastRoutePolicy: "session",
+          matchedBy: "binding.account",
+        })),
+      },
     });
   });
 
@@ -96,6 +106,60 @@ describe("Zalo pairing lifecycle", () => {
       expect(sendPayload.chat_id).toBe("dm-pairing-1");
       expect(sendPayload.text).toContain("PAIRCODE");
       expect(sendOptions).toBeUndefined();
+    } finally {
+      await monitor.stop();
+    }
+  });
+
+  it("does not pair an unknown sender onto the default personal route", async () => {
+    setLifecycleRuntimeCore({
+      pairing: {
+        readAllowFromStore: readAllowFromStoreMock,
+        upsertPairingRequest: upsertPairingRequestMock,
+      },
+      commands: {
+        shouldComputeCommandAuthorized: vi.fn(() => false),
+        resolveCommandAuthorizedFromAuthorizers: vi.fn(() => false),
+      },
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "personal",
+          accountId: "acct-zalo-pairing",
+          sessionKey: "agent:personal:zalo:direct:dm-personal",
+          mainSessionKey: "agent:personal:main",
+          lastRoutePolicy: "session",
+          matchedBy: "default",
+        })),
+      },
+    });
+    const monitor = await startWebhookLifecycleMonitor({
+      ...createPairingMonitorSetup(),
+      cacheKey: "zalo-pairing-personal-deny",
+    });
+
+    try {
+      await withServer(
+        (req, res) => {
+          void monitor.route.handler(req, res);
+        },
+        async (baseUrl) => {
+          await postWebhookReplay({
+            baseUrl,
+            path: "/hooks/zalo",
+            secret: "supersecret",
+            payload: createTextUpdate({
+              messageId: `zalo-personal-${Date.now()}`,
+              userId: "guest",
+              userName: "Guest",
+              chatId: "dm-personal",
+            }),
+          });
+          await settleAsyncWork();
+        },
+      );
+
+      expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+      expect(sendMessageMock).not.toHaveBeenCalled();
     } finally {
       await monitor.stop();
     }

@@ -4230,6 +4230,7 @@ export const chatHandlers: GatewayRequestHandlers = {
               }
             },
             replyOptions: {
+              identityContractVersion: 1,
               runId: clientRunId,
               ...(isOperatorUiClient(clientInfo)
                 ? {

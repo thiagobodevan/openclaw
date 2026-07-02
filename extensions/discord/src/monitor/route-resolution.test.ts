@@ -1,7 +1,9 @@
 // Discord tests cover route resolution plugin behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import * as conversationBindingRuntime from "openclaw/plugin-sdk/conversation-binding-runtime";
 import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { resolveDiscordNativeInteractionRouteState } from "./native-command-route.js";
 import {
   buildDiscordRoutePeer,
   resolveDiscordBoundConversationRoute,
@@ -69,6 +71,131 @@ describe("discord route resolution helpers", () => {
       sessionKey: "agent:worker:discord:channel:c1",
       matchedBy: "binding.channel",
     });
+  });
+
+  it("marks native-command runtime thread bindings as explicit channel bindings", async () => {
+    const result = await resolveDiscordNativeInteractionRouteState({
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+      },
+      accountId: "default",
+      guildId: "g1",
+      isDirectMessage: false,
+      isGroupDm: false,
+      conversationId: "thread-1",
+      threadBinding: {
+        accountId: "default",
+        channelId: "channel-1",
+        threadId: "thread-1",
+        targetKind: "subagent",
+        targetSessionKey: "agent:service:subagent:bound",
+        agentId: "service",
+        boundBy: "owner",
+        boundAt: 1,
+        lastActivityAt: 1,
+      },
+    });
+
+    expect(result.effectiveRoute).toMatchObject({
+      agentId: "service",
+      sessionKey: "agent:service:subagent:bound",
+      matchedBy: "binding.channel",
+    });
+  });
+
+  it("resolves native commands through a live conversation binding without touching its lease", async () => {
+    const runtimeBinding = {
+      bindingId: "binding-service",
+      targetSessionKey: "agent:service:discord:channel:channel-1",
+      metadata: { boundBy: "owner" },
+    } as never;
+    const serviceRoute = {
+      agentId: "service",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:service:discord:channel:channel-1",
+      mainSessionKey: "agent:service:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    const lookup = vi
+      .spyOn(conversationBindingRuntime, "lookupRuntimeConversationBindingRoute")
+      .mockReturnValue({
+        bindingRecord: runtimeBinding,
+        boundSessionKey: serviceRoute.sessionKey,
+        route: serviceRoute,
+      });
+    const touch = vi.spyOn(conversationBindingRuntime, "touchRuntimeConversationBindingRoute");
+
+    try {
+      const result = await resolveDiscordNativeInteractionRouteState({
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+        },
+        accountId: "default",
+        guildId: "guild-1",
+        isDirectMessage: false,
+        isGroupDm: false,
+        conversationId: "channel-1",
+      });
+
+      expect(result.effectiveRoute).toEqual(serviceRoute);
+      expect(result.runtimeBinding).toBe(runtimeBinding);
+      expect(result.identityDecision).toMatchObject({
+        mode: "organization",
+        allowed: true,
+      });
+      expect(touch).not.toHaveBeenCalled();
+    } finally {
+      lookup.mockRestore();
+      touch.mockRestore();
+    }
+  });
+
+  it("rejects shared personal native bindings before preparing their runtime", async () => {
+    const personalRoute = {
+      agentId: "personal",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:personal:acp:binding:discord:default:channel-1",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    const resolveConfigured = vi
+      .spyOn(conversationBindingRuntime, "resolveConfiguredBindingRoute")
+      .mockReturnValue({
+        route: personalRoute,
+        boundAgentId: "personal",
+        boundSessionKey: personalRoute.sessionKey,
+        bindingResolution: {
+          statefulTarget: {
+            agentId: "personal",
+            sessionKey: personalRoute.sessionKey,
+          },
+        },
+      } as never);
+    const ensureReady = vi.spyOn(conversationBindingRuntime, "ensureConfiguredBindingRouteReady");
+
+    const result = await resolveDiscordNativeInteractionRouteState({
+      cfg: { agents: { list: [{ id: "personal", default: true }] } },
+      accountId: "default",
+      guildId: "guild-1",
+      isDirectMessage: false,
+      isGroupDm: false,
+      conversationId: "channel-1",
+      enforceConfiguredBindingReadiness: true,
+    });
+
+    expect(result.identityDecision).toMatchObject({
+      mode: "external",
+      allowed: false,
+      reason: "unbound_shared",
+    });
+    expect(result.bindingReadiness).toBeNull();
+    expect(ensureReady).not.toHaveBeenCalled();
+    resolveConfigured.mockRestore();
+    ensureReady.mockRestore();
   });
 
   it("falls back to configured route when no bound session exists", () => {

@@ -267,6 +267,7 @@ function buildEmbeddedContextFromTemplate(params: {
     sessionKey: params.run.sessionKey,
     sandboxSessionKey: params.run.runtimePolicySessionKey,
     agentId: params.run.agentId,
+    routeMatchedBy: params.run.routeMatchedBy,
     messageProvider: resolveOriginMessageProvider({
       originatingChannel: sessionCtx.OriginatingChannel,
       provider: sessionCtx.Provider,

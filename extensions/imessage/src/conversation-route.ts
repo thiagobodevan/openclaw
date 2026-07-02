@@ -1,21 +1,28 @@
 // Imessage plugin module implements conversation route behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
+  lookupRuntimeConversationBindingRoute,
   resolveConfiguredBindingRoute,
-  resolveRuntimeConversationBindingRoute,
+  touchRuntimeConversationBindingRoute,
+  type SessionBindingRecord,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveIMessageInboundConversationId } from "./conversation-id.js";
 
-export function resolveIMessageConversationRoute(params: {
+type IMessageConversationRouteParams = {
   cfg: OpenClawConfig;
   accountId: string;
   isGroup: boolean;
   peerId: string;
   sender: string;
   chatId?: number;
-}): ReturnType<typeof resolveAgentRoute> {
+};
+
+export function lookupIMessageConversationRoute(params: IMessageConversationRouteParams): {
+  route: ReturnType<typeof resolveAgentRoute>;
+  runtimeBinding: SessionBindingRecord | null;
+} {
   let route = resolveAgentRoute({
     cfg: params.cfg,
     channel: "imessage",
@@ -32,7 +39,7 @@ export function resolveIMessageConversationRoute(params: {
     chatId: params.chatId,
   });
   if (!conversationId) {
-    return route;
+    return { route, runtimeBinding: null };
   }
 
   route = resolveConfiguredBindingRoute({
@@ -45,7 +52,7 @@ export function resolveIMessageConversationRoute(params: {
     },
   }).route;
 
-  const runtimeRoute = resolveRuntimeConversationBindingRoute({
+  const runtimeRoute = lookupRuntimeConversationBindingRoute({
     route,
     conversation: {
       channel: "imessage",
@@ -61,5 +68,13 @@ export function resolveIMessageConversationRoute(params: {
       `imessage: routed via bound conversation ${conversationId} -> ${runtimeRoute.boundSessionKey}`,
     );
   }
-  return route;
+  return { route, runtimeBinding: runtimeRoute.bindingRecord };
+}
+
+export function resolveIMessageConversationRoute(
+  params: IMessageConversationRouteParams,
+): ReturnType<typeof resolveAgentRoute> {
+  const state = lookupIMessageConversationRoute(params);
+  touchRuntimeConversationBindingRoute({ bindingRecord: state.runtimeBinding });
+  return state.route;
 }

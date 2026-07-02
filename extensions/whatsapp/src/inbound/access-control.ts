@@ -1,10 +1,17 @@
 // Whatsapp plugin module implements access control behavior.
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { resolveConfiguredBindingRoute } from "openclaw/plugin-sdk/conversation-binding-runtime";
 import { upsertChannelPairingRequest } from "openclaw/plugin-sdk/conversation-runtime";
+import {
+  resolveAgentRoute,
+  resolveConversationIdentityMode,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
 import { defaultRuntime } from "openclaw/plugin-sdk/runtime-env";
 import { warnMissingProviderGroupPolicyFallbackOnce } from "openclaw/plugin-sdk/runtime-group-policy";
 import { resolveWhatsAppInboundPolicy, resolveWhatsAppIngressAccess } from "../inbound-policy.js";
+import { normalizeWhatsAppAllowFromEntry } from "../normalize-target.js";
 import { buildWhatsAppInboundAdmission, type WhatsAppInboundAdmission } from "./admission.js";
 
 export type BlockedInboundAccessControlResult = {
@@ -103,6 +110,44 @@ export async function checkInboundAccessControl(params: {
     senderId: accessSenderId,
     dmSenderId: params.from,
   });
+  const senderIsOwner =
+    !params.group &&
+    (policy.isSamePhone(params.from) ||
+      resolveStableSenderIsOwner({
+        senderId: params.from,
+        commandOwnerAllowFrom: params.cfg.commands?.ownerAllowFrom,
+        providerAllowFrom: access.senderAccess.effectiveAllowFrom,
+        normalizeEntry: normalizeWhatsAppAllowFromEntry,
+      }));
+  if (!params.group) {
+    const route = resolveAgentRoute({
+      cfg: params.cfg,
+      channel: "whatsapp",
+      accountId: policy.account.accountId,
+      peer: { kind: "direct", id: params.from },
+    });
+    const configuredRoute = resolveConfiguredBindingRoute({
+      cfg: params.cfg,
+      route,
+      channel: "whatsapp",
+      accountId: policy.account.accountId,
+      conversationId: params.from,
+    }).route;
+    const identity = resolveConversationIdentityMode({
+      config: params.cfg,
+      agentId: configuredRoute.agentId,
+      routeMatchedBy: configuredRoute.matchedBy,
+      chatType: "direct",
+      senderIsOwner,
+    });
+    if (!identity.allowed) {
+      logWhatsAppVerbose(
+        params.verbose,
+        `Blocked dm before pairing (conversation identity: ${identity.reason})`,
+      );
+      return blockedInboundAccess(policy);
+    }
+  }
   const { senderAccess } = access;
   if (params.group && senderAccess.decision !== "allow") {
     if (senderAccess.reasonCode === "group_policy_disabled") {
@@ -191,6 +236,7 @@ export async function checkInboundAccessControl(params: {
       isGroup: params.group,
       conversationId,
       senderId: admissionSenderId,
+      senderIsOwner,
     }),
   };
 }

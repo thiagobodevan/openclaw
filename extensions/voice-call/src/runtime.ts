@@ -21,6 +21,12 @@ import {
   validateProviderConfig,
 } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
+import {
+  applyVoiceCallInboundResponsePolicy,
+  isVoiceCallInboundIdentityCurrent,
+  resolveVoiceCallInboundAdmission,
+  resolveVoiceCallInboundIdentity,
+} from "./identity.js";
 import { CallManager } from "./manager.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import type { TwilioProvider } from "./providers/twilio.js";
@@ -58,6 +64,37 @@ type Logger = {
 
 type ResolvedRealtimeProvider = ResolvedRealtimeVoiceProvider;
 
+function warnForUnroutedInboundIdentity(params: {
+  config: VoiceCallConfig;
+  coreConfig: OpenClawConfig;
+  log: Logger;
+}): void {
+  if (params.config.inboundPolicy === "disabled") {
+    return;
+  }
+  const globalIdentity = resolveVoiceCallInboundIdentity({
+    config: params.config,
+    coreConfig: params.coreConfig,
+  });
+  if (!globalIdentity.allowed) {
+    params.log.warn(
+      "[voice-call] Inbound calls without a matching number route will be rejected. Configure agentId with a non-default service agent.",
+    );
+  }
+  const deniedRouteCount = Object.keys(params.config.numbers).filter(
+    (to) =>
+      !resolveVoiceCallInboundIdentity({
+        config: params.config,
+        coreConfig: params.coreConfig,
+        to,
+      }).allowed,
+  ).length;
+  if (deniedRouteCount > 0) {
+    params.log.warn(
+      `[voice-call] ${deniedRouteCount} inbound number route(s) will be rejected. Configure numbers.<dialed-number>.agentId with a non-default service agent.`,
+    );
+  }
+}
 const REALTIME_VOICE_CONSULT_SYSTEM_PROMPT = [
   "You are the configured OpenClaw agent receiving delegated requests from a live phone voice bridge.",
   "Act on behalf of the caller using the normal available tools when the caller asks you to do work.",
@@ -271,6 +308,8 @@ export async function createVoiceCallRuntime(params: {
     );
   }
 
+  warnForUnroutedInboundIdentity({ config, coreConfig: cfg, log });
+
   const validation = validateProviderConfig(config);
   if (!validation.valid) {
     throw new Error(`Invalid voice-call config: ${validation.errors.join("; ")}`);
@@ -280,7 +319,17 @@ export async function createVoiceCallRuntime(params: {
   if (stateRuntime) {
     setVoiceCallStateRuntime({ state: stateRuntime });
   }
-  const manager = new CallManager(config, undefined, cfg.session);
+  const manager = new CallManager(
+    config,
+    undefined,
+    cfg.session,
+    ({ from, to }) => resolveVoiceCallInboundAdmission({ config, coreConfig: cfg, from, to }),
+    (identity) =>
+      isVoiceCallInboundIdentityCurrent({
+        coreConfig: cfg,
+        identity,
+      }),
+  );
   const realtimeProvider = config.realtime.enabled
     ? await resolveRealtimeProvider({
         config,
@@ -298,11 +347,15 @@ export async function createVoiceCallRuntime(params: {
   );
   if (realtimeProvider) {
     const { RealtimeCallHandler } = await loadRealtimeHandler();
+    const hasPerNumberAgentRoute = Object.values(config.numbers).some((route) =>
+      Boolean(route.agentId?.trim()),
+    );
     const realtimeInstructions = await buildRealtimeVoiceInstructions({
       baseInstructions: config.realtime.instructions,
       config,
       coreConfig,
       agentRuntime,
+      allowAgentContext: !hasPerNumberAgentRoute,
     });
     const realtimeConfig = {
       ...config.realtime,
@@ -331,33 +384,54 @@ export async function createVoiceCallRuntime(params: {
           }
           const numberRouteKey = resolveVoiceCallNumberRouteKeyForCall(call);
           const effectiveConfig = resolveVoiceCallEffectiveConfig(config, numberRouteKey).config;
-          const agentId = effectiveConfig.agentId ?? "main";
+          if (call.direction === "inbound" && !call.inboundIdentity) {
+            return { error: "Inbound call identity is unavailable" };
+          }
+          const inboundIdentity = call.inboundIdentity;
+          const agentId = inboundIdentity?.agentId ?? effectiveConfig.agentId ?? "main";
+          if (
+            inboundIdentity &&
+            !isVoiceCallInboundIdentityCurrent({
+              coreConfig: cfg,
+              identity: inboundIdentity,
+            })
+          ) {
+            return { error: "Inbound call agent is no longer configured" };
+          }
+          const consultConfig = inboundIdentity
+            ? applyVoiceCallInboundResponsePolicy({
+                config: effectiveConfig,
+                identity: inboundIdentity,
+              })
+            : effectiveConfig;
           const sessionKey = resolveVoiceCallConsultSessionKey({
             ...call,
-            config: effectiveConfig,
+            config: consultConfig,
             coreSession: cfg.session,
           });
           const requesterSessionKey =
             typeof call.metadata?.requesterSessionKey === "string"
               ? call.metadata.requesterSessionKey
               : undefined;
-          const fastContext = await resolveRealtimeFastContextConsult({
-            cfg,
-            agentId,
-            sessionKey,
-            config: effectiveConfig.realtime.fastContext,
-            args,
-            logger: log,
-          });
-          if (fastContext.handled) {
-            return fastContext.result;
+          if (call.direction !== "inbound") {
+            const fastContext = await resolveRealtimeFastContextConsult({
+              cfg,
+              agentId,
+              sessionKey,
+              config: effectiveConfig.realtime.fastContext,
+              args,
+              logger: log,
+            });
+            if (fastContext.handled) {
+              return fastContext.result;
+            }
           }
           const { provider: agentProvider, model } = resolveVoiceResponseModel({
-            voiceConfig: effectiveConfig,
+            voiceConfig: consultConfig,
             agentRuntime,
           });
           const thinkLevel =
-            effectiveConfig.realtime.consultThinkingLevel ??
+            consultConfig.realtime.consultThinkingLevel ??
             agentRuntime.resolveThinkingDefault({
               cfg,
               provider: agentProvider,
@@ -368,6 +442,11 @@ export async function createVoiceCallRuntime(params: {
             agentRuntime,
             logger: log,
             agentId,
+            routeMatchedBy: inboundIdentity?.routeMatchedBy,
+            chatType: inboundIdentity?.chatType,
+            senderId: inboundIdentity?.senderId,
+            senderE164: inboundIdentity?.senderE164,
+            senderIsOwner: inboundIdentity?.senderIsOwner,
             sessionKey,
             messageProvider: "voice",
             lane: "voice",
@@ -381,12 +460,12 @@ export async function createVoiceCallRuntime(params: {
             provider: agentProvider,
             model,
             thinkLevel,
-            fastMode: effectiveConfig.realtime.consultFastMode,
-            timeoutMs: effectiveConfig.responseTimeoutMs,
+            fastMode: consultConfig.realtime.consultFastMode,
+            timeoutMs: consultConfig.responseTimeoutMs,
             spawnedBy: requesterSessionKey,
             contextMode: requesterSessionKey ? "fork" : undefined,
             toolsAllow: resolveRealtimeVoiceAgentConsultToolsAllow(
-              effectiveConfig.realtime.toolPolicy,
+              consultConfig.realtime.toolPolicy,
             ),
             extraSystemPrompt: REALTIME_VOICE_CONSULT_SYSTEM_PROMPT,
           });

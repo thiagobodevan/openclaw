@@ -45,7 +45,7 @@ export function normalizeSlackAllowOwnerEntry(entry: string): string | undefined
     return undefined;
   }
   const withoutPrefix = trimmed.replace(/^(slack:|user:)/, "");
-  return /^u[a-z0-9]+$/.test(withoutPrefix) ? withoutPrefix : undefined;
+  return /^[uw][a-z0-9_]+$/.test(withoutPrefix) ? withoutPrefix : undefined;
 }
 
 export type SlackAllowListMatch = AllowlistMatch<

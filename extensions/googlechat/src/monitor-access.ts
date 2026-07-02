@@ -15,6 +15,7 @@ import {
   createChannelPairingController,
   isDangerousNameMatchingEnabled,
   resolveAllowlistProviderRuntimeGroupPolicy,
+  resolveConversationIdentityMode,
   resolveDefaultGroupPolicy,
   warnMissingProviderGroupPolicyFallbackOnce,
   type OpenClawConfig,
@@ -47,6 +48,24 @@ function normalizeGoogleChatStableEntry(entry: string): string | null {
     return null;
   }
   return withoutProvider.startsWith("users/") ? normalizeUserId(withoutProvider) : withoutProvider;
+}
+
+export function resolveGoogleChatStableSenderIsOwner(params: {
+  config: OpenClawConfig;
+  account: ResolvedGoogleChatAccount;
+  senderId: string;
+}): boolean {
+  const senderId = normalizeUserId(params.senderId);
+  if (!senderId) {
+    return false;
+  }
+  const commandOwners = params.config.commands?.ownerAllowFrom ?? [];
+  const ownerAllowFrom =
+    commandOwners.length > 0 ? commandOwners : (params.account.config.dm?.allowFrom ?? []);
+  return ownerAllowFrom.some((entry) => {
+    const normalized = normalizeGoogleChatStableEntry(String(entry));
+    return normalized !== "*" && normalized === senderId;
+  });
 }
 
 function normalizeGoogleChatEmailEntry(entry: string): string | null {
@@ -368,6 +387,25 @@ export async function applyGoogleChatInboundAccessPolicy(params: {
   const commandAuthorized = resolvedAccess.commandAccess.requested
     ? resolvedAccess.commandAccess.authorized
     : undefined;
+  const agentRoute = core.channel.routing.resolveAgentRoute({
+    cfg: config,
+    channel: "googlechat",
+    accountId: account.accountId,
+    peer: { kind: isGroup ? "group" : "direct", id: spaceId },
+  });
+  const identity = resolveConversationIdentityMode({
+    config,
+    agentId: agentRoute.agentId,
+    routeMatchedBy: agentRoute.matchedBy,
+    chatType: isGroup ? "group" : "direct",
+    groupId: isGroup ? spaceId : undefined,
+    groupSpace: isGroup ? (space.displayName ?? spaceId) : undefined,
+    senderIsOwner: !isGroup && resolveGoogleChatStableSenderIsOwner({ config, account, senderId }),
+  });
+  if (!identity.allowed) {
+    logVerbose(`drop message before pairing or access side effects (${identity.reason})`);
+    return { ok: false };
+  }
 
   if (isGroup) {
     if (groupConfigResolved.deprecatedNameMatch) {

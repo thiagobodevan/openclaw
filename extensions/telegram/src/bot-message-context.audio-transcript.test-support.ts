@@ -24,6 +24,7 @@ async function buildGroupVoiceContext(params: {
   mediaPath: string;
   groupDisableAudioPreflight?: boolean;
   topicDisableAudioPreflight?: boolean;
+  personalRoute?: boolean;
 }) {
   const groupConfig = {
     requireMention: true,
@@ -48,7 +49,9 @@ async function buildGroupVoiceContext(params: {
     allMedia: [{ path: params.mediaPath, contentType: "audio/ogg" }],
     options: { forceWasMentioned: true },
     cfg: {
-      agents: { defaults: { model: DEFAULT_MODEL, workspace: DEFAULT_WORKSPACE } },
+      agents: params.personalRoute
+        ? { list: [{ id: "main", default: true }] }
+        : { defaults: { model: DEFAULT_MODEL, workspace: DEFAULT_WORKSPACE } },
       channels: { telegram: {} },
       messages: { groupChat: { mentionPatterns: [DEFAULT_MENTION_PATTERN] } },
     },
@@ -99,6 +102,23 @@ describe("buildTelegramMessageContext audio transcript body", () => {
 
     expect(transcribeFirstAudioMock).toHaveBeenCalledTimes(1);
     expectTranscriptRendered(ctx, "hey bot please help");
+  });
+
+  it("denies a personal group route before audio preflight", async () => {
+    const ctx = await buildGroupVoiceContext({
+      messageId: 5,
+      chatId: -1001234567894,
+      title: "Guest Group",
+      date: 1700000400,
+      fromId: 46,
+      firstName: "Guest",
+      fileId: "voice-5",
+      mediaPath: "/tmp/voice5.ogg",
+      personalRoute: true,
+    });
+
+    expect(ctx).toBeNull();
+    expect(transcribeFirstAudioMock).not.toHaveBeenCalled();
   });
 
   it("skips preflight transcription when disableAudioPreflight is true", async () => {

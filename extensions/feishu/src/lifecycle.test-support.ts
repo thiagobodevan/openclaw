@@ -182,8 +182,8 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", async () => {
       resolveConfiguredBindingRouteMock.getMockImplementation()
         ? resolveConfiguredBindingRouteMock(params)
         : actual.resolveConfiguredBindingRoute(params),
-    resolveRuntimeConversationBindingRoute: (
-      params: Parameters<typeof actual.resolveRuntimeConversationBindingRoute>[0],
+    lookupRuntimeConversationBindingRoute: (
+      params: Parameters<typeof actual.lookupRuntimeConversationBindingRoute>[0],
     ) => {
       const conversation =
         "conversation" in params
@@ -199,7 +199,6 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", async () => {
       if (!bindingRecord || !boundSessionKey) {
         return { bindingRecord: null, route: params.route };
       }
-      touchBindingMock(bindingRecord.bindingId);
       return {
         bindingRecord,
         boundSessionKey,
@@ -211,6 +210,13 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", async () => {
           matchedBy: "binding.channel",
         },
       };
+    },
+    touchRuntimeConversationBindingRoute: ({
+      bindingRecord,
+    }: Parameters<typeof actual.touchRuntimeConversationBindingRoute>[0]) => {
+      if (bindingRecord) {
+        touchBindingMock(bindingRecord.bindingId);
+      }
     },
     ensureConfiguredBindingRouteReady: (
       params: Parameters<typeof actual.ensureConfiguredBindingRouteReady>[0],

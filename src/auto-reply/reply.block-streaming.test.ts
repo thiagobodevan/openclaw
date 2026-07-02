@@ -51,7 +51,10 @@ vi.mock("../runtime.js", () => ({
   defaultRuntime: { log: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 vi.mock("./command-auth.js", () => ({
-  resolveCommandAuthorization: vi.fn(() => ({ isAuthorizedSender: true })),
+  resolveCommandAuthorization: vi.fn(() => ({
+    isAuthorizedSender: true,
+    senderIsOwner: true,
+  })),
 }));
 vi.mock("./reply/directive-handling.defaults.js", () => ({
   resolveDefaultModel: vi.fn(() => ({
@@ -96,6 +99,8 @@ function createTelegramMessage(messageSid: string): MsgContext {
   return {
     Body: "ping",
     From: "+1004",
+    SenderId: "+1004",
+    OwnerAllowFrom: ["+1004"],
     To: "+2000",
     MessageSid: messageSid,
     Provider: "telegram",

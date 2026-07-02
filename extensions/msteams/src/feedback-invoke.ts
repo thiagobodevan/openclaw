@@ -1,6 +1,9 @@
 // Msteams plugin module implements feedback invoke behavior.
 import path from "node:path";
-import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
+import {
+  resolveConversationIdentityAdmission,
+  resolveThreadSessionKeys,
+} from "openclaw/plugin-sdk/routing";
 import { appendRegularFile } from "openclaw/plugin-sdk/security-runtime";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatUnknownError } from "./errors.js";
@@ -87,16 +90,42 @@ export async function runMSTeamsFeedbackInvokeHandler(
   const convType = normalizeOptionalLowercaseString(activity.conversation?.conversationType);
   const isDirectMessage = convType === "personal" || (!convType && !activity.conversation?.isGroup);
   const isChannel = convType === "channel";
+  const teamId = activity.channelData?.team?.id;
+  const chatType = isDirectMessage ? "direct" : isChannel ? "channel" : "group";
 
   const core = getMSTeamsRuntime();
   const route = core.channel.routing.resolveAgentRoute({
     cfg: deps.cfg,
     channel: "msteams",
+    teamId,
     peer: {
-      kind: isDirectMessage ? "direct" : isChannel ? "channel" : "group",
+      kind: chatType,
       id: isDirectMessage ? senderId : conversationId,
     },
   });
+
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: deps.cfg,
+    ctx: {
+      AgentId: route.agentId,
+      AgentRouteMatchedBy: route.matchedBy,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: chatType,
+      ChatId: isDirectMessage ? undefined : conversationId,
+      GroupSpace: teamId,
+      SenderId: senderId,
+      Provider: "msteams",
+      Surface: "msteams",
+      CommandAuthorized: true,
+    },
+  });
+  if (!identityDecision.allowed) {
+    deps.log.debug?.("dropping feedback before transcript write", {
+      reason: identityDecision.reason,
+    });
+    return true;
+  }
 
   // Match the thread-aware session key used by the message handler so feedback
   // events land in the correct per-thread transcript. For channel threads, the
@@ -189,6 +218,9 @@ export async function runMSTeamsFeedbackInvokeHandler(
       sessionKey: route.sessionKey,
       agentId: route.agentId,
       conversationId,
+      routeMatchedBy: route.matchedBy,
+      chatType,
+      senderId,
       feedbackMessageId: messageId,
       userComment,
       log: deps.log,

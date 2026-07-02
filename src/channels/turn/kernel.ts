@@ -1,6 +1,10 @@
 // Channel turn kernel for normalized inbound event dispatch, history, and delivery.
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import {
+  resolveConversationIdentityAdmission,
+  resolveConversationIdentityContractVersion,
+} from "../../auto-reply/reply/conversation-identity-admission.js";
+import {
   clearHistoryEntriesIfEnabled,
   recordPendingHistoryEntryWithMedia,
 } from "../../auto-reply/reply/history.js";
@@ -414,6 +418,10 @@ export async function dispatchAssembledChannelTurn(
   params: AssembledChannelTurn,
 ): Promise<ChannelTurnResult> {
   const replyPipeline = resolveAssembledReplyPipeline(params);
+  const identityContractVersion = resolveConversationIdentityContractVersion(
+    (replyPipeline.replyOptions as { identityContractVersion?: unknown } | undefined)
+      ?.identityContractVersion,
+  );
   return await runPreparedChannelTurnCore(
     {
       channel: params.channel,
@@ -424,6 +432,7 @@ export async function dispatchAssembledChannelTurn(
       recordInboundSession: params.recordInboundSession,
       afterRecord: params.afterRecord,
       record: params.record,
+      identity: identityContractVersion === 1 ? { cfg: params.cfg, contractVersion: 1 } : undefined,
       history: params.history,
       admission: params.admission,
       botLoopProtection: params.botLoopProtection,
@@ -527,61 +536,88 @@ async function runPreparedChannelTurnCoreInTrace<
   options: { suppressObserveOnlyDispatch: boolean },
 ): Promise<ChannelTurnResult<TDispatchResult>> {
   const admission = params.admission ?? ({ kind: "dispatch" } as const);
-  const botLoopDrop = resolveBotLoopProtectionDrop(params);
+  const identityDecision = params.identity
+    ? resolveConversationIdentityAdmission({
+        ctx: params.ctxPayload,
+        cfg: params.identity.cfg,
+      })
+    : undefined;
+  const shouldRecord =
+    resolveConversationIdentityContractVersion(params.identity?.contractVersion) !== 1 ||
+    identityDecision?.allowed === true;
+  // Only admitted turns consume pair-loop budget. Otherwise one denied event
+  // could suppress a later authorized event from the same bot pair.
+  const botLoopDrop = shouldRecord ? resolveBotLoopProtectionDrop(params) : undefined;
   if (botLoopDrop) {
     clearPendingHistoryAfterTurn(params.history);
     return botLoopDrop;
   }
-  emit({
-    ...params,
-    event: {
-      stage: "record",
-      event: "start",
-      messageId: params.messageId,
-      sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
-      admission: admission.kind,
-    },
-  });
-  try {
-    await params.recordInboundSession({
-      storePath: params.storePath,
-      sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
-      ctx: params.ctxPayload,
-      groupResolution: params.record?.groupResolution,
-      createIfMissing: params.record?.createIfMissing,
-      updateLastRoute: params.record?.updateLastRoute,
-      onRecordError: params.record?.onRecordError ?? (() => undefined),
-      trackSessionMetaTask: params.record?.trackSessionMetaTask,
-    });
+  // A denied v1 turn may still dispatch the fixed operator guidance below, but it
+  // must not rewrite session origin or last-route state before that denial.
+  if (!shouldRecord) {
     emit({
       ...params,
       event: {
         stage: "record",
-        event: "done",
+        event: "drop",
         messageId: params.messageId,
         sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
         admission: admission.kind,
+        reason: identityDecision?.reason,
       },
     });
-    await params.afterRecord?.();
-  } catch (err) {
+  } else {
     emit({
       ...params,
       event: {
         stage: "record",
-        event: "error",
+        event: "start",
         messageId: params.messageId,
         sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
         admission: admission.kind,
-        error: err,
       },
     });
     try {
-      await params.onPreDispatchFailure?.(err);
-    } catch {
-      // Preserve the original session-recording error.
+      await params.recordInboundSession({
+        storePath: params.storePath,
+        sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
+        ctx: params.ctxPayload,
+        groupResolution: params.record?.groupResolution,
+        createIfMissing: params.record?.createIfMissing,
+        updateLastRoute: params.record?.updateLastRoute,
+        onRecordError: params.record?.onRecordError ?? (() => undefined),
+        trackSessionMetaTask: params.record?.trackSessionMetaTask,
+      });
+      emit({
+        ...params,
+        event: {
+          stage: "record",
+          event: "done",
+          messageId: params.messageId,
+          sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
+          admission: admission.kind,
+        },
+      });
+      await params.afterRecord?.();
+    } catch (err) {
+      emit({
+        ...params,
+        event: {
+          stage: "record",
+          event: "error",
+          messageId: params.messageId,
+          sessionKey: params.ctxPayload.SessionKey ?? params.routeSessionKey,
+          admission: admission.kind,
+          error: err,
+        },
+      });
+      try {
+        await params.onPreDispatchFailure?.(err);
+      } catch {
+        // Preserve the original session-recording error.
+      }
+      throw err;
     }
-    throw err;
   }
 
   emit({

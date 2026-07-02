@@ -5,6 +5,7 @@ import type {
   MediaUnderstandingOutput,
 } from "../media-understanding/types.js";
 import type { PluginHookChannelContext } from "../plugins/hook-channel-context.types.js";
+import type { AgentRouteMatch } from "../routing/resolve-route.js";
 import type { InputProvenance } from "../sessions/input-provenance.js";
 import type { CommandTurnContext } from "./command-turn-context.js";
 import type { CommandArgs } from "./commands-args.types.js";
@@ -115,6 +116,10 @@ export type MsgContext = {
    * id, such as selected-agent global sessions.
    */
   AgentId?: string;
+  /** Trusted route-binding provenance; never derived from sender/display labels. */
+  AgentRouteMatchedBy?: AgentRouteMatch;
+  /** Exact queued-system-event context owned by this channel interaction. */
+  SystemEventContextKey?: string;
   /**
    * Session-like key used for runtime policy (sandbox/tool policy) when the
    * conversation key intentionally remains broader, such as a main-session DM.

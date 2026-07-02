@@ -13,6 +13,7 @@ import {
   sanitizeQaBusToolCallArguments,
   type QaBusToolCall,
 } from "openclaw/plugin-sdk/qa-channel-protocol";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import {
   buildQaTarget,
   deleteQaBusMessage,
@@ -286,6 +287,32 @@ export async function handleQaInbound(params: {
   if (access.ingress.admission !== "dispatch") {
     return;
   }
+  // QA Channel is an authenticated in-process harness transport. Mark that
+  // trusted boundary explicitly so generated default-agent scenarios remain routable.
+  const inputProvenance = {
+    kind: "internal_system" as const,
+    sourceChannel: params.channelId,
+    sourceTool: "qa_channel_harness",
+  };
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: params.config as OpenClawConfig,
+    ctx: {
+      AgentId: route.agentId,
+      AgentRouteMatchedBy: route.matchedBy,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId ?? params.account.accountId,
+      ChatType: inbound.conversation.kind === "direct" ? "direct" : "group",
+      ChatId: inbound.conversation.kind === "direct" ? undefined : inbound.conversation.id,
+      GroupChannel: inbound.conversation.kind === "channel" ? inbound.conversation.id : undefined,
+      SenderId: inbound.senderId,
+      Provider: params.channelId,
+      Surface: params.channelId,
+      InputProvenance: inputProvenance,
+    },
+  });
+  if (!identityDecision.allowed) {
+    return;
+  }
   const { storePath, body } = buildEnvelope({
     channel: params.channelLabel,
     from: inbound.senderName || inbound.senderId,
@@ -313,6 +340,7 @@ export async function handleQaInbound(params: {
     To: target,
     SessionKey: commandTargets?.sessionKey ?? route.sessionKey,
     CommandTargetSessionKey: commandTargets?.commandTargetSessionKey,
+    AgentRouteMatchedBy: route.matchedBy,
     AccountId: route.accountId ?? params.account.accountId,
     ChatType: inbound.conversation.kind === "direct" ? "direct" : "group",
     WasMentioned: wasMentioned,
@@ -331,6 +359,7 @@ export async function handleQaInbound(params: {
     ThreadParentId: inbound.threadId ? inbound.conversation.id : undefined,
     SenderName: inbound.senderName,
     SenderId: inbound.senderId,
+    InputProvenance: inputProvenance,
     Provider: params.channelId,
     Surface: params.channelId,
     MessageSid: inbound.id,
@@ -387,6 +416,7 @@ export async function handleQaInbound(params: {
       onPartialReply: async (payload) => {
         await preview.update(payload.text ?? "");
       },
+      identityContractVersion: 1,
       onToolStart: (payload) => {
         if (payload.phase && payload.phase !== "start") {
           return;

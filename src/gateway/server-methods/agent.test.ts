@@ -178,6 +178,7 @@ vi.mock("../../infra/agent-events.js", () => ({
 }));
 
 vi.mock("../../agents/subagent-registry-read.js", () => ({
+  getSubagentRunByChildSessionKey: mocks.getLatestSubagentRunByChildSessionKey,
   getLatestSubagentRunByChildSessionKey: mocks.getLatestSubagentRunByChildSessionKey,
 }));
 
@@ -2199,6 +2200,119 @@ describe("gateway agent handler", () => {
     expect(callArgs.message).not.toContain("[Wed 2026-01-28 20:30 EST]");
 
     resetTimeConfig();
+  });
+
+  it("rejects a service-to-personal inter-session transition before Gateway mutation", async () => {
+    mocks.loadSessionEntry.mockClear();
+    mocks.updateSessionStore.mockClear();
+    mocks.registerAgentRunContext.mockClear();
+    mocks.agentCommand.mockClear();
+    mocks.loadConfigReturn = {
+      agents: {
+        list: [{ id: "main", default: true }, { id: "service" }],
+      },
+    };
+    mocks.listAgentIds.mockReturnValue(["main", "service"]);
+    const context = makeContext();
+
+    const respond = await invokeAgent(
+      {
+        message: "cross-identity update",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        inputProvenance: {
+          kind: "inter_session",
+          sourceSessionKey: "agent:service:discord:channel:ops",
+          sourceTool: "sessions_send",
+        },
+        idempotencyKey: "test-service-to-personal-denied",
+      },
+      {
+        context,
+        client: backendGatewayClient(),
+        flushDispatch: false,
+      },
+    );
+
+    expectRespondError(respond, { message: "inter-session identity transition denied" });
+    expect(context.dedupe.size).toBe(0);
+    expect(context.chatAbortControllers.size).toBe(0);
+    expect(context.addChatRun).not.toHaveBeenCalled();
+    expect(mocks.loadSessionEntry).not.toHaveBeenCalled();
+    expect(mocks.updateSessionStore).not.toHaveBeenCalled();
+    expect(mocks.registerAgentRunContext).not.toHaveBeenCalled();
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects a service-to-personal retry before reading a cached accepted response", async () => {
+    mocks.loadConfigReturn = {
+      agents: { list: [{ id: "main", default: true }, { id: "service" }] },
+    };
+    mocks.listAgentIds.mockReturnValue(["main", "service"]);
+    const context = makeContext();
+    context.dedupe.set("agent:test-denied-cached-transition", {
+      ts: Date.now(),
+      ok: true,
+      payload: {
+        runId: "test-denied-cached-transition",
+        sessionKey: "agent:main:main",
+        status: "accepted",
+      },
+    });
+
+    const respond = await invokeAgent(
+      {
+        message: "retry cached cross-identity update",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        inputProvenance: {
+          kind: "inter_session",
+          sourceSessionKey: "agent:service:discord:channel:ops",
+          sourceTool: "sessions_send",
+        },
+        idempotencyKey: "test-denied-cached-transition",
+      },
+      { context, client: backendGatewayClient(), flushDispatch: false },
+    );
+
+    expectRespondError(respond, { message: "inter-session identity transition denied" });
+    expect(context.dedupe.get("agent:test-denied-cached-transition")?.payload).toMatchObject({
+      status: "accepted",
+    });
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+  });
+
+  it("rejects a service-to-personal session-id request before Gateway mutation", async () => {
+    mocks.updateSessionStore.mockClear();
+    mocks.registerAgentRunContext.mockClear();
+    mocks.agentCommand.mockClear();
+    mocks.loadConfigReturn = {
+      agents: { list: [{ id: "main", default: true }, { id: "service" }] },
+    };
+    mocks.listAgentIds.mockReturnValue(["main", "service"]);
+    const context = makeContext();
+
+    const respond = await invokeAgent(
+      {
+        message: "session id cross-identity update",
+        sessionId: "personal-session-id",
+        inputProvenance: {
+          kind: "inter_session",
+          sourceSessionKey: "agent:service:discord:channel:ops",
+          sourceTool: "sessions_send",
+        },
+        idempotencyKey: "test-denied-session-id-transition",
+      },
+      { context, client: backendGatewayClient(), flushDispatch: false },
+    );
+
+    expectRespondError(respond, { message: "inter-session identity transition denied" });
+    expect(context.dedupe.size).toBe(0);
+    expect(context.chatAbortControllers.size).toBe(0);
+    expect(context.addChatRun).not.toHaveBeenCalled();
+    expect(mocks.updateSessionStore).not.toHaveBeenCalled();
+    expect(mocks.registerAgentRunContext).not.toHaveBeenCalled();
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
   });
 
   it("suppresses persisted prompts for subagent announce task-completion handoffs", async () => {
@@ -4777,6 +4891,10 @@ describe("gateway agent handler", () => {
   it("preserves selected-global agent id on cached accepted responses", async () => {
     const context = makeContext();
     mocks.agentCommand.mockClear();
+    mocks.loadConfigReturn = {
+      agents: { list: [{ id: "main", default: true }, { id: "work" }] },
+    };
+    mocks.listAgentIds.mockReturnValue(["main", "work"]);
     context.dedupe.set("agent:cached-global-work", {
       ts: Date.now(),
       ok: true,

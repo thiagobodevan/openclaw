@@ -2580,6 +2580,7 @@ export const dispatchTelegramMessage = async ({
                   },
                 },
                 replyOptions: {
+                  identityContractVersion: 1,
                   skillFilter,
                   disableBlockStreaming,
                   abortSignal: replyAbortController.signal,

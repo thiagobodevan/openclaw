@@ -123,7 +123,12 @@ describe("runAccessStage — dynamic cfg routing (#69546)", () => {
       const exact = cfg.bindings.find((b) => b.match.peer === `direct:${params.peer.id}`);
       const fallback = cfg.bindings.find((b) => !b.match.peer);
       const agent = exact?.agentId ?? fallback?.agentId;
-      return { sessionKey: `qqbot:${params.peer.id}`, accountId: params.accountId, agentId: agent };
+      return {
+        sessionKey: `qqbot:${params.peer.id}`,
+        accountId: params.accountId,
+        agentId: agent,
+        matchedBy: exact ? "binding.peer" : fallback ? "binding.account" : "default",
+      };
     });
 
     const event = buildEvent(peerId);
@@ -150,7 +155,11 @@ describe("runAccessStage — dynamic cfg routing (#69546)", () => {
     const seenCfgs = new Set<unknown>();
     const runtime = buildRuntime((params) => {
       seenCfgs.add(params.cfg);
-      return { sessionKey: `s:${params.peer.id}`, accountId: params.accountId };
+      return {
+        sessionKey: `s:${params.peer.id}`,
+        accountId: params.accountId,
+        matchedBy: "default",
+      };
     });
 
     const cfgA: StubCfg = { bindings: [] };

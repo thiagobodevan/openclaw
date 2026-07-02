@@ -6,9 +6,11 @@ import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import type { SpawnedRunMetadata } from "../../agents/spawned-context.js";
 import type { PromptMode } from "../../agents/system-prompt.types.js";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
+import type { ChatType } from "../../channels/chat-type.js";
 import type { ChannelOutboundTargetMode } from "../../channels/plugins/types.public.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
 import type { PluginHookChannelContext } from "../../plugins/hook-types.js";
+import type { AgentRouteMatch } from "../../routing/resolve-route.js";
 import type { InputProvenance } from "../../sessions/input-provenance.js";
 import type { ExecElevatedDefaults } from "../bash-tools.exec-types.js";
 import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
@@ -36,11 +38,16 @@ type AcpTurnSource = "manual_spawn";
 
 /** Channel/account/thread context carried into an agent run. */
 export type AgentRunContext = {
+  /** Trusted core/gateway handoff already admitted outside public channel ingress. */
+  isInternal?: boolean;
   messageChannel?: string;
   accountId?: string;
+  chatType?: ChatType;
+  routeMatchedBy?: AgentRouteMatch;
   groupId?: string | null;
   groupChannel?: string | null;
   groupSpace?: string | null;
+  memberRoleIds?: string[];
   currentChannelId?: string;
   /** Transport-native chat/conversation ID for plugin hook identity context. */
   chatId?: string;
@@ -126,6 +133,8 @@ export type AgentCommandOpts = {
   bootstrapContextRunKind?: BootstrapContextRunKind;
   internalEvents?: AgentInternalEvent[];
   inputProvenance?: InputProvenance;
+  /** Core-validated parent ownership for an unconfigured live child session. */
+  trustedInterSessionTargetIsLiveOwnedChild?: boolean;
   /** Internal runs can execute against a session without updating visible status/model/usage. */
   sessionEffects?: "visible" | "internal";
   /** Internal handoffs can write transcript turns without changing user-facing model/usage state. */
@@ -173,10 +182,23 @@ export type AgentCommandOpts = {
 /** Restricted option surface for external ingress callsites. */
 export type AgentCommandIngressOpts = Omit<
   AgentCommandOpts,
-  "senderIsOwner" | "allowModelOverride" | "resultMetaOverrides"
+  | "senderIsOwner"
+  | "allowModelOverride"
+  | "resultMetaOverrides"
+  | "trustedInterSessionTargetIsLiveOwnedChild"
 > & {
   /** Trusted sender identity bit for command/channel-action auth; defaults false for ingress. */
   senderIsOwner?: boolean;
   /** Ingress callsites must always pass explicit model-override authorization state. */
   allowModelOverride: boolean;
+};
+
+/** Identity-aware ingress context admitted by current core and plugin callsites. */
+export type AgentCommandIdentityIngressOpts = Omit<AgentCommandIngressOpts, "runContext"> & {
+  /** Versioned identity contract; unversioned ingress remains a legacy compatibility path. */
+  identityContractVersion: 1;
+  /** Set only after the host revalidates the source-to-child ownership edge. */
+  trustedInterSessionTargetIsLiveOwnedChild?: boolean;
+  runContext: AgentRunContext &
+    ({ isInternal: true } | { chatType: ChatType; routeMatchedBy: AgentRouteMatch });
 };

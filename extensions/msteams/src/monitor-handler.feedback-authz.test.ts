@@ -14,6 +14,8 @@ const feedbackReflectionMockState = vi.hoisted(() => ({
   runFeedbackReflection: vi.fn(),
 }));
 
+type ResolveAgentRoute = PluginRuntime["channel"]["routing"]["resolveAgentRoute"];
+
 vi.mock("./monitor-handler/message-handler.js", () => ({
   createMSTeamsMessageHandler: () => async () => {},
 }));
@@ -32,7 +34,20 @@ vi.mock("./feedback-reflection.js", async () => {
   };
 });
 
-function createRuntimeStub(readAllowFromStore: ReturnType<typeof vi.fn>): PluginRuntime {
+const defaultResolveAgentRoute: ResolveAgentRoute = ({ peer }) => ({
+  sessionKey: `msteams:${peer?.kind ?? "group"}:${peer?.id ?? "unknown"}`,
+  mainSessionKey: "agent:default:main",
+  agentId: "default",
+  accountId: "default",
+  channel: "msteams",
+  lastRoutePolicy: "session",
+  matchedBy: "default",
+});
+
+function createRuntimeStub(
+  readAllowFromStore: ReturnType<typeof vi.fn>,
+  resolveAgentRoute: ResolveAgentRoute = defaultResolveAgentRoute,
+): PluginRuntime {
   return {
     logging: {
       shouldLogVerbose: () => false,
@@ -51,10 +66,7 @@ function createRuntimeStub(readAllowFromStore: ReturnType<typeof vi.fn>): Plugin
         upsertPairingRequest: vi.fn(async () => null),
       },
       routing: {
-        resolveAgentRoute: ({ peer }: { peer: { kind: string; id: string } }) => ({
-          sessionKey: `msteams:${peer.kind}:${peer.id}`,
-          agentId: "default",
-        }),
+        resolveAgentRoute,
       },
       session: {
         resolveStorePath: (storePath?: string) => storePath ?? tmpdir(),
@@ -66,9 +78,10 @@ function createRuntimeStub(readAllowFromStore: ReturnType<typeof vi.fn>): Plugin
 function createDeps(params: {
   cfg: OpenClawConfig;
   readAllowFromStore?: ReturnType<typeof vi.fn>;
+  resolveAgentRoute?: ResolveAgentRoute;
 }): MSTeamsMessageHandlerDeps {
   const readAllowFromStore = params.readAllowFromStore ?? vi.fn(async () => []);
-  setMSTeamsRuntime(createRuntimeStub(readAllowFromStore));
+  setMSTeamsRuntime(createRuntimeStub(readAllowFromStore, params.resolveAgentRoute));
   return createMSTeamsMessageHandlerDeps({
     cfg: params.cfg,
     runtime: { error: vi.fn() } as unknown as RuntimeEnv,
@@ -140,6 +153,7 @@ async function expectFileMissing(filePath: string) {
 async function withFeedbackHandler(params: {
   cfg: OpenClawConfig;
   context: Parameters<typeof createFeedbackInvokeContext>[0];
+  resolveAgentRoute?: ResolveAgentRoute;
   assertResult: (args: { tmpDir: string }) => Promise<void>;
 }) {
   const tmpDir = await mkdtemp(path.join(tmpdir(), "openclaw-msteams-feedback-"));
@@ -149,6 +163,7 @@ async function withFeedbackHandler(params: {
         ...params.cfg,
         session: { store: tmpDir },
       },
+      resolveAgentRoute: params.resolveAgentRoute,
     });
     await runMSTeamsFeedbackInvokeHandler(createFeedbackInvokeContext(params.context), deps);
     await params.assertResult({ tmpDir });
@@ -166,6 +181,7 @@ describe("msteams feedback invoke authz", () => {
   it("records feedback for an allowlisted DM sender", async () => {
     await withFeedbackHandler({
       cfg: {
+        commands: { ownerAllowFrom: ["owner-aad"] },
         channels: {
           msteams: {
             dmPolicy: "allowlist",
@@ -214,9 +230,40 @@ describe("msteams feedback invoke authz", () => {
     });
   });
 
+  it("carries the admitted direct sender and route into negative-feedback reflection", async () => {
+    await withFeedbackHandler({
+      cfg: {
+        commands: { ownerAllowFrom: ["owner-aad"] },
+        channels: {
+          msteams: {
+            dmPolicy: "allowlist",
+            allowFrom: ["owner-aad"],
+          },
+        },
+      } as OpenClawConfig,
+      context: {
+        reaction: "dislike",
+        conversationId: "a:personal-chat;messageid=bot-msg-1",
+        conversationType: "personal",
+        senderId: "owner-aad",
+        senderName: "Owner",
+      },
+      assertResult: async () => {
+        expect(feedbackReflectionMockState.runFeedbackReflection).toHaveBeenCalledWith(
+          expect.objectContaining({
+            routeMatchedBy: "default",
+            chatType: "direct",
+            senderId: "owner-aad",
+          }),
+        );
+      },
+    });
+  });
+
   it("keeps DM feedback allowed when team route allowlists exist", async () => {
     await withFeedbackHandler({
       cfg: {
+        commands: { ownerAllowFrom: ["owner-aad"] },
         channels: {
           msteams: {
             dmPolicy: "allowlist",
@@ -332,5 +379,77 @@ describe("msteams feedback invoke authz", () => {
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it("does not record allowlisted shared feedback on the default personal route", async () => {
+    await withFeedbackHandler({
+      cfg: {
+        channels: {
+          msteams: {
+            groupPolicy: "allowlist",
+            groupAllowFrom: ["owner-aad"],
+          },
+        },
+      } as OpenClawConfig,
+      context: {
+        reaction: "like",
+        conversationId: "19:group@thread.tacv2;messageid=bot-msg-1",
+        conversationType: "groupChat",
+        senderId: "owner-aad",
+        teamId: "team-1",
+      },
+      assertResult: async ({ tmpDir }) => {
+        await expectFileMissing(path.join(tmpDir, "msteams_group_19_group_thread_tacv2.jsonl"));
+        expect(feedbackReflectionMockState.runFeedbackReflection).not.toHaveBeenCalled();
+      },
+    });
+  });
+
+  it("uses a team-bound service route for shared feedback", async () => {
+    const resolveAgentRoute = vi.fn<ResolveAgentRoute>(({ peer, teamId }) => ({
+      sessionKey: `msteams:${peer?.kind ?? "group"}:${peer?.id ?? "unknown"}`,
+      mainSessionKey: "agent:service-bot:main",
+      agentId: teamId === "team-1" ? "service-bot" : "default",
+      accountId: "default",
+      channel: "msteams",
+      lastRoutePolicy: "session",
+      matchedBy: teamId === "team-1" ? "binding.team" : "default",
+    }));
+
+    await withFeedbackHandler({
+      cfg: {
+        agents: {
+          list: [{ id: "default", default: true }, { id: "service-bot" }],
+        },
+        channels: {
+          msteams: {
+            groupPolicy: "allowlist",
+            groupAllowFrom: ["owner-aad"],
+          },
+        },
+      } as OpenClawConfig,
+      context: {
+        reaction: "like",
+        conversationId: "19:group@thread.tacv2;messageid=bot-msg-1",
+        conversationType: "groupChat",
+        senderId: "owner-aad",
+        teamId: "team-1",
+        comment: "service feedback",
+      },
+      resolveAgentRoute,
+      assertResult: async ({ tmpDir }) => {
+        expect(resolveAgentRoute).toHaveBeenCalledWith(
+          expect.objectContaining({ teamId: "team-1" }),
+        );
+        const transcript = await readFile(
+          path.join(tmpDir, "msteams_group_19_group_thread_tacv2.jsonl"),
+          "utf-8",
+        );
+        expect(JSON.parse(transcript.trim())).toMatchObject({
+          agentId: "service-bot",
+          comment: "service feedback",
+        });
+      },
+    });
   });
 });

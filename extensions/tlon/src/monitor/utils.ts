@@ -173,6 +173,18 @@ export async function resolveTlonCommandAuthorizationWithIngress(params: {
   });
 }
 
+export function resolveTlonOwnerAllowFrom(params: {
+  senderShip: string;
+  ownerShip: string | null | undefined;
+  isGroup: boolean;
+}): string[] {
+  if (params.isGroup || !params.ownerShip) {
+    return [];
+  }
+  const senderShip = normalizeShip(params.senderShip);
+  return senderShip === normalizeShip(params.ownerShip) ? [senderShip] : [];
+}
+
 export function isGroupInviteAllowed(
   inviterShip: string,
   allowlist: string[] | undefined,

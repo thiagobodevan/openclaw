@@ -25,6 +25,15 @@ export function getAccessControlTestConfig(): Record<string, unknown> {
 export function setupAccessControlTestHarness(): void {
   beforeEach(() => {
     config = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "service" }],
+      },
+      bindings: [
+        {
+          agentId: "service",
+          match: { channel: "whatsapp", accountId: "default" },
+        },
+      ],
       channels: {
         whatsapp: {
           dmPolicy: "pairing",

@@ -1,5 +1,6 @@
 // Tests get-reply message hooks before and after agent execution.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import type { ApplyMediaUnderstandingResult } from "../../media-understanding/apply.js";
 import type { MsgContext } from "../templating.js";
@@ -68,6 +69,8 @@ function emptyAliasIndex() {
 
 function buildCtx(overrides: Partial<MsgContext> = {}): MsgContext {
   return buildGetReplyGroupCtx({
+    AgentId: "main",
+    AgentRouteMatchedBy: "binding.channel",
     Body: "<media:audio>",
     BodyForAgent: "<media:audio>",
     RawBody: "<media:audio>",
@@ -77,6 +80,16 @@ function buildCtx(overrides: Partial<MsgContext> = {}): MsgContext {
     MediaUrl: "https://example.test/voice.ogg",
     MediaType: "audio/ogg",
     ...overrides,
+  });
+}
+
+function withMessageHookConfig(config: OpenClawConfig = {}): OpenClawConfig {
+  return withFastReplyConfig({
+    ...config,
+    agents: {
+      ...config.agents,
+      list: [{ id: "personal", default: true }, { id: "main" }],
+    },
   });
 }
 
@@ -166,7 +179,7 @@ describe("getReplyFromConfig message hooks", () => {
     await resetMessageHookTestState();
     const ctx = buildCtx();
 
-    await getReplyFromConfig(ctx, undefined, withFastReplyConfig({}));
+    await getReplyFromConfig(ctx, undefined, withMessageHookConfig());
 
     enrichedHookCase = {
       transcribed: hookEventCall(0),
@@ -284,7 +297,7 @@ describe("getReplyFromConfig message hooks", () => {
           MediaUrl: undefined,
         }),
         undefined,
-        withFastReplyConfig({
+        withMessageHookConfig({
           agents: {
             defaults: {
               model: "anthropic/claude-opus-4-6",
@@ -377,7 +390,7 @@ describe("getReplyFromConfig message hooks", () => {
         MediaRemoteHost: "user@gateway-host",
       }),
       undefined,
-      withFastReplyConfig({}),
+      withMessageHookConfig(),
     );
 
     expect(order).toEqual(["stage", "understand"]);
@@ -398,7 +411,7 @@ describe("getReplyFromConfig message hooks", () => {
       ctx.BodyForAgent = "<media:audio>";
     });
 
-    await getReplyFromConfig(buildCtx(), undefined, withFastReplyConfig({}));
+    await getReplyFromConfig(buildCtx(), undefined, withMessageHookConfig());
 
     expect(mocks.createInternalHookEvent).toHaveBeenCalledTimes(1);
     const preprocessed = hookEventCall(0);
@@ -411,7 +424,7 @@ describe("getReplyFromConfig message hooks", () => {
   it("skips message hooks in fast test mode", async () => {
     process.env.OPENCLAW_TEST_FAST = "1";
 
-    await getReplyFromConfig(buildCtx(), undefined, withFastReplyConfig({}));
+    await getReplyFromConfig(buildCtx(), undefined, withMessageHookConfig());
 
     expect(mocks.applyMediaUnderstanding).not.toHaveBeenCalled();
     expect(mocks.applyLinkUnderstanding).not.toHaveBeenCalled();
@@ -423,7 +436,7 @@ describe("getReplyFromConfig message hooks", () => {
     await getReplyFromConfig(
       buildCtx({ SessionKey: undefined }),
       undefined,
-      withFastReplyConfig({}),
+      withMessageHookConfig(),
     );
 
     expect(mocks.createInternalHookEvent).not.toHaveBeenCalled();
@@ -447,7 +460,7 @@ describe("getReplyFromConfig message hooks", () => {
         StickerMediaIncluded: undefined,
       }),
       undefined,
-      withFastReplyConfig({}),
+      withMessageHookConfig(),
     );
 
     expect(mocks.applyMediaUnderstanding).not.toHaveBeenCalled();
@@ -475,7 +488,7 @@ describe("getReplyFromConfig message hooks", () => {
         SkipStickerMediaUnderstanding: true,
       }),
       undefined,
-      withFastReplyConfig({}),
+      withMessageHookConfig(),
     );
 
     expect(mocks.applyMediaUnderstanding).not.toHaveBeenCalled();
@@ -500,7 +513,7 @@ describe("getReplyFromConfig message hooks", () => {
         SkipStickerMediaUnderstanding: true,
       }),
       undefined,
-      withFastReplyConfig({}),
+      withMessageHookConfig(),
     );
 
     expect(mocks.applyMediaUnderstanding).toHaveBeenCalledOnce();
@@ -511,7 +524,7 @@ describe("getReplyFromConfig message hooks", () => {
       new Error("Cannot find module '/tmp/openclaw/dist/media-understanding/apply.runtime-old.js'"),
     );
 
-    const reply = await getReplyFromConfig(buildCtx(), undefined, withFastReplyConfig({}));
+    const reply = await getReplyFromConfig(buildCtx(), undefined, withMessageHookConfig());
 
     expect(reply).toEqual({ text: "ok" });
     expect(mocks.applyMediaUnderstanding).toHaveBeenCalledTimes(1);
@@ -552,7 +565,7 @@ describe("getReplyFromConfig message hooks", () => {
         StickerMediaIncluded: undefined,
       }),
       undefined,
-      withFastReplyConfig({}),
+      withMessageHookConfig(),
     );
 
     expect(reply).toEqual({ text: "ok" });

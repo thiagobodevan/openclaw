@@ -2,8 +2,9 @@
 import type { GlobalShortcut, MessageShortcut, SlackShortcutMiddlewareArgs } from "@slack/bolt";
 import { requestHeartbeat } from "openclaw/plugin-sdk/heartbeat-runtime";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
-import { authorizeSlackSystemEventSender } from "../auth.js";
+import { authorizeSlackSystemEventSender, resolveSlackSenderIsOwner } from "../auth.js";
 import type { SlackMonitorContext } from "../context.js";
+import { resolveSlackSystemEventIdentityPreflight } from "./system-event-context.js";
 
 type SlackShortcutBody = GlobalShortcut | MessageShortcut;
 
@@ -43,6 +44,18 @@ async function handleSlackShortcut(params: {
     return;
   }
   const threadTs = messageBody ? resolveMessageThreadTs(messageBody) : undefined;
+  if (
+    !resolveSlackSystemEventIdentityPreflight({
+      ctx: params.ctx,
+      senderId: userId,
+      channelId,
+      channelType: isMessageShortcut ? undefined : "im",
+      threadTs,
+      eventKind: "shortcut",
+    })
+  ) {
+    return;
+  }
   const auth = await authorizeSlackSystemEventSender({
     ctx: params.ctx,
     senderId: userId,
@@ -76,18 +89,30 @@ async function handleSlackShortcut(params: {
     messageText: messageBody?.message.text,
     responseUrl: messageBody?.response_url,
   };
-  const sessionKey = params.ctx.resolveSlackSystemEventSessionKey({
+  const route = await params.ctx.resolveSlackSystemEventRouteReady({
     channelId,
     channelType: auth.channelType,
     senderId: userId,
+    ...(auth.channelType === "im"
+      ? { senderIsOwner: resolveSlackSenderIsOwner(params.ctx, userId) }
+      : {}),
     threadTs,
   });
+  if (!route) {
+    params.ctx.runtime.log?.(
+      `slack:interaction drop shortcut callback=${callbackId} reason=configured-binding-unavailable`,
+    );
+    return;
+  }
+  const sessionKey = route.sessionKey;
   const contextKey = [
     "slack:interaction:shortcut",
     interactionType,
     callbackId,
     channelId,
     messageTs,
+    userId,
+    body.trigger_id,
     body.action_ts,
   ]
     .filter(Boolean)
@@ -99,6 +124,12 @@ async function handleSlackShortcut(params: {
   const queued = enqueueSystemEvent(params.formatSystemEvent(eventPayload), {
     sessionKey,
     contextKey,
+    contextMode: "exact",
+    actor: {
+      channel: "slack",
+      accountId: params.ctx.accountId,
+      senderId: userId,
+    },
     deliveryContext: {
       channel: "slack",
       to: auth.channelType === "im" ? `user:${userId}` : `channel:${channelId}`,
@@ -108,11 +139,30 @@ async function handleSlackShortcut(params: {
   });
   if (queued) {
     requestHeartbeat({
-      source: "hook",
+      source: "channel-interaction",
       intent: "immediate",
       reason: "hook:slack-interaction",
       sessionKey,
       heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        accountId: params.ctx.accountId,
+        routeMatchedBy: route.matchedBy,
+        chatType: route.chatType,
+        systemEventContextKey: contextKey,
+        groupId: route.chatType === "direct" ? undefined : channelId,
+        groupChannel: messageBody?.channel.name,
+        groupSpace: body.team?.id ?? body.user.team_id,
+        senderId: userId,
+        resolveCurrentRoute: (cfg) =>
+          params.ctx.resolveSlackSystemEventCurrentRoute?.({
+            cfg,
+            channelId,
+            channelType: auth.channelType,
+            senderId: userId,
+            threadTs,
+          }) ?? null,
+      },
     });
   }
 }

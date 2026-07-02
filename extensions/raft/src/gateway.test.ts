@@ -30,35 +30,40 @@ function createContext(accountId = "default") {
     lastStopAt: null,
     lastError: null,
   };
-  const run = vi.fn(async (params: {
-    raw: unknown;
-    adapter: {
-      ingest: (raw: unknown) => {
-        id: string;
-        timestamp: number;
-        rawText: string;
-        textForAgent: string;
-        textForCommands: string;
-      };
-      resolveTurn: (input: {
-        id: string;
-        timestamp: number;
-        rawText: string;
-        textForAgent: string;
-        textForCommands: string;
-      }) => Promise<{
-        delivery: {
-          deliver: () => Promise<{ visibleReplySent: false }>;
+  const run = vi.fn(
+    async (params: {
+      raw: unknown;
+      adapter: {
+        ingest: (raw: unknown) => {
+          id: string;
+          timestamp: number;
+          rawText: string;
+          textForAgent: string;
+          textForCommands: string;
         };
-      }>;
-    };
-  }) => {
-    const input = params.adapter.ingest(params.raw);
-    const turn = await params.adapter.resolveTurn(input);
-    await turn.delivery.deliver();
-  });
+        resolveTurn: (input: {
+          id: string;
+          timestamp: number;
+          rawText: string;
+          textForAgent: string;
+          textForCommands: string;
+        }) => Promise<{
+          delivery: {
+            deliver: () => Promise<{ visibleReplySent: false }>;
+          };
+          replyOptions: { identityContractVersion: 1 };
+        }>;
+      };
+    }) => {
+      const input = params.adapter.ingest(params.raw);
+      const turn = await params.adapter.resolveTurn(input);
+      await turn.delivery.deliver();
+    },
+  );
   const ctx = {
-    cfg: {},
+    cfg: {
+      agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
+    },
     accountId,
     account: {
       accountId,
@@ -83,6 +88,7 @@ function createContext(accountId = "default") {
         resolveAgentRoute: vi.fn(() => ({
           agentId: "main",
           sessionKey: `agent:main:raft:${accountId}`,
+          matchedBy: "binding.account" as const,
         })),
       },
       inbound: {
@@ -166,6 +172,20 @@ describe("Raft wake gateway", () => {
 
     controller.abort();
     await start;
+  });
+
+  it("rejects startup without an explicit non-default service-agent binding", async () => {
+    const { ctx, wakeDedupe } = createContext();
+    Object.defineProperty(ctx, "cfg", {
+      value: { agents: { list: [{ id: "main", default: true }] } },
+    });
+    const spawnBridge = vi.fn(() => new FakeBridge());
+
+    await expect(startRaftGatewayAccount(ctx, { spawnBridge, wakeDedupe })).rejects.toThrow(
+      "explicit binding to a non-default service agent",
+    );
+
+    expect(spawnBridge).not.toHaveBeenCalled();
   });
 
   it("accepts authenticated content-free wake hints and dedupes retry delivery ids", async () => {
@@ -279,6 +299,8 @@ describe("Raft wake gateway", () => {
       `raft --profile 'main'"'"'; touch /tmp/pwn; echo '"'"'' message check`,
     );
     expect(input?.rawText).not.toContain("wake-1");
+    const turn = input ? await run.mock.calls[0]?.[0].adapter.resolveTurn(input) : undefined;
+    expect(turn?.replyOptions).toEqual({ identityContractVersion: 1 });
 
     controller.abort();
     await start;
@@ -485,5 +507,4 @@ describe("Raft wake gateway", () => {
       resetPluginStateStoreForTests();
     }
   });
-
 });

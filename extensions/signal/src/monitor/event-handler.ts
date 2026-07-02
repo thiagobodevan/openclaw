@@ -43,7 +43,11 @@ import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
 import { dispatchInboundMessage } from "openclaw/plugin-sdk/reply-runtime";
 import { createReplyDispatcherWithTyping } from "openclaw/plugin-sdk/reply-runtime";
 import { settleReplyDispatcher } from "openclaw/plugin-sdk/reply-runtime";
-import { resolveAgentRoute, resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
+import {
+  resolveAgentRoute,
+  resolveConversationIdentityAdmission,
+  resolveInboundLastRouteSessionKey,
+} from "openclaw/plugin-sdk/routing";
 import {
   danger,
   logVerbose,
@@ -325,6 +329,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       route: {
         agentId: route.agentId,
         accountId: route.accountId,
+        matchedBy: route.matchedBy,
         routeSessionKey: route.sessionKey,
       },
       reply: {
@@ -581,6 +586,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
                 dispatcher,
                 replyOptions: {
                   ...replyOptions,
+                  identityContractVersion: 1,
                   disableBlockStreaming:
                     typeof deps.blockStreaming === "boolean" ? !deps.blockStreaming : undefined,
                   ...(statusReactionController
@@ -702,6 +708,35 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     const messageId = params.reaction.targetSentTimestamp
       ? String(params.reaction.targetSentTimestamp)
       : "unknown";
+    const senderPeerId = resolveSignalPeerId(params.sender);
+    const route = resolveSignalInboundRoute({
+      cfg: deps.cfg,
+      accountId: deps.accountId,
+      isGroup,
+      groupId,
+      senderPeerId,
+    });
+    const senderId = formatSignalSenderId(params.sender);
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg: deps.cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: isGroup ? "group" : "direct",
+        ChatId: groupId,
+        GroupSubject: groupName,
+        SenderId: senderId,
+        Provider: "signal",
+        Surface: "signal",
+        CommandAuthorized: true,
+      },
+    });
+    if (!identityDecision.allowed) {
+      logVerbose(`Blocked signal reaction identity (${identityDecision.reason})`);
+      return true;
+    }
     const conversationKey = resolveSignalApprovalConversationKey(
       groupId ? `group:${groupId}` : `signal:${resolveSignalRecipient(params.sender)}`,
     );
@@ -713,7 +748,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         conversationKey,
         messageId,
         reactionKey: emojiLabel,
-        actorId: formatSignalSenderId(params.sender),
+        actorId: senderId,
         targetAuthor: params.reaction.targetAuthor,
         targetAuthorUuid: params.reaction.targetAuthorUuid,
         logVerboseMessage: logVerbose,
@@ -739,14 +774,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       return true;
     }
 
-    const senderPeerId = resolveSignalPeerId(params.sender);
-    const route = resolveSignalInboundRoute({
-      cfg: deps.cfg,
-      accountId: deps.accountId,
-      isGroup,
-      groupId,
-      senderPeerId,
-    });
     const groupLabel = isGroup ? `${groupName ?? "Signal Group"} id:${groupId}` : undefined;
     const text = deps.buildSignalReactionSystemEventText({
       emojiLabel,
@@ -755,7 +782,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       targetLabel: targets[0]?.display,
       groupLabel,
     });
-    const senderId = formatSignalSenderId(params.sender);
     const contextKey = [
       "signal",
       "reaction",
@@ -770,6 +796,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     enqueueSystemEvent(text, {
       sessionKey: route.sessionKey,
       contextKey,
+      actor: { channel: "signal", accountId: deps.accountId, senderId },
     });
     return true;
   }
@@ -891,6 +918,36 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     }
     const senderIdLine = formatSignalPairingIdLine(sender);
     const groupName = dataMessage.groupInfo?.groupName ?? undefined;
+    const commandAuthorized = commandAccess.authorized;
+    const route = resolveSignalInboundRoute({
+      cfg: deps.cfg,
+      accountId: deps.accountId,
+      isGroup,
+      groupId,
+      senderPeerId,
+    });
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg: deps.cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: isGroup ? "group" : "direct",
+        ChatId: isGroup ? groupId : undefined,
+        SenderId: senderDisplay,
+        SenderE164: senderRecipient,
+        Provider: "signal",
+        Surface: "signal",
+        CommandAuthorized: commandAuthorized,
+      },
+    });
+    if (!identityDecision.allowed) {
+      logVerbose(
+        `signal: drop message before pairing, history, or attachment preparation (${identityDecision.reason})`,
+      );
+      return;
+    }
 
     if (!isGroup) {
       const allowedDirectMessage = await handleSignalDirectMessageAccess({
@@ -929,7 +986,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       }
     }
 
-    const commandAuthorized = commandAccess.authorized;
     if (isGroup && commandAccess.shouldBlockControlCommand) {
       logInboundDrop({
         log: logVerbose,
@@ -940,13 +996,6 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       return;
     }
 
-    const route = resolveSignalInboundRoute({
-      cfg: deps.cfg,
-      accountId: deps.accountId,
-      isGroup,
-      groupId,
-      senderPeerId,
-    });
     const mentionRegexes = buildMentionRegexes(deps.cfg, route.agentId);
     const wasMentioned = isGroup && matchesMentionPatterns(messageText, mentionRegexes);
     const requireMention =

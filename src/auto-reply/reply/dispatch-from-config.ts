@@ -91,6 +91,7 @@ import {
 } from "../../plugins/conversation-binding.js";
 import { getGlobalHookRunner, getGlobalPluginRegistry } from "../../plugins/hook-runner-global.js";
 import type { PluginHookReplyDispatchEvent } from "../../plugins/hook-types.js";
+import { EXTERNAL_CONVERSATION_IDENTITY_DENIAL } from "../../routing/conversation-identity.js";
 import { isAcpSessionKey } from "../../routing/session-key.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
@@ -132,6 +133,10 @@ import {
   type CommandSessionMetadataChange,
 } from "./command-session-metadata.js";
 import { resolveConversationBindingContextFromMessage } from "./conversation-binding-input.js";
+import {
+  resolveConversationIdentityAdmission,
+  resolveConversationIdentityContractVersion,
+} from "./conversation-identity-admission.js";
 import {
   createInternalHookEvent,
   loadSessionStore,
@@ -1098,6 +1103,29 @@ export async function dispatchReplyFromConfig(
   if (params.replyOptions?.abortSignal?.aborted) {
     return {
       queuedFinal: false,
+      counts: dispatcher.getQueuedCounts(),
+    };
+  }
+  const replyConfig = withFullRuntimeReplyConfig(
+    params.configOverride ? (applyMergePatch(cfg, params.configOverride) as OpenClawConfig) : cfg,
+  );
+  const identityContractVersion = resolveConversationIdentityContractVersion(
+    (params.replyOptions as { identityContractVersion?: unknown } | undefined)
+      ?.identityContractVersion,
+  );
+  const enforceConversationIdentity = identityContractVersion === 1;
+  const conversationIdentity = enforceConversationIdentity
+    ? resolveConversationIdentityAdmission({
+        ctx,
+        cfg: replyConfig,
+      })
+    : undefined;
+  if (conversationIdentity && !conversationIdentity.allowed) {
+    const queuedFinal = dispatcher.sendFinalReply({
+      text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+    });
+    return {
+      queuedFinal,
       counts: dispatcher.getQueuedCounts(),
     };
   }
@@ -3069,9 +3097,6 @@ export async function dispatchReplyFromConfig(
       params.replyResolver ??
       (await traceReplyPhase("reply.load_reply_resolver", () => loadGetReplyFromConfigRuntime()))
         .getReplyFromConfig;
-    const replyConfig = withFullRuntimeReplyConfig(
-      params.configOverride ? (applyMergePatch(cfg, params.configOverride) as OpenClawConfig) : cfg,
-    );
     recordAgentDispatchStarted();
     const replyResult = await runWithDispatchAbortSignal(getDispatchAbortSignal(), () =>
       traceReplyPhase("reply.run_reply_resolver", () =>
@@ -3079,6 +3104,7 @@ export async function dispatchReplyFromConfig(
           ctx,
           {
             ...getReplyOptions(),
+            ...(conversationIdentity ? { conversationIdentityDecision: conversationIdentity } : {}),
             sourceReplyDeliveryMode,
             sessionPromptSourceReplyDeliveryMode: sessionStableSourceReplyDeliveryMode,
             ...({

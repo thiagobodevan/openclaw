@@ -18,6 +18,7 @@ import type { ResolvedZalouserAccount, ZaloInboundMessage } from "./types.js";
 import {
   listZaloFriendsMock,
   listZaloGroupsMock,
+  resolveZaloGroupContextMock,
   startZaloListenerMock,
 } from "./zalo-js.test-mocks.js";
 
@@ -40,6 +41,7 @@ function createAccount(): ResolvedZalouserAccount {
 
 function createConfig(): OpenClawConfig {
   return {
+    agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
     channels: {
       zalouser: {
         enabled: true,
@@ -87,6 +89,8 @@ function dispatchReplyCall(mock: unknown, index = 0): DispatchReplyCallArg {
 function installRuntime(params: {
   commandAuthorized?: boolean;
   replyPayload?: { text?: string; mediaUrl?: string; mediaUrls?: string[] };
+  routeAgentId?: string;
+  routeMatchedBy?: "default" | "binding.channel";
   resolveCommandAuthorizedFromAuthorizers?: (params: {
     useAccessGroups: boolean;
     authorizers: Array<{ configured: boolean; allowed: boolean }>;
@@ -113,15 +117,20 @@ function installRuntime(params: {
   const resolveAgentRoute = vi.fn((input: { peer?: { kind?: string; id?: string } }) => {
     const peerKind = input.peer?.kind === "direct" ? "direct" : "group";
     const peerId = input.peer?.id ?? "1";
+    const agentId = params.routeAgentId ?? "main";
     return {
-      agentId: "main",
+      agentId,
       sessionKey:
-        peerKind === "direct" ? "agent:main:main" : `agent:main:zalouser:${peerKind}:${peerId}`,
+        peerKind === "direct"
+          ? `agent:${agentId}:main`
+          : `agent:${agentId}:zalouser:${peerKind}:${peerId}`,
       accountId: "default",
-      mainSessionKey: "agent:main:main",
+      mainSessionKey: `agent:${agentId}:main`,
+      matchedBy: params.routeMatchedBy ?? "binding.channel",
     };
   });
   const readAllowFromStore = vi.fn(async () => []);
+  const upsertPairingRequest = vi.fn(async () => ({ code: "PAIR", created: true }));
   const readSessionUpdatedAt = vi.fn(
     (_params?: { storePath: string; sessionKey: string }): number | undefined => undefined,
   );
@@ -226,7 +235,7 @@ function installRuntime(params: {
     channel: {
       pairing: {
         readAllowFromStore,
-        upsertPairingRequest: vi.fn(async () => ({ code: "PAIR", created: true })),
+        upsertPairingRequest,
         buildPairingReply: vi.fn(() => "pair"),
       },
       commands: {
@@ -293,6 +302,7 @@ function installRuntime(params: {
     resolveAgentRoute,
     resolveCommandAuthorizedFromAuthorizers,
     readAllowFromStore,
+    upsertPairingRequest,
     readSessionUpdatedAt,
     buildAgentSessionKey,
   };
@@ -367,6 +377,7 @@ describe("zalouser monitor group mention gating", () => {
     listZaloFriendsMock.mockResolvedValue([]);
     listZaloGroupsMock.mockReset();
     listZaloGroupsMock.mockResolvedValue([]);
+    resolveZaloGroupContextMock.mockClear();
     startZaloListenerMock.mockReset();
     startZaloListenerMock.mockResolvedValue({ stop: vi.fn() });
   });
@@ -771,6 +782,41 @@ describe("zalouser monitor group mention gating", () => {
     expect(callArg?.ctx?.To).toBe("zalouser:group:g-attacker-001");
   });
 
+  it("hydrates an omitted group name before explicitly enabled name matching", async () => {
+    resolveZaloGroupContextMock.mockResolvedValueOnce({
+      groupId: "g-attacker-001",
+      name: "Trusted Team",
+      members: [],
+    });
+    const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+    });
+
+    await processMessageWithDefaults({
+      message: createGroupMessage({
+        threadId: "g-attacker-001",
+        groupName: undefined,
+        senderId: "666",
+        hasAnyMention: true,
+        wasExplicitlyMentioned: true,
+        content: "ping @bot",
+      }),
+      account: {
+        ...createAccount(),
+        config: {
+          ...createAccount().config,
+          dangerouslyAllowNameMatching: true,
+          groupPolicy: "allowlist",
+          groupAllowFrom: ["*"],
+          groups: { "Trusted Team": { enabled: true } },
+        },
+      },
+    });
+
+    expect(resolveZaloGroupContextMock).toHaveBeenCalledWith("default", "g-attacker-001");
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledTimes(1);
+  });
+
   it("does not resolve mutable allowlist or group names at startup by default", async () => {
     listZaloFriendsMock.mockResolvedValue([{ userId: "999", displayName: "Alice" }]);
     listZaloGroupsMock.mockResolvedValue([{ groupId: "g-other", name: "Trusted Team" }]);
@@ -837,6 +883,49 @@ describe("zalouser monitor group mention gating", () => {
     expect(sessionKeyInput?.dmScope).toBe("per-channel-peer");
     const callArg = dispatchReplyCall(dispatchReplyWithBufferedBlockDispatcher);
     expect(callArg?.ctx?.SessionKey).toBe("agent:main:zalouser:direct:321");
+  });
+
+  it("denies an unbound shared route before provider context lookup", async () => {
+    const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+      routeAgentId: "personal",
+      routeMatchedBy: "default",
+    });
+
+    await testing.processMessage({
+      message: createGroupMessage({ groupName: undefined }),
+      account: createAccount(),
+      config: { agents: { list: [{ id: "personal", default: true }] } },
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(resolveZaloGroupContextMock).not.toHaveBeenCalled();
+    expect(sendDeliveredZalouserMock).not.toHaveBeenCalled();
+    expect(sendSeenZalouserMock).not.toHaveBeenCalled();
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+  });
+
+  it("does not pair a DM onto the default personal route", async () => {
+    const { upsertPairingRequest, dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
+      commandAuthorized: false,
+      routeAgentId: "personal",
+      routeMatchedBy: "default",
+    });
+    const account = createAccount();
+
+    await testing.processMessage({
+      message: createDmMessage({ senderId: "guest" }),
+      account: {
+        ...account,
+        config: { ...account.config, dmPolicy: "pairing", allowFrom: [] },
+      },
+      config: { agents: { list: [{ id: "personal", default: true }] } },
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(upsertPairingRequest).not.toHaveBeenCalled();
+    expect(sendMessageZalouserMock).not.toHaveBeenCalled();
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
   });
 
   it("surfaces quote metadata in inbound reply context", async () => {

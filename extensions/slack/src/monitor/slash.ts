@@ -18,7 +18,11 @@ import {
   resolveNativeSkillsEnabled,
 } from "openclaw/plugin-sdk/native-command-config-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
-import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
+import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  resolveConversationIdentityAdmission,
+  type ResolvedAgentRoute,
+} from "openclaw/plugin-sdk/routing";
 import { getRuntimeConfigSnapshot } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { danger, logVerbose, warn } from "openclaw/plugin-sdk/runtime-env";
 import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
@@ -50,6 +54,7 @@ import {
 import { escapeSlackMrkdwn } from "./mrkdwn.js";
 import { isSlackChannelAllowedByPolicy } from "./policy.js";
 import { resolveSlackRoomContextHints } from "./room-context.js";
+import { normalizeSlackRouteBindingConfig } from "./routing-config.js";
 
 type SlackBlock = { type: string; [key: string]: unknown };
 
@@ -429,6 +434,70 @@ export async function registerSlackMonitorSlashCommands(params: {
         return;
       }
 
+      const {
+        resolveAgentRoute,
+        resolveConfiguredBindingRoute,
+        lookupRuntimeConversationBindingRoute,
+        touchRuntimeConversationBindingRoute,
+      } = await loadSlashDispatchRuntime();
+      const baseRoute = resolveAgentRoute({
+        cfg: normalizeSlackRouteBindingConfig(cfg),
+        channel: "slack",
+        accountId: account.accountId,
+        teamId: ctx.teamId || undefined,
+        peer: {
+          kind: isDirectMessage ? "direct" : isRoom ? "channel" : "group",
+          id: isDirectMessage ? command.user_id : command.channel_id,
+        },
+      });
+      const conversation = {
+        channel: "slack",
+        accountId: account.accountId,
+        conversationId: isDirectMessage ? `user:${command.user_id}` : command.channel_id,
+      };
+      const runtimeRoute = lookupRuntimeConversationBindingRoute({
+        route: baseRoute,
+        conversation,
+      });
+      const configuredRoute =
+        runtimeRoute.boundSessionKey || runtimeRoute.bindingRecord
+          ? null
+          : resolveConfiguredBindingRoute({ cfg, route: baseRoute, conversation });
+      const slashRouteState = configuredRoute
+        ? {
+            route: configuredRoute.route,
+            configuredBinding: configuredRoute.bindingResolution,
+            runtimeBinding: null,
+          }
+        : {
+            route: runtimeRoute.route,
+            configuredBinding: null,
+            runtimeBinding: runtimeRoute.bindingRecord,
+          };
+      const identityDecision = resolveConversationIdentityAdmission({
+        cfg,
+        ctx: {
+          AgentId: slashRouteState.route.agentId,
+          SessionKey: slashRouteState.route.sessionKey,
+          AgentRouteMatchedBy: slashRouteState.route.matchedBy,
+          AccountId: slashRouteState.route.accountId ?? account.accountId,
+          ChatType: chatType,
+          ChatId: isRoomish ? command.channel_id : undefined,
+          GroupChannel: isRoomish ? (channelInfo?.name ?? command.channel_id) : undefined,
+          GroupSpace: ctx.teamId || undefined,
+          SenderId: command.user_id,
+          Provider: "slack",
+          Surface: "slack",
+        },
+      });
+      if (!identityDecision.allowed) {
+        await respond({
+          text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+          response_type: "ephemeral",
+        });
+        return;
+      }
+
       const effectiveAllowFromLower = await resolveSlackEffectiveAllowFrom(ctx, {
         includePairingStore: isDirectMessage,
       });
@@ -548,23 +617,41 @@ export async function registerSlackMonitorSlashCommands(params: {
         }
       }
 
-      let resolvedSlashRoute: ResolvedAgentRoute | undefined;
-      const resolveSlashRoute = async () => {
-        if (resolvedSlashRoute) {
-          return resolvedSlashRoute;
+      let preparedSlashRoute: Promise<ResolvedAgentRoute | null> | undefined;
+      let runtimeBindingTouched = false;
+      const touchRuntimeBinding = () => {
+        if (!runtimeBindingTouched) {
+          touchRuntimeConversationBindingRoute({
+            bindingRecord: slashRouteState.runtimeBinding,
+          });
+          runtimeBindingTouched = true;
         }
-        const { resolveAgentRoute } = await loadSlashDispatchRuntime();
-        resolvedSlashRoute = resolveAgentRoute({
-          cfg,
-          channel: "slack",
-          accountId: account.accountId,
-          teamId: ctx.teamId || undefined,
-          peer: {
-            kind: isDirectMessage ? "direct" : isRoom ? "channel" : "group",
-            id: isDirectMessage ? command.user_id : command.channel_id,
-          },
-        });
-        return resolvedSlashRoute;
+      };
+      const resolvePreparedSlashRoute = () => {
+        preparedSlashRoute ??= (async () => {
+          if (!slashRouteState.configuredBinding) {
+            touchRuntimeBinding();
+            return slashRouteState.route;
+          }
+          const { ensureConfiguredBindingRouteReady } = await loadSlashDispatchRuntime();
+          const readiness = await ensureConfiguredBindingRouteReady({
+            cfg,
+            bindingResolution: slashRouteState.configuredBinding,
+          });
+          if (readiness.ok) {
+            touchRuntimeBinding();
+            return slashRouteState.route;
+          }
+          logVerbose(
+            `slack slash: configured ACP binding unavailable for ${slashRouteState.configuredBinding.record.conversation.conversationId}: ${readiness.error}`,
+          );
+          await respond({
+            text: "Configured ACP binding is unavailable right now. Please try again.",
+            response_type: "ephemeral",
+          });
+          return null;
+        })();
+        return preparedSlashRoute;
       };
 
       if (commandDefinition && supportsInteractiveArgMenus) {
@@ -574,8 +661,11 @@ export async function registerSlackMonitorSlashCommands(params: {
           commandDefinition.args?.some(
             (arg) => typeof arg.choices === "function" && commandArgs?.values?.[arg.name] == null,
           );
-        const menuRoute = menuNeedsModelContext ? await resolveSlashRoute() : undefined;
-        const menuModelContext = menuRoute
+        const menuRoute = await resolvePreparedSlashRoute();
+        if (!menuRoute) {
+          return;
+        }
+        const menuModelContext = menuNeedsModelContext
           ? resolveSlackCommandMenuModelContext({
               cfg,
               agentId: menuRoute.agentId,
@@ -623,24 +713,15 @@ export async function registerSlackMonitorSlashCommands(params: {
         dispatchReplyWithDispatcher,
         finalizeInboundContext,
         recordInboundSessionMetaSafe,
-        resolveAgentRoute,
         resolveChunkMode,
         resolveConversationLabel,
         resolveMarkdownTableMode,
       } = await loadSlashDispatchRuntime();
 
-      const route =
-        resolvedSlashRoute ??
-        resolveAgentRoute({
-          cfg,
-          channel: "slack",
-          accountId: account.accountId,
-          teamId: ctx.teamId || undefined,
-          peer: {
-            kind: isDirectMessage ? "direct" : isRoom ? "channel" : "group",
-            id: isDirectMessage ? command.user_id : command.channel_id,
-          },
-        });
+      const route = await resolvePreparedSlashRoute();
+      if (!route) {
+        return;
+      }
 
       const { untrustedChannelMetadata, groupSystemPrompt } = resolveSlackRoomContextHints({
         isRoomish,
@@ -695,6 +776,7 @@ export async function registerSlackMonitorSlashCommands(params: {
         MessageSid: command.trigger_id,
         Timestamp: Date.now(),
         SessionKey: sessionKey,
+        AgentRouteMatchedBy: route.matchedBy,
         CommandTargetSessionKey: commandTargetSessionKey,
         AccountId: route.accountId,
         CommandSource: "native" as const,
@@ -763,6 +845,7 @@ export async function registerSlackMonitorSlashCommands(params: {
           },
         },
         replyOptions: {
+          identityContractVersion: 1,
           skillFilter: channelConfig?.skills,
           onModelSelected,
         },

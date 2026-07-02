@@ -27,6 +27,9 @@ beforeEach(() => {
 
 function buildConfig(): CoreConfig {
   return {
+    agents: {
+      list: [{ id: "personal", default: true }, { id: "main" }],
+    },
     channels: {
       matrix: {
         homeserver: "https://matrix.example.org",
@@ -43,7 +46,14 @@ function buildConfig(): CoreConfig {
   } as CoreConfig;
 }
 
-function buildCore() {
+function buildCore(
+  routeOverrides: Partial<{
+    sessionKey: string;
+    mainSessionKey: string;
+    agentId: string;
+    matchedBy: "binding.peer" | "default";
+  }> = {},
+) {
   return {
     channel: {
       routing: {
@@ -51,7 +61,11 @@ function buildCore() {
           sessionKey: "agent:main:matrix:channel:!ops:example.org",
           mainSessionKey: "agent:main:matrix:channel:!ops:example.org",
           agentId: "main",
-          matchedBy: "peer",
+          accountId: "default",
+          channel: "matrix",
+          lastRoutePolicy: "session",
+          matchedBy: "binding.peer",
+          ...routeOverrides,
         }),
       },
     },
@@ -174,8 +188,35 @@ describe("matrix approval reactions", () => {
       {
         sessionKey: "agent:main:matrix:channel:!ops:example.org",
         contextKey: "matrix:reaction:add:!ops:example.org:$msg-1:@owner:example.org:👍",
+        actor: { channel: "matrix", accountId: "default", senderId: "@owner:example.org" },
       },
     );
+  });
+
+  it("rejects an unbound shared reaction before target hydration", async () => {
+    const core = buildCore({
+      sessionKey: "agent:personal:matrix:channel:!ops:example.org",
+      mainSessionKey: "agent:personal:main",
+      agentId: "personal",
+      matchedBy: "default",
+    });
+    const client = createReactionClient(
+      vi.fn().mockResolvedValue({
+        event_id: "$msg-1",
+        sender: "@bot:example.org",
+        content: { body: "normal bot message" },
+      }),
+    );
+
+    await handleReaction({
+      client,
+      core,
+      targetEventId: "$msg-1",
+      reactionKey: "👍",
+    });
+
+    expect(client.getEvent).not.toHaveBeenCalled();
+    expect(core.system.enqueueSystemEvent).not.toHaveBeenCalled();
   });
 
   it("still resolves approval reactions when generic reaction notifications are off", async () => {

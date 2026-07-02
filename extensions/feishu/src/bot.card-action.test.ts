@@ -492,7 +492,7 @@ describe("Feishu Card Action Handler", () => {
     expect(createFeishuClientMock).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to p2p when Feishu chat API returns an error", async () => {
+  it("fails closed as shared when Feishu chat API returns an error", async () => {
     createFeishuClientMock.mockReturnValueOnce({
       im: {
         chat: {
@@ -508,10 +508,10 @@ describe("Feishu Card Action Handler", () => {
 
     await handleFeishuCardAction({ cfg, event, runtime });
 
-    expect(handleMessage().chat_type).toBe("p2p");
+    expect(handleMessage().chat_type).toBe("group");
   });
 
-  it("falls back to p2p when Feishu chat API throws", async () => {
+  it("fails closed as shared when Feishu chat API throws", async () => {
     createFeishuClientMock.mockReturnValueOnce({
       im: {
         chat: {
@@ -527,7 +527,26 @@ describe("Feishu Card Action Handler", () => {
 
     await handleFeishuCardAction({ cfg, event, runtime });
 
-    expect(handleMessage().chat_type).toBe("p2p");
+    expect(handleMessage().chat_type).toBe("group");
+  });
+
+  it("does not treat privacy-only private metadata as a direct audience", async () => {
+    createFeishuClientMock.mockReturnValueOnce({
+      im: {
+        chat: {
+          get: vi.fn().mockResolvedValue({ code: 0, data: { chat_type: "private" } }),
+        },
+      },
+    });
+    const event = createCardActionEvent({
+      token: "tok9f",
+      chatId: "oc_private_group_789",
+      actionValue: { text: "/help" },
+    });
+
+    await handleFeishuCardAction({ cfg, event, runtime });
+
+    expect(handleMessage().chat_type).toBe("group");
   });
 
   it("drops duplicate structured callback tokens", async () => {

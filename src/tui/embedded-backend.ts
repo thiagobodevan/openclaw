@@ -1153,8 +1153,10 @@ export class EmbeddedTuiBackend implements TuiBackend {
           deliver: params.deliver,
           channel: INTERNAL_MESSAGE_CHANNEL,
           runContext: {
+            isInternal: true,
             messageChannel: INTERNAL_MESSAGE_CHANNEL,
           },
+          identityContractVersion: 1,
           timeout: timeoutSecondsFromMs(params.timeoutMs),
           runId: params.runId,
           abortSignal: params.controller.signal,

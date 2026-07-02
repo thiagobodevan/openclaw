@@ -24,14 +24,19 @@ import {
 import { hasControlCommand } from "openclaw/plugin-sdk/command-auth-native";
 import type { DmPolicy, GroupPolicy, OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/context-visibility-runtime";
+import type { SessionBindingRecord } from "openclaw/plugin-sdk/conversation-runtime";
 import { createChannelHistoryWindow, type HistoryEntry } from "openclaw/plugin-sdk/reply-history";
 import type { FinalizedMsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
+import {
+  resolveAgentRoute,
+  resolveConversationIdentityMode,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
 import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { sanitizeTerminalText } from "openclaw/plugin-sdk/text-chunking";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { resolveIMessageAccount } from "../accounts.js";
-import { resolveIMessageConversationRoute } from "../conversation-route.js";
+import { lookupIMessageConversationRoute } from "../conversation-route.js";
 import {
   isKnownFromMeIMessageMessageId,
   rememberIMessageReplyCache,
@@ -350,6 +355,7 @@ type IMessageInboundDispatchDecision = {
   sender: string;
   senderNormalized: string;
   route: ReturnType<typeof resolveAgentRoute>;
+  runtimeBinding?: SessionBindingRecord;
   bodyText: string;
   createdAt?: number;
   replyContext: IMessageReplyContext | null;
@@ -372,16 +378,54 @@ type IMessageInboundReactionDecision = {
   sender: string;
   senderNormalized: string;
   route: ReturnType<typeof resolveAgentRoute>;
+  runtimeBinding?: SessionBindingRecord;
   reaction: IMessageReactionContext;
   text: string;
   contextKey: string;
 };
 
+type IMessageInboundPairingDecision = {
+  kind: "pairing";
+  isGroup: false;
+  chatId?: number;
+  chatGuid?: string;
+  chatIdentifier?: string;
+  sender: string;
+  senderNormalized: string;
+  senderId: string;
+  route: ReturnType<typeof resolveAgentRoute>;
+  runtimeBinding?: SessionBindingRecord;
+};
+
 type IMessageInboundDecision =
   | { kind: "drop"; reason: string }
-  | { kind: "pairing"; senderId: string }
+  | IMessageInboundPairingDecision
   | IMessageInboundReactionDecision
   | IMessageInboundDispatchDecision;
+
+function resolveIMessageConversationIdentityAdmission(params: {
+  cfg: OpenClawConfig;
+  route: ReturnType<typeof resolveAgentRoute>;
+  isGroup: boolean;
+  chatId?: number;
+  chatGuid?: string;
+  chatIdentifier?: string;
+  senderNormalized: string;
+  senderIsOwner?: boolean;
+}) {
+  const groupId = params.isGroup
+    ? String(params.chatId ?? params.chatGuid ?? params.chatIdentifier ?? "unknown")
+    : undefined;
+  return resolveConversationIdentityMode({
+    config: params.cfg,
+    agentId: params.route.agentId,
+    routeMatchedBy: params.route.matchedBy,
+    chatType: params.isGroup ? "group" : "direct",
+    groupId,
+    groupChannel: groupId,
+    senderIsOwner: params.senderIsOwner,
+  });
+}
 
 export async function resolveIMessageInboundDecision(params: {
   cfg: OpenClawConfig;
@@ -478,48 +522,35 @@ export async function resolveIMessageInboundDecision(params: {
     chatIdentifierNormalized != null &&
     senderNormalized === chatIdentifierNormalized &&
     destinationCallerIdNormalized == null;
-  let skipSelfChatHasCheck = false;
-  const inboundMessageIds = resolveInboundEchoMessageIds(params.message);
-  const inboundMessageId = inboundMessageIds[0];
-  const hasInboundGuid = Boolean(normalizeReplyField(params.message.guid));
-
-  if (params.message.is_from_me) {
-    if (isAmbiguousSelfThread) {
-      params.selfChatCache?.remember(selfChatLookup);
-    }
-    if (isSelfChat) {
-      params.selfChatCache?.remember({ ...selfChatLookup, allowCreatedAtSkew: true });
-      const echoScope = buildIMessageEchoScope({
-        accountId: params.accountId,
-        isGroup,
-        chatId,
-        chatGuid,
-        chatIdentifier,
-        sender,
-      });
-      if (
-        params.echoCache &&
-        (bodyText || inboundMessageId) &&
-        hasIMessageEchoMatch({
-          echoCache: params.echoCache,
-          scope: echoScope,
-          text: bodyText || undefined,
-          messageIds: inboundMessageIds,
-          skipIdShortCircuit: !hasInboundGuid,
-          includePendingText: true,
-        })
-      ) {
-        return { kind: "drop", reason: "agent echo in self-chat" };
-      }
-      skipSelfChatHasCheck = true;
-    } else {
-      return { kind: "drop", reason: "from me" };
-    }
-  }
   if (isGroup && !chatId) {
     return { kind: "drop", reason: "group without chat_id" };
   }
-
+  const routeState = lookupIMessageConversationRoute({
+    cfg: params.cfg,
+    accountId: params.accountId,
+    isGroup,
+    peerId: isGroup ? String(chatId ?? "unknown") : senderNormalized,
+    sender,
+    chatId,
+  });
+  const { route, runtimeBinding } = routeState;
+  if (isGroup) {
+    const identityDecision = resolveIMessageConversationIdentityAdmission({
+      cfg: params.cfg,
+      route,
+      isGroup,
+      chatId,
+      chatGuid,
+      chatIdentifier,
+      senderNormalized,
+    });
+    if (!identityDecision.allowed) {
+      return {
+        kind: "drop",
+        reason: `conversation identity ${identityDecision.reason}`,
+      };
+    }
+  }
   const groupId = isGroup ? groupIdCandidate : undefined;
   const hasControlCommandInMessage = hasControlCommand(messageText, params.cfg);
   const groupAllowFromForAccess = isGroup
@@ -559,7 +590,68 @@ export async function resolveIMessageInboundDecision(params: {
   });
   const { commandAccess, senderAccess } = accessDecision;
   const effectiveGroupAllowFrom = senderAccess.effectiveGroupAllowFrom;
+  if (!isGroup) {
+    const senderIsOwner = resolveStableSenderIsOwner({
+      senderId: senderNormalized,
+      commandOwnerAllowFrom: params.cfg.commands?.ownerAllowFrom,
+      providerAllowFrom: senderAccess.effectiveAllowFrom,
+      normalizeEntry: normalizeIMessageHandleEntry,
+    });
+    const identityDecision = resolveIMessageConversationIdentityAdmission({
+      cfg: params.cfg,
+      route,
+      isGroup,
+      chatId,
+      chatGuid,
+      chatIdentifier,
+      senderNormalized,
+      senderIsOwner,
+    });
+    if (!identityDecision.allowed) {
+      return {
+        kind: "drop",
+        reason: `conversation identity ${identityDecision.reason}`,
+      };
+    }
+  }
+  let skipSelfChatHasCheck = false;
+  const inboundMessageIds = resolveInboundEchoMessageIds(params.message);
+  const inboundMessageId = inboundMessageIds[0];
+  const hasInboundGuid = Boolean(normalizeReplyField(params.message.guid));
 
+  if (params.message.is_from_me) {
+    if (isAmbiguousSelfThread) {
+      params.selfChatCache?.remember(selfChatLookup);
+    }
+    if (isSelfChat) {
+      params.selfChatCache?.remember({ ...selfChatLookup, allowCreatedAtSkew: true });
+      const echoScope = buildIMessageEchoScope({
+        accountId: params.accountId,
+        isGroup,
+        chatId,
+        chatGuid,
+        chatIdentifier,
+        sender,
+      });
+      if (
+        params.echoCache &&
+        (bodyText || inboundMessageId) &&
+        hasIMessageEchoMatch({
+          echoCache: params.echoCache,
+          scope: echoScope,
+          text: bodyText || undefined,
+          messageIds: inboundMessageIds,
+          skipIdShortCircuit: !hasInboundGuid,
+          includePendingText: true,
+        })
+      ) {
+        return { kind: "drop", reason: "agent echo in self-chat" };
+      }
+      skipSelfChatHasCheck = true;
+    } else {
+      return { kind: "drop", reason: "from me" };
+    }
+  }
   if (senderAccess.decision !== "allow") {
     if (isGroup) {
       if (senderAccess.reasonCode === "group_policy_disabled") {
@@ -583,7 +675,18 @@ export async function resolveIMessageInboundDecision(params: {
       return { kind: "drop", reason: "dmPolicy disabled" };
     }
     if (senderAccess.decision === "pairing") {
-      return { kind: "pairing", senderId: senderNormalized };
+      return {
+        kind: "pairing",
+        isGroup: false,
+        chatId,
+        chatGuid,
+        chatIdentifier,
+        sender,
+        senderNormalized,
+        senderId: senderNormalized,
+        route,
+        ...(runtimeBinding ? { runtimeBinding } : {}),
+      };
     }
     params.logVerbose?.(`Blocked iMessage sender ${sender} (dmPolicy=${params.dmPolicy})`);
     return { kind: "drop", reason: "dmPolicy blocked" };
@@ -596,14 +699,6 @@ export async function resolveIMessageInboundDecision(params: {
     return { kind: "drop", reason: "group id not in allowlist" };
   }
 
-  const route = resolveIMessageConversationRoute({
-    cfg: params.cfg,
-    accountId: params.accountId,
-    isGroup,
-    peerId: isGroup ? String(chatId ?? "unknown") : senderNormalized,
-    sender,
-    chatId,
-  });
   if (reactionContext) {
     const notificationMode = params.reactionNotifications ?? "own";
     if (notificationMode === "off") {
@@ -664,6 +759,7 @@ export async function resolveIMessageInboundDecision(params: {
       sender,
       senderNormalized,
       route,
+      ...(runtimeBinding ? { runtimeBinding } : {}),
       reaction: reactionContext,
       text,
       contextKey: reactionKey,
@@ -852,6 +948,7 @@ export async function resolveIMessageInboundDecision(params: {
     sender,
     senderNormalized,
     route,
+    ...(runtimeBinding ? { runtimeBinding } : {}),
     bodyText,
     createdAt,
     replyContext: filteredReplyContext,
@@ -1010,7 +1107,7 @@ export async function buildIMessageInboundContext(params: {
     timestamp: decision.createdAt,
     from: imessageFrom,
     sender: {
-      id: decision.sender,
+      id: decision.senderNormalized,
       name: decision.senderNormalized,
     },
     conversation: {
@@ -1021,6 +1118,7 @@ export async function buildIMessageInboundContext(params: {
     route: {
       agentId: decision.route.agentId,
       accountId: decision.route.accountId,
+      matchedBy: decision.route.matchedBy,
       routeSessionKey: decision.route.sessionKey,
     },
     reply: {

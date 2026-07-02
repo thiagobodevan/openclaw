@@ -7,6 +7,9 @@ import type { LineAccountConfig } from "./types.js";
 type MessageEvent = webhook.MessageEvent;
 type PostbackEvent = webhook.PostbackEvent;
 
+const resolveLineAgentRouteMock = vi.hoisted(() => vi.fn());
+const resolveLineIdentityModeMock = vi.hoisted(() => vi.fn());
+
 // Avoid pulling in globals/pairing/media dependencies; this suite only asserts
 // allowlist/groupPolicy gating and message-context wiring.
 vi.mock("openclaw/plugin-sdk/channel-inbound", () => ({
@@ -117,8 +120,10 @@ vi.mock("openclaw/plugin-sdk/reply-history", () => ({
     historyMap.set(historyKey, [...existing, entry].slice(-limit));
   },
 }));
-vi.mock("openclaw/plugin-sdk/routing", () => ({
-  resolveAgentRoute: () => ({ agentId: "default" }),
+vi.mock("openclaw/plugin-sdk/routing", async (importOriginal) => ({
+  ...(await importOriginal()),
+  resolveAgentRoute: resolveLineAgentRouteMock,
+  resolveConversationIdentityMode: resolveLineIdentityModeMock,
 }));
 
 const { readAllowFromStoreMock, upsertPairingRequestMock } = vi.hoisted(() => ({
@@ -146,20 +151,53 @@ vi.mock("./send.js", () => ({
   },
 }));
 
-const { buildLineMessageContextMock, buildLinePostbackContextMock } = vi.hoisted(() => ({
-  buildLineMessageContextMock: vi.fn(async () => ({
-    ctxPayload: { From: "line:group:group-1" },
-    replyToken: "reply-token",
-    route: { agentId: "default" },
-    isGroup: true,
-    accountId: "default",
-  })),
-  buildLinePostbackContextMock: vi.fn(async () => null as unknown),
-}));
+const { buildLineMessageContextMock, buildLinePostbackContextMock, prepareLineInboundRouteMock } =
+  vi.hoisted(() => ({
+    buildLineMessageContextMock: vi.fn(async () => ({
+      ctxPayload: { From: "line:group:group-1" },
+      replyToken: "reply-token",
+      route: { agentId: "default" },
+      isGroup: true,
+      accountId: "default",
+    })),
+    buildLinePostbackContextMock: vi.fn(async () => null as unknown),
+    prepareLineInboundRouteMock: vi.fn(async () => ({
+      userId: "user-1",
+      isGroup: false,
+      peerId: "user-1",
+      route: {
+        agentId: "default",
+        accountId: "default",
+        sessionKey: "session-1",
+        matchedBy: "default",
+      },
+    })),
+  }));
 
 vi.mock("./bot-message-context.js", () => ({
   buildLineMessageContext: buildLineMessageContextMock,
   buildLinePostbackContext: buildLinePostbackContextMock,
+  prepareLineInboundRoute: prepareLineInboundRouteMock,
+  lookupLineInboundRoute: ({
+    source,
+  }: {
+    source: { type?: string; userId?: string; groupId?: string; roomId?: string };
+  }) => {
+    const isGroup = source.type === "group" || source.type === "room";
+    const groupId = source.type === "group" ? source.groupId : undefined;
+    const roomId = source.type === "room" ? source.roomId : undefined;
+    return {
+      userId: source.userId,
+      groupId,
+      roomId,
+      isGroup,
+      peerId: groupId ?? roomId ?? source.userId ?? "unknown",
+      route: resolveLineAgentRouteMock(),
+      configuredBinding: null,
+      configuredBindingSessionKey: "",
+      runtimeBinding: null,
+    };
+  },
   getLineSourceInfo: (source: {
     type?: string;
     userId?: string;
@@ -335,6 +373,17 @@ describe("handleLineWebhookEvents", () => {
   });
 
   beforeEach(() => {
+    resolveLineAgentRouteMock.mockReset().mockReturnValue({
+      agentId: "line-service",
+      accountId: "default",
+      sessionKey: "agent:line-service:line:direct:user",
+      matchedBy: "binding.peer",
+    });
+    resolveLineIdentityModeMock.mockReset().mockReturnValue({
+      mode: "organization",
+      allowed: true,
+      reason: "bound_service_agent",
+    });
     buildLineMessageContextMock.mockReset();
     buildLineMessageContextMock.mockImplementation(async () => ({
       ctxPayload: { From: "line:group:group-1" },
@@ -345,6 +394,18 @@ describe("handleLineWebhookEvents", () => {
     }));
     buildLinePostbackContextMock.mockReset();
     buildLinePostbackContextMock.mockImplementation(async () => null as unknown);
+    prepareLineInboundRouteMock.mockReset();
+    prepareLineInboundRouteMock.mockImplementation(async () => ({
+      userId: "user-1",
+      isGroup: false,
+      peerId: "user-1",
+      route: {
+        agentId: "default",
+        accountId: "default",
+        sessionKey: "session-1",
+        matchedBy: "default",
+      },
+    }));
     readAllowFromStoreMock.mockReset();
     readAllowFromStoreMock.mockImplementation(async () => [] as string[]);
     upsertPairingRequestMock.mockReset();
@@ -657,6 +718,46 @@ describe("handleLineWebhookEvents", () => {
     expect(pairingRequest?.channel).toBe("line");
     expect(pairingRequest?.id).toBe("user-5");
     expect(pairingRequest?.accountId).toBe("default");
+  });
+
+  it("does not pair a DM when conversation identity denies the personal route", async () => {
+    resolveLineIdentityModeMock.mockReturnValue({
+      mode: "external",
+      allowed: false,
+      reason: "untrusted_direct",
+    });
+    const processMessage = vi.fn();
+    const event = {
+      type: "message",
+      message: { id: "m-personal", type: "text", text: "hi" },
+      replyToken: "reply-token",
+      timestamp: Date.now(),
+      source: { type: "user", userId: "guest" },
+      mode: "active",
+      webhookEventId: "evt-personal",
+      deliveryContext: { isRedelivery: false },
+    } as MessageEvent;
+
+    await handleLineWebhookEvents([event], {
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }] },
+        channels: { line: { dmPolicy: "pairing" } },
+      },
+      account: {
+        accountId: "default",
+        enabled: true,
+        channelAccessToken: "token",
+        channelSecret: "secret",
+        tokenSource: "config",
+        config: { dmPolicy: "pairing" },
+      },
+      runtime: createRuntime(),
+      mediaMaxBytes: 1,
+      processMessage,
+    });
+
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(processMessage).not.toHaveBeenCalled();
   });
 
   it("does not authorize DM senders from another account's pairing-store entries", async () => {
@@ -1049,6 +1150,34 @@ describe("handleLineWebhookEvents", () => {
       }),
     );
     expect(processMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies an unbound route before downloading media", async () => {
+    const processMessage = vi.fn();
+    prepareLineInboundRouteMock.mockRejectedValueOnce(
+      new Error("This conversation is not bound to a shared service agent."),
+    );
+    const event = createTestMessageEvent({
+      message: {
+        id: "private-image-1",
+        type: "image",
+        contentProvider: { type: "line" },
+        quoteToken: "quote-private-image-1",
+      },
+      source: { type: "group", groupId: "external-group", userId: "guest" },
+      webhookEventId: "evt-private-image",
+    });
+
+    await expect(
+      handleLineWebhookEvents(
+        [event],
+        createLineWebhookTestContext({ processMessage, groupPolicy: "open" }),
+      ),
+    ).rejects.toThrow("not bound to a shared service agent");
+
+    expect(downloadLineMediaMock).not.toHaveBeenCalled();
+    expect(buildLineMessageContextMock).not.toHaveBeenCalled();
+    expect(processMessage).not.toHaveBeenCalled();
   });
 
   it("allows non-text group messages through when requireMention is set (cannot detect mention)", async () => {

@@ -1,7 +1,7 @@
 // Voice Call plugin module implements context behavior.
 import type { VoiceCallConfig, VoiceCallCoreSessionConfig } from "../config.js";
 import type { VoiceCallProvider } from "../providers/base.js";
-import type { CallId, CallRecord } from "../types.js";
+import type { CallId, CallRecord, VoiceCallInboundIdentity } from "../types.js";
 
 type TranscriptWaiter = {
   resolve: (text: string) => void;
@@ -41,9 +41,20 @@ export type StreamSessionIssuer = (request: {
   direction: "inbound" | "outbound";
 }) => { token: string; streamUrl: string } | undefined;
 
+export type InboundCallAdmission = (request: {
+  from?: string;
+  to?: string;
+}) => VoiceCallInboundIdentity | undefined;
+
+export type InboundCallIdentityValidation = (
+  identity: VoiceCallInboundIdentity,
+  call: CallRecord,
+) => boolean;
+
 type CallManagerHooks = {
   onCallAnswered?: (call: CallRecord) => void;
   streamSessionIssuer?: StreamSessionIssuer;
+  admitInbound?: InboundCallAdmission;
 };
 
 export type CallManagerContext = CallManagerRuntimeState &

@@ -30,6 +30,19 @@ registerGetReplyRuntimeOverrides(mocks);
 
 let getReplyFromConfig: typeof import("./get-reply.js").getReplyFromConfig;
 
+const serviceAgentConfig = {
+  agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
+};
+
+function buildBoundGroupCtx(overrides: Parameters<typeof buildGetReplyGroupCtx>[0] = {}) {
+  return buildGetReplyGroupCtx({
+    AgentId: "main",
+    AgentRouteMatchedBy: "binding.peer",
+    SessionKey: "agent:main:telegram:-100123",
+    ...overrides,
+  });
+}
+
 async function loadGetReplyRuntimeForTest() {
   ({ getReplyFromConfig } = await loadGetReplyModuleForTest({ cacheKey: import.meta.url }));
 }
@@ -92,9 +105,9 @@ describe("getReplyFromConfig before_agent_reply wiring", () => {
     });
 
     const result = await getReplyFromConfig(
-      buildGetReplyGroupCtx({ SenderId: "telegram-user-42" }),
-      undefined,
-      {},
+      buildBoundGroupCtx({ SenderId: "telegram-user-42" }),
+      { identityContractVersion: 1 },
+      serviceAgentConfig,
     );
 
     expect(result).toEqual({ text: "plugin reply" });
@@ -138,12 +151,151 @@ describe("getReplyFromConfig before_agent_reply wiring", () => {
     );
   });
 
+  it.each([
+    {
+      name: "account-selected service agent in a shared room",
+      context: buildBoundGroupCtx({ AgentRouteMatchedBy: "config.agent" }),
+    },
+    {
+      name: "bound service agent in a direct conversation",
+      context: buildBoundGroupCtx({ ChatType: "direct", AgentRouteMatchedBy: "binding.peer" }),
+    },
+  ])("admits $name without personal fallback", async ({ context }) => {
+    mocks.runBeforeAgentReply.mockResolvedValue({
+      handled: true,
+      reply: { text: "service reply" },
+    });
+
+    const result = await getReplyFromConfig(
+      context,
+      { identityContractVersion: 1 },
+      serviceAgentConfig,
+    );
+
+    expect(result).toEqual({ text: "service reply" });
+    expect(mocks.runBeforeAgentReply).toHaveBeenCalledOnce();
+  });
+
   it("falls back to NO_REPLY when the hook claims without a reply payload", async () => {
     mocks.runBeforeAgentReply.mockResolvedValue({ handled: true });
 
-    const result = await getReplyFromConfig(buildGetReplyGroupCtx(), undefined, {});
+    const result = await getReplyFromConfig(
+      buildBoundGroupCtx(),
+      { identityContractVersion: 1 },
+      serviceAgentConfig,
+    );
 
     expect(result).toEqual({ text: SILENT_REPLY_TOKEN });
+  });
+
+  it("denies an unbound shared audience before hooks or session setup", async () => {
+    const result = await getReplyFromConfig(
+      buildGetReplyGroupCtx({
+        AgentId: "personal",
+        AgentRouteMatchedBy: "default",
+        SessionKey: "agent:personal:telegram:-100123",
+      }),
+      { identityContractVersion: 1 },
+      { agents: { list: [{ id: "personal", default: true }] } },
+    );
+
+    expect(result).toEqual({
+      text: "This conversation is not bound to a shared service agent. Ask an operator to configure an explicit agent binding for this audience.",
+    });
+    expect(mocks.initSessionState).not.toHaveBeenCalled();
+    expect(mocks.handleInlineActions).not.toHaveBeenCalled();
+    expect(mocks.runBeforeAgentReply).not.toHaveBeenCalled();
+  });
+
+  it("preserves unversioned public reply behavior for existing plugins", async () => {
+    mocks.runBeforeAgentReply.mockResolvedValue({
+      handled: true,
+      reply: { text: "legacy plugin reply" },
+    });
+
+    const result = await getReplyFromConfig(
+      buildGetReplyGroupCtx({
+        AgentId: "personal",
+        AgentRouteMatchedBy: "default",
+        SessionKey: "agent:personal:telegram:-100123",
+      }),
+      undefined,
+      { agents: { list: [{ id: "personal", default: true }] } },
+    );
+
+    expect(result).toEqual({ text: "legacy plugin reply" });
+    expect(mocks.runBeforeAgentReply).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unsupported reply identity contract versions", async () => {
+    await expect(
+      getReplyFromConfig(buildBoundGroupCtx(), { identityContractVersion: 2 } as never, {}),
+    ).rejects.toThrow("Unsupported reply identity contract version: 2");
+  });
+
+  it("does not trust heartbeat labels without internal provenance", async () => {
+    const result = await getReplyFromConfig(
+      buildGetReplyGroupCtx({
+        Provider: "heartbeat",
+        Surface: "slack",
+        AgentId: "personal",
+        AgentRouteMatchedBy: "default",
+        SessionKey: "agent:personal:slack:channel:C_SHARED",
+        ChatType: "channel",
+      }),
+      { identityContractVersion: 1, isHeartbeat: true },
+      { agents: { list: [{ id: "personal", default: true }] } },
+    );
+
+    expect(result).toEqual({
+      text: "This conversation is not bound to a shared service agent. Ask an operator to configure an explicit agent binding for this audience.",
+    });
+    expect(mocks.initSessionState).not.toHaveBeenCalled();
+  });
+
+  it("keeps trusted internal continuations in their existing session", async () => {
+    mocks.runBeforeAgentReply.mockResolvedValue({
+      handled: true,
+      reply: { text: "resumed" },
+    });
+
+    const result = await getReplyFromConfig(
+      buildGetReplyGroupCtx({
+        Provider: "webchat",
+        Surface: "webchat",
+        InputProvenance: {
+          kind: "internal_system",
+          sourceChannel: "telegram",
+          sourceTool: "restart-sentinel",
+        },
+      }),
+      { identityContractVersion: 1 },
+      {},
+    );
+
+    expect(result).toEqual({ text: "resumed" });
+    expect(mocks.runBeforeAgentReply).toHaveBeenCalledOnce();
+  });
+
+  it("admits authenticated gateway writers without requiring operator admin", async () => {
+    mocks.runBeforeAgentReply.mockResolvedValue({
+      handled: true,
+      reply: { text: "gateway reply" },
+    });
+
+    const result = await getReplyFromConfig(
+      buildGetReplyGroupCtx({
+        Provider: "webchat",
+        Surface: "webchat",
+        ChatType: "direct",
+        GatewayClientScopes: ["operator.write"],
+      }),
+      { identityContractVersion: 1 },
+      {},
+    );
+
+    expect(result).toEqual({ text: "gateway reply" });
+    expect(mocks.runBeforeAgentReply).toHaveBeenCalledOnce();
   });
 });
 afterEach(() => {

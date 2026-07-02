@@ -22,6 +22,7 @@ import {
   normalizeChannelProgressDraftLineIdentity,
   resolveChannelProgressDraftMaxLines,
 } from "openclaw/plugin-sdk/channel-outbound";
+import { resolveCommandAuthorization } from "openclaw/plugin-sdk/command-auth";
 import {
   evaluateSupplementalContextVisibility,
   resolveChannelContextVisibilityMode,
@@ -39,7 +40,10 @@ import {
   getReplyPayloadTtsSupplement,
 } from "openclaw/plugin-sdk/reply-payload";
 import type { GetReplyOptions } from "openclaw/plugin-sdk/reply-runtime";
-import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
+import {
+  resolveConversationIdentityMode,
+  resolveInboundLastRouteSessionKey,
+} from "openclaw/plugin-sdk/routing";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
 import { getSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -736,6 +740,54 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           return undefined;
         }
 
+        const {
+          route: _route,
+          configuredBinding: _configuredBinding,
+          runtimeBindingId: _runtimeBindingId,
+        } = resolveMatrixInboundRoute({
+          cfg,
+          accountId,
+          roomId,
+          senderId,
+          isDirectMessage,
+          dmSessionScope,
+          threadId: thread.threadId,
+          eventTs: eventTs ?? undefined,
+          resolveAgentRoute: core.channel.routing.resolveAgentRoute,
+        });
+        const senderIsOwner =
+          !isRoom &&
+          resolveCommandAuthorization({
+            ctx: {
+              Provider: "matrix",
+              Surface: "matrix",
+              AccountId: accountId,
+              SenderId: senderId,
+              From: `matrix:${senderId}`,
+              To: `room:${roomId}`,
+              ChatType: "direct",
+            },
+            cfg,
+            commandAuthorized: false,
+          }).stableSenderIsOwner;
+        const identityDecision = resolveConversationIdentityMode({
+          config: cfg,
+          agentId: _route.agentId,
+          routeMatchedBy: _route.matchedBy,
+          chatType: isDirectMessage ? "direct" : "channel",
+          groupId: isRoom ? roomId : undefined,
+          senderIsOwner,
+        });
+        if (!identityDecision.allowed) {
+          logVerboseMessage(
+            `matrix: drop identity-unadmitted sender=${senderId} room=${roomId} reason=${identityDecision.reason}`,
+          );
+          // Identity denial is not a processed event: discard speculative history
+          // and let the outer finally release the claim for a later bound replay.
+          discardReservedHistorySlot();
+          return undefined;
+        }
+
         const roomInfoForConfig =
           isRoom && needsRoomAliasesForConfig
             ? await getRoomInfo(roomId, { includeAliases: true })
@@ -939,6 +991,11 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
             senderLabel: senderName,
             selfUserId,
             isDirectMessage,
+            preparedRoute: {
+              route: _route,
+              configuredBinding: _configuredBinding,
+              runtimeBindingId: _runtimeBindingId,
+            },
             logVerboseMessage,
           });
           await commitInboundEventIfClaimedAndDiscardReserved();
@@ -989,10 +1046,6 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
           content,
           mediaUrl,
         });
-        const pendingHistoryPollText =
-          !pendingHistoryText && isPollEvent && historyLimit > 0
-            ? (await getPollSnapshot())?.text
-            : "";
         if (!mentionPrecheckText && !mediaUrl && !isPollEvent) {
           await commitInboundEventIfClaimedAndDiscardReserved();
           return undefined;
@@ -1007,21 +1060,10 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         let preflightMediaSizeLimitExceeded = false;
         let preflightAudioTranscript: string | undefined;
 
-        const {
-          route: _route,
-          configuredBinding: _configuredBinding,
-          runtimeBindingId: _runtimeBindingId,
-        } = resolveMatrixInboundRoute({
-          cfg,
-          accountId,
-          roomId,
-          senderId,
-          isDirectMessage,
-          dmSessionScope,
-          threadId: thread.threadId,
-          eventTs: eventTs ?? undefined,
-          resolveAgentRoute: core.channel.routing.resolveAgentRoute,
-        });
+        const pendingHistoryPollText =
+          !pendingHistoryText && isPollEvent && historyLimit > 0
+            ? (await getPollSnapshot())?.text
+            : "";
         const hasExplicitSessionBinding = _configuredBinding !== null || _runtimeBindingId !== null;
         const preflightAudioMediaUrl = mediaUrl?.startsWith("mxc://") ? mediaUrl : undefined;
         const shouldRunMatrixAudioPreflight =
@@ -1628,6 +1670,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
         route: {
           agentId: _route.agentId,
           accountId: _route.accountId,
+          matchedBy: _route.matchedBy,
           routeSessionKey: _route.sessionKey,
         },
         reply: {
@@ -2472,6 +2515,7 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
                       dispatcher,
                       replyOptions: {
                         ...replyOptions,
+                        identityContractVersion: 1,
                         skillFilter: roomConfig?.skills,
                         // Keep block streaming enabled when explicitly requested, even
                         // with draft previews on. The draft remains the live preview

@@ -17,6 +17,17 @@ beforeEach(() => {
 
 function baseCfg(): OpenClawConfig {
   return {
+    agents: { list: [{ id: "main", default: true }, { id: "imessage-service" }] },
+    bindings: [
+      {
+        agentId: "imessage-service",
+        match: {
+          channel: "imessage",
+          accountId: "default",
+          peer: { kind: "group", id: "*" },
+        },
+      },
+    ],
     channels: {
       imessage: {
         dmPolicy: "open",
@@ -170,7 +181,7 @@ describe("imessage monitor gating + envelope builders", () => {
     const ctxPayload = await buildDispatchContextPayload({ cfg, message });
 
     expect(ctxPayload.ChatType).toBe("group");
-    expect(ctxPayload.SessionKey).toBe("agent:main:imessage:group:42");
+    expect(ctxPayload.SessionKey).toBe("agent:imessage-service:imessage:group:42");
     expect(ctxPayload.Body ?? "").toContain("+15550002222:");
     expect(ctxPayload.Body ?? "").not.toContain("[from:");
     expect(ctxPayload.To).toBe("chat_id:42");
@@ -398,7 +409,7 @@ describe("imessage monitor gating + envelope builders", () => {
     };
     const { decision } = await resolveDispatchDecision({ cfg, message, groupHistories });
     expect(decision.isGroup).toBe(true);
-    expect(decision.route.sessionKey).toBe("agent:main:imessage:group:2");
+    expect(decision.route.sessionKey).toBe("agent:imessage-service:imessage:group:2");
   });
 
   it("allows group messages when requireMention is true but no mentionPatterns exist", async () => {

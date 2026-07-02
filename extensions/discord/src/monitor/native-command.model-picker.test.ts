@@ -10,6 +10,7 @@ import type {
 } from "openclaw/plugin-sdk/command-auth-native";
 import type { ModelsProviderData } from "openclaw/plugin-sdk/command-auth-native";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { EXTERNAL_CONVERSATION_IDENTITY_DENIAL } from "openclaw/plugin-sdk/routing";
 import * as globalsModule from "openclaw/plugin-sdk/runtime-env";
 import {
   loadSessionStore,
@@ -55,6 +56,7 @@ type MockInteraction = {
 };
 
 let tempDir: string;
+const OWNER_ID = "123456789012345678";
 
 function createModelsProviderData(entries: Record<string, string[]>): ModelsProviderData {
   return createBaseModelsProviderData(entries, { defaultProviderOrder: "sorted" });
@@ -65,8 +67,12 @@ function createModelPickerContext(): ModelPickerContext {
     session: {
       store: path.join(tempDir, "sessions.json"),
     },
+    commands: {
+      ownerAllowFrom: [`discord:${OWNER_ID}`],
+    },
     channels: {
       discord: {
+        allowFrom: [OWNER_ID],
         dm: {
           enabled: true,
           policy: "open",
@@ -86,7 +92,7 @@ function createModelPickerContext(): ModelPickerContext {
 }
 
 function createInteraction(params?: { userId?: string; values?: string[] }): MockInteraction {
-  const userId = params?.userId ?? "owner";
+  const userId = params?.userId ?? OWNER_ID;
   const interaction = {
     user: {
       id: userId,
@@ -150,7 +156,7 @@ function createModelsViewSelectData(): PickerSelectData {
     cmd: "model",
     act: "model",
     view: "models",
-    u: "owner",
+    u: OWNER_ID,
     p: "openai",
     pg: "1",
   };
@@ -161,7 +167,7 @@ function createModelsViewSubmitData(): PickerButtonData {
     cmd: "model",
     act: "submit",
     view: "models",
-    u: "owner",
+    u: OWNER_ID,
     p: "openai",
     pg: "1",
     mi: "2",
@@ -215,7 +221,7 @@ async function runSubmitButton(params: {
   userId?: string;
 }) {
   const button = createModelPickerFallbackButton(params.context, params.dispatchCommandInteraction);
-  const submitInteraction = createInteraction({ userId: params.userId ?? "owner" });
+  const submitInteraction = createInteraction({ userId: params.userId ?? OWNER_ID });
   await button.run(submitInteraction as unknown as PickerButtonInteraction, params.data);
   return submitInteraction;
 }
@@ -229,7 +235,7 @@ async function runModelSelect(params: {
 }) {
   const select = createModelPickerFallbackSelect(params.context, params.dispatchCommandInteraction);
   const selectInteraction = createInteraction({
-    userId: params.userId ?? "owner",
+    userId: params.userId ?? OWNER_ID,
     values: params.values ?? ["gpt-4o"],
   });
   await select.run(
@@ -322,7 +328,7 @@ describe("Discord model picker interactions", () => {
       cmd: "model",
       act: "back",
       view: "providers",
-      u: "owner",
+      u: OWNER_ID,
       pg: "1",
     };
 
@@ -343,7 +349,7 @@ describe("Discord model picker interactions", () => {
         return pickerData;
       });
     const select = createModelPickerFallbackSelect(context);
-    const interaction = createInteraction({ userId: "owner", values: ["gpt-4o"] });
+    const interaction = createInteraction({ userId: OWNER_ID, values: ["gpt-4o"] });
 
     await select.run(
       interaction as unknown as PickerSelectInteraction,
@@ -396,7 +402,7 @@ describe("Discord model picker interactions", () => {
     mockModelCommandPipeline(modelCommand);
 
     const dispatchSpy = createDispatchSpy();
-    const submitInteraction = createInteraction({ userId: "owner" });
+    const submitInteraction = createInteraction({ userId: OWNER_ID });
     defineThrowingDiscordChannelGetter(submitInteraction.channel, "name");
 
     const button = createModelPickerFallbackButton(context, dispatchSpy);
@@ -550,6 +556,12 @@ describe("Discord model picker interactions", () => {
 
   it("applies the selected model even when component thread parent.name throws on a partial channel", async () => {
     const context = createModelPickerContext();
+    context.threadBindings = createBoundThreadBindingManager({
+      accountId: "default",
+      threadId: "thread-1",
+      targetSessionKey: "agent:worker:subagent:thread-1",
+      agentId: "worker",
+    });
     const pickerData = createDefaultModelPickerData();
     const modelCommand = createModelCommandDefinition();
 
@@ -557,7 +569,7 @@ describe("Discord model picker interactions", () => {
     mockModelCommandPipeline(modelCommand);
 
     const dispatchSpy = createDispatchSpy();
-    const submitInteraction = createInteraction({ userId: "owner" });
+    const submitInteraction = createInteraction({ userId: OWNER_ID });
     submitInteraction.guild = { id: "guild-1" };
     const threadChannel = {
       type: ChannelType.PublicThread,
@@ -590,7 +602,7 @@ describe("Discord model picker interactions", () => {
   });
 
   it("ignores category parent metadata for non-thread component channels", () => {
-    const interaction = createInteraction({ userId: "owner" });
+    const interaction = createInteraction({ userId: OWNER_ID });
     interaction.guild = { id: "guild-1" };
     interaction.channel = {
       type: ChannelType.GuildText,
@@ -629,7 +641,7 @@ describe("Discord model picker interactions", () => {
     await runModelSelect({ context, dispatchCommandInteraction: dispatchSpy });
 
     const button = createModelPickerFallbackButton(context, dispatchSpy);
-    const submitInteraction = createInteraction({ userId: "owner" });
+    const submitInteraction = createInteraction({ userId: OWNER_ID });
     const submitData = createModelsViewSubmitData();
 
     await button.run(submitInteraction as unknown as PickerButtonInteraction, submitData);
@@ -659,13 +671,13 @@ describe("Discord model picker interactions", () => {
     ]);
 
     const button = createModelPickerFallbackButton(context);
-    const interaction = createInteraction({ userId: "owner" });
+    const interaction = createInteraction({ userId: OWNER_ID });
 
     const data: PickerButtonData = {
       cmd: "model",
       act: "recents",
       view: "recents",
-      u: "owner",
+      u: OWNER_ID,
       p: "openai",
       pg: "1",
     };
@@ -700,7 +712,7 @@ describe("Discord model picker interactions", () => {
         cmd: "model",
         act: "submit",
         view: "recents",
-        u: "owner",
+        u: OWNER_ID,
         pg: "1",
         rs: "2",
       },
@@ -740,7 +752,7 @@ describe("Discord model picker interactions", () => {
         cmd: "model",
         act: "submit",
         view: "recents",
-        u: "owner",
+        u: OWNER_ID,
         p: "openai",
         ri: "1",
         pg: "1",
@@ -774,7 +786,7 @@ describe("Discord model picker interactions", () => {
 
     const select = createModelPickerFallbackSelect(context, dispatchSpy);
     const selectInteraction = createInteraction({
-      userId: "owner",
+      userId: OWNER_ID,
       values: ["gpt-4o"],
     });
     selectInteraction.channel = {
@@ -785,7 +797,7 @@ describe("Discord model picker interactions", () => {
     await select.run(selectInteraction as unknown as PickerSelectInteraction, selectData);
 
     const button = createModelPickerFallbackButton(context, dispatchSpy);
-    const submitInteraction = createInteraction({ userId: "owner" });
+    const submitInteraction = createInteraction({ userId: OWNER_ID });
     submitInteraction.channel = {
       type: ChannelType.PublicThread,
       id: "thread-bound",
@@ -828,7 +840,7 @@ describe("Discord model picker interactions", () => {
 
     const dispatchSpy = createDispatchSpy();
     const button = createModelPickerFallbackButton(context, dispatchSpy);
-    const submitInteraction = createInteraction({ userId: "owner" });
+    const submitInteraction = createInteraction({ userId: OWNER_ID });
     submitInteraction.channel = {
       type: ChannelType.PublicThread,
       id: "thread-bound",
@@ -882,7 +894,7 @@ describe("Discord model picker interactions", () => {
       context,
       vi.fn<DispatchDiscordCommandInteraction>().mockResolvedValue({ accepted: false }),
     );
-    const submitInteraction = createInteraction({ userId: "owner" });
+    const submitInteraction = createInteraction({ userId: OWNER_ID });
     submitInteraction.channel = {
       type: ChannelType.PublicThread,
       id: "thread-bound",
@@ -912,7 +924,7 @@ describe("Discord model picker interactions", () => {
     const loadSpy = vi
       .spyOn(modelPickerModule, "loadDiscordModelPickerData")
       .mockResolvedValue(createDefaultModelPickerData());
-    const interaction = createInteraction({ userId: "owner" });
+    const interaction = createInteraction({ userId: OWNER_ID });
     interaction.guild = { id: "guild-1" };
     interaction.channel = {
       type: ChannelType.PublicThread,
@@ -925,7 +937,7 @@ describe("Discord model picker interactions", () => {
       interaction: interaction as never,
       cfg: context.cfg,
       command: "model",
-      userId: "owner",
+      userId: OWNER_ID,
       accountId: context.accountId,
       threadBindings: context.threadBindings,
       preferFollowUp: false,
@@ -933,6 +945,33 @@ describe("Discord model picker interactions", () => {
     });
 
     expect(loadSpy).toHaveBeenCalledWith(context.cfg, "worker");
+  });
+
+  it("rejects an unbound shared picker before loading model data", async () => {
+    const context = createModelPickerContext();
+    const loadSpy = vi.spyOn(modelPickerModule, "loadDiscordModelPickerData");
+    const interaction = createInteraction({ userId: OWNER_ID });
+    interaction.guild = { id: "guild-1" };
+    interaction.channel = {
+      type: ChannelType.GuildText,
+      id: "channel-1",
+      name: "shared",
+    };
+
+    await expect(
+      replyWithDiscordModelPickerProviders({
+        interaction: interaction as never,
+        cfg: context.cfg,
+        command: "model",
+        userId: OWNER_ID,
+        accountId: context.accountId,
+        threadBindings: context.threadBindings,
+        preferFollowUp: false,
+        safeInteractionCall: async (_label, fn) => await fn(),
+      }),
+    ).rejects.toThrow(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+
+    expect(loadSpy).not.toHaveBeenCalled();
   });
 
   it("opens the first visible provider when the current model provider is filtered out", async () => {
@@ -948,7 +987,7 @@ describe("Discord model picker interactions", () => {
     const loadSpy = vi
       .spyOn(modelPickerModule, "loadDiscordModelPickerData")
       .mockResolvedValue(pickerData);
-    const interaction = createInteraction({ userId: "owner" });
+    const interaction = createInteraction({ userId: OWNER_ID });
     const cfg = {
       ...context.cfg,
       agents: {
@@ -966,7 +1005,7 @@ describe("Discord model picker interactions", () => {
       interaction: interaction as never,
       cfg,
       command: "model",
-      userId: "owner",
+      userId: OWNER_ID,
       accountId: context.accountId,
       threadBindings: context.threadBindings,
       preferFollowUp: false,
@@ -991,13 +1030,13 @@ describe("Discord model picker interactions", () => {
     const pickerData = createModelsProviderData(entries);
     pickerData.resolvedDefault = { provider: "provider-30", model: "model" };
     vi.spyOn(modelPickerModule, "loadDiscordModelPickerData").mockResolvedValue(pickerData);
-    const interaction = createInteraction({ userId: "owner" });
+    const interaction = createInteraction({ userId: OWNER_ID });
 
     await replyWithDiscordModelPickerProviders({
       interaction: interaction as never,
       cfg: context.cfg,
       command: "model",
-      userId: "owner",
+      userId: OWNER_ID,
       accountId: context.accountId,
       threadBindings: context.threadBindings,
       preferFollowUp: false,

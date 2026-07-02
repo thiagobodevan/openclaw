@@ -455,6 +455,238 @@ describe("agentCommand", () => {
     ).rejects.toThrow("allowModelOverride must be explicitly set for ingress agent runs.");
   });
 
+  it("denies unbound shared ingress before agent execution and admits a bound service agent", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, undefined, undefined, [
+        { id: "personal", default: true },
+        { id: "team-ops" },
+      ]);
+
+      await expect(
+        agentCommandFromIngress(
+          {
+            message: "shared request",
+            agentId: "personal",
+            allowModelOverride: false,
+            identityContractVersion: 1,
+            runContext: {
+              messageChannel: "discord",
+              chatType: "channel",
+              routeMatchedBy: "default",
+              groupSpace: "guild-1",
+            },
+          },
+          runtime,
+        ),
+      ).rejects.toThrow("not bound to a shared service agent");
+      expect(attemptExecutionRuntime.runAgentAttempt).not.toHaveBeenCalled();
+
+      await agentCommandFromIngress(
+        {
+          message: "team request",
+          agentId: "team-ops",
+          allowModelOverride: false,
+          senderIsOwner: false,
+          identityContractVersion: 1,
+          runContext: {
+            messageChannel: "discord",
+            accountId: "operations",
+            chatType: "channel",
+            routeMatchedBy: "binding.guild",
+            groupId: "channel-1",
+            groupSpace: "guild-1",
+            memberRoleIds: ["role-1"],
+            senderId: "guest-1",
+          },
+        },
+        runtime,
+      );
+
+      expect(attemptExecutionRuntime.runAgentAttempt).toHaveBeenCalledTimes(1);
+      expect(attemptExecutionRuntime.runAgentAttempt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runContext: expect.objectContaining({
+            accountId: "operations",
+            chatType: "channel",
+            routeMatchedBy: "binding.guild",
+            groupId: "channel-1",
+            groupSpace: "guild-1",
+            memberRoleIds: ["role-1"],
+            senderId: "guest-1",
+          }),
+        }),
+      );
+    });
+  });
+
+  it("denies unbound shared ingress before reading persisted session state", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      writeSessionStoreSeed(store, {
+        "agent:personal:main": {
+          sessionId: "private-session",
+          updatedAt: Date.now(),
+        },
+      });
+      clearSessionStoreCacheForTest();
+      mockConfig(home, store, undefined, undefined, [
+        { id: "personal", default: true },
+        { id: "team-ops" },
+      ]);
+      const readFileSync = vi.spyOn(fs, "readFileSync");
+
+      try {
+        await expect(
+          agentCommandFromIngress(
+            {
+              message: "shared request",
+              sessionId: "private-session",
+              agentId: "personal",
+              allowModelOverride: false,
+              identityContractVersion: 1,
+              runContext: {
+                messageChannel: "discord",
+                chatType: "channel",
+                routeMatchedBy: "default",
+                groupSpace: "guild-1",
+              },
+            },
+            runtime,
+          ),
+        ).rejects.toThrow("not bound to a shared service agent");
+        expect(readFileSync.mock.calls.some(([filePath]) => filePath === store)).toBe(false);
+      } finally {
+        readFileSync.mockRestore();
+      }
+    });
+  });
+
+  it("denies public ingress that omits route and audience provenance", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store);
+
+      await expect(
+        agentCommandFromIngress(
+          {
+            message: "unclassified request",
+            agentId: "main",
+            allowModelOverride: false,
+            identityContractVersion: 1,
+          } as never,
+          runtime,
+        ),
+      ).rejects.toThrow("not bound to a shared service agent");
+      expect(attemptExecutionRuntime.runAgentAttempt).not.toHaveBeenCalled();
+    });
+  });
+
+  it("preserves unversioned public SDK ingress behavior for existing plugins", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store);
+
+      await agentCommandFromIngress(
+        {
+          message: "legacy plugin request",
+          agentId: "main",
+          allowModelOverride: false,
+        },
+        runtime,
+      );
+
+      expect(attemptExecutionRuntime.runAgentAttempt).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("keeps explicitly internal ingress group metadata without a channel route", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, undefined, undefined, [
+        { id: "personal", default: true },
+        { id: "team-ops" },
+      ]);
+
+      await agentCommandFromIngress(
+        {
+          message: "trusted group-session request",
+          agentId: "team-ops",
+          allowModelOverride: false,
+          identityContractVersion: 1,
+          runContext: {
+            isInternal: true,
+            messageChannel: "discord",
+            chatType: "channel",
+            groupId: "channel-1",
+            groupSpace: "guild-1",
+          },
+        },
+        runtime,
+      );
+
+      expect(attemptExecutionRuntime.runAgentAttempt).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("denies a shared service inter-session handoff into the personal default agent", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, undefined, undefined, [
+        { id: "personal", default: true },
+        { id: "team-ops" },
+      ]);
+
+      await expect(
+        agentCommandFromIngress(
+          {
+            message: "cross into personal",
+            agentId: "personal",
+            allowModelOverride: false,
+            identityContractVersion: 1,
+            inputProvenance: {
+              kind: "inter_session",
+              sourceSessionKey: "agent:team-ops:slack:channel:C_SHARED",
+              sourceTool: "sessions_send",
+            },
+            runContext: { isInternal: true, messageChannel: "webchat" },
+          },
+          runtime,
+        ),
+      ).rejects.toThrow("not bound to a shared service agent");
+      expect(attemptExecutionRuntime.runAgentAttempt).not.toHaveBeenCalled();
+    });
+  });
+
+  it("admits an unconfigured inter-session target only with revalidated live-child ownership", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store, undefined, undefined, [{ id: "main", default: true }]);
+      const request = {
+        message: "continue child",
+        sessionKey: "agent:removed-service:subagent:child",
+        allowModelOverride: false,
+        identityContractVersion: 1 as const,
+        inputProvenance: {
+          kind: "inter_session" as const,
+          sourceSessionKey: "agent:main:main",
+          sourceTool: "sessions_send",
+        },
+        runContext: { isInternal: true as const, messageChannel: "webchat" },
+      };
+
+      await expect(agentCommandFromIngress(request, runtime)).rejects.toThrow(
+        "not bound to a shared service agent",
+      );
+      await agentCommandFromIngress(
+        { ...request, trustedInterSessionTargetIsLiveOwnedChild: true },
+        runtime,
+      );
+
+      expect(attemptExecutionRuntime.runAgentAttempt).toHaveBeenCalledOnce();
+    });
+  });
+
   it("uses the selected agent thinkingDefault for fresh ingress runs", async () => {
     await withTempHome(async (home) => {
       const store = path.join(home, "sessions.json");
@@ -473,6 +705,8 @@ describe("agentCommand", () => {
           message: "ping",
           agentId: "main",
           allowModelOverride: false,
+          identityContractVersion: 1,
+          runContext: { isInternal: true },
         },
         runtime,
       );
@@ -597,7 +831,9 @@ describe("agentCommand", () => {
           messageChannel: "telegram",
           deliver: true,
           allowModelOverride: false,
+          identityContractVersion: 1,
           sessionEffects: "internal",
+          runContext: { isInternal: true, messageChannel: "telegram" },
         },
         runtime,
         { sendMessageTelegram },

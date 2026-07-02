@@ -15,7 +15,10 @@ import {
   resolveAuthorizedComponentInteraction,
   resolveInteractionCustomId,
 } from "./agent-components-helpers.js";
-import { dispatchDiscordComponentEvent } from "./agent-components.dispatch.js";
+import {
+  applyMatchingDiscordComponentRouteOverrides,
+  dispatchDiscordComponentEvent,
+} from "./agent-components.dispatch.js";
 import { dispatchPluginDiscordInteractiveEvent } from "./agent-components.plugin-interactive.js";
 import type { DiscordComponentControlHandlers } from "./agent-components.wildcard-controls.js";
 
@@ -46,22 +49,6 @@ async function handleDiscordComponentEvent(params: {
     return;
   }
 
-  const entry = await resolveDiscordComponentEntryWithPersistence({
-    id: parsed.componentId,
-    consume: false,
-  });
-  if (!entry) {
-    try {
-      await params.interaction.reply({
-        content: "This component has expired.",
-        ephemeral: true,
-      });
-    } catch {
-      // Interaction may have expired
-    }
-    return;
-  }
-
   const unauthorizedReply = `You are not authorized to use this ${params.componentLabel}.`;
   const authorized = await resolveAuthorizedComponentInteraction({
     ctx: params.ctx,
@@ -80,9 +67,37 @@ async function handleDiscordComponentEvent(params: {
     guildInfo,
     allowNameMatching,
     commandAuthorized,
+    admittedRoute,
     user,
     replyOpts,
   } = authorized;
+
+  const entry = await resolveDiscordComponentEntryWithPersistence({
+    id: parsed.componentId,
+    consume: false,
+  });
+  if (!entry) {
+    try {
+      await params.interaction.reply({
+        content: "This component has expired.",
+        ephemeral: true,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return;
+  }
+  if (!applyMatchingDiscordComponentRouteOverrides(admittedRoute.route, entry)) {
+    try {
+      await params.interaction.reply({
+        content: "This component is no longer valid.",
+        ephemeral: true,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return;
+  }
 
   const componentAllowed = await ensureComponentUserAllowed({
     entry,
@@ -183,6 +198,7 @@ async function handleDiscordComponentEvent(params: {
     guildInfo,
     eventText,
     replyToId: consumed.messageId ?? params.interaction.message?.id,
+    admittedRoute,
     routeOverrides: {
       sessionKey: consumed.sessionKey,
       agentId: consumed.agentId,
@@ -213,6 +229,21 @@ async function handleDiscordModalTrigger(params: {
     }
     return;
   }
+  const unauthorizedReply = "You are not authorized to use this form.";
+  const authorized = await resolveAuthorizedComponentInteraction({
+    ctx: params.ctx,
+    interaction: params.interaction,
+    label: params.label,
+    componentLabel: "form",
+    unauthorizedReply,
+    defer: false,
+  });
+  if (!authorized) {
+    return;
+  }
+  const { interactionCtx, channelCtx, user, replyOpts, allowNameMatching, admittedRoute } =
+    authorized;
+
   const entry = await resolveDiscordComponentEntryWithPersistence({
     id: parsed.componentId,
     consume: false,
@@ -221,6 +252,17 @@ async function handleDiscordModalTrigger(params: {
     try {
       await params.interaction.reply({
         content: "This button has expired.",
+        ephemeral: true,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return;
+  }
+  if (!applyMatchingDiscordComponentRouteOverrides(admittedRoute.route, entry)) {
+    try {
+      await params.interaction.reply({
+        content: "This form is no longer available.",
         ephemeral: true,
       });
     } catch {
@@ -242,20 +284,6 @@ async function handleDiscordModalTrigger(params: {
     return;
   }
 
-  const unauthorizedReply = "You are not authorized to use this form.";
-  const authorized = await resolveAuthorizedComponentInteraction({
-    ctx: params.ctx,
-    interaction: params.interaction,
-    label: params.label,
-    componentLabel: "form",
-    unauthorizedReply,
-    defer: false,
-  });
-  if (!authorized) {
-    return;
-  }
-  const { user, replyOpts, allowNameMatching } = authorized;
-
   const componentAllowed = await ensureComponentUserAllowed({
     entry,
     interaction: params.interaction,
@@ -269,11 +297,11 @@ async function handleDiscordModalTrigger(params: {
     return;
   }
 
-  const consumed = await resolveDiscordComponentEntryWithPersistence({
-    id: parsed.componentId,
-    consume: !entry.reusable,
+  const modalEntry = await resolveDiscordModalEntryWithPersistence({
+    id: modalId,
+    consume: false,
   });
-  if (!consumed) {
+  if (!modalEntry) {
     try {
       await params.interaction.reply({
         content: "This form has expired.",
@@ -284,13 +312,23 @@ async function handleDiscordModalTrigger(params: {
     }
     return;
   }
+  if (!applyMatchingDiscordComponentRouteOverrides(admittedRoute.route, modalEntry)) {
+    try {
+      await params.interaction.reply({
+        content: "This form is no longer available.",
+        ephemeral: true,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return;
+  }
 
-  const resolvedModalId = consumed.modalId ?? modalId;
-  const modalEntry = await resolveDiscordModalEntryWithPersistence({
-    id: resolvedModalId,
-    consume: false,
+  const consumed = await resolveDiscordComponentEntryWithPersistence({
+    id: parsed.componentId,
+    consume: !entry.reusable,
   });
-  if (!modalEntry) {
+  if (!consumed) {
     try {
       await params.interaction.reply({
         content: "This form has expired.",

@@ -21,12 +21,18 @@ import { resolveChannelMessageSourceReplyDeliveryMode } from "openclaw/plugin-sd
 import { hasControlCommand } from "openclaw/plugin-sdk/command-detection";
 import { isAbortRequestText } from "openclaw/plugin-sdk/command-primitives-runtime";
 import { shouldHandleTextCommands } from "openclaw/plugin-sdk/command-surface";
-import { ensureConfiguredBindingRouteReady } from "openclaw/plugin-sdk/conversation-runtime";
+import {
+  ensureConfiguredBindingRouteReady,
+  touchRuntimeConversationBindingRoute,
+} from "openclaw/plugin-sdk/conversation-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { mimeTypeFromFilePath } from "openclaw/plugin-sdk/media-mime";
 import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
 import type { FinalizedMsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
+import {
+  resolveConversationIdentityMode,
+  resolveInboundLastRouteSessionKey,
+} from "openclaw/plugin-sdk/routing";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
 import {
@@ -48,6 +54,7 @@ import {
   authorizeSlackBotRoomMessage,
   resolveSlackCommandIngress,
   resolveSlackEffectiveAllowFrom,
+  resolveSlackSenderIsOwner,
 } from "../auth.js";
 import { resolveSlackChannelConfig } from "../channel-config.js";
 import { stripSlackMentionsForCommandDetection } from "../commands.js";
@@ -628,6 +635,26 @@ export async function prepareSlackMessage(params: {
 }): Promise<PreparedSlackMessage | null> {
   const { ctx, account, message, opts } = params;
   const cfg = ctx.cfg;
+  const stableSenderId = message.user ?? message.bot_id;
+  const messageAssistantThreadContext = resolveSlackMessageAssistantThreadContext(message);
+  // Payload ids are sufficient to reject personal fallback before channel or
+  // subteam lookups and before assistant-thread cache restoration.
+  const identityRoute = ctx.resolveSlackSystemEventIdentityRoute({
+    channelId: messageAssistantThreadContext?.assistantChannelId ?? message.channel,
+    channelType: message.channel_type,
+    senderId: stableSenderId,
+    senderIsOwner: stableSenderId ? resolveSlackSenderIsOwner(ctx, stableSenderId) : false,
+    threadTs: messageAssistantThreadContext?.threadTs ?? message.thread_ts ?? message.ts,
+  });
+  if (!identityRoute) {
+    logInboundDrop({
+      log: logVerbose,
+      channel: "slack",
+      reason: "conversation identity not admitted",
+      target: message.channel,
+    });
+    return null;
+  }
   const conversation = await resolveSlackConversationContext({ ctx, account, message });
   const {
     channelInfo,
@@ -674,7 +701,6 @@ export async function prepareSlackMessage(params: {
     : isGroupDm
       ? "group"
       : "channel";
-  const messageAssistantThreadContext = resolveSlackMessageAssistantThreadContext(message);
   const assistantContextLookupChannelId =
     messageAssistantThreadContext?.assistantChannelId ?? message.channel;
   const assistantContextLookupThreadTs =
@@ -780,6 +806,16 @@ export async function prepareSlackMessage(params: {
     sessionKey,
     historyKey,
   } = routing;
+  const identityDecision = resolveConversationIdentityMode({
+    config: cfg,
+    agentId: route.agentId,
+    routeMatchedBy: route.matchedBy,
+    chatType: channelChatType,
+    groupId: isDirectMessage ? undefined : message.channel,
+    groupChannel: isDirectMessage ? undefined : channelName,
+    groupSpace: ctx.teamId,
+    senderIsOwner: resolveSlackSenderIsOwner(ctx, senderId),
+  });
   const isAssistantThreadMessage = Boolean(isDirectMessage && messageAssistantThreadContext);
   const shouldForceAssistantReplyThread = Boolean(
     assistantThreadContext?.threadTs &&
@@ -792,6 +828,15 @@ export async function prepareSlackMessage(params: {
     logVerbose(
       `slack: routed via bound conversation ${runtimeBinding.conversation.conversationId} -> ${runtimeBinding.targetSessionKey}`,
     );
+  }
+  if (!identityDecision.allowed) {
+    logInboundDrop({
+      log: logVerbose,
+      channel: "slack",
+      reason: "conversation identity not admitted",
+      target: message.channel,
+    });
+    return null;
   }
   if (configuredBinding) {
     const ensured = await ensureConfiguredBindingRouteReady({
@@ -1136,10 +1181,13 @@ export async function prepareSlackMessage(params: {
       ? `slack:channel:${message.channel}`
       : `slack:group:${message.channel}`;
 
-  enqueueSystemEvent(inboundLabel, {
-    sessionKey,
-    contextKey: `slack:message:${message.channel}:${message.ts ?? "unknown"}`,
-  });
+  if (identityDecision.allowed) {
+    enqueueSystemEvent(inboundLabel, {
+      sessionKey,
+      contextKey: `slack:message:${message.channel}:${message.ts ?? "unknown"}`,
+      actor: { channel: "slack", accountId: ctx.accountId, senderId },
+    });
+  }
 
   const envelopeFrom =
     resolveConversationLabel({
@@ -1284,6 +1332,7 @@ export async function prepareSlackMessage(params: {
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
+      matchedBy: route.matchedBy,
       routeSessionKey: sessionKey,
       parentSessionKey: threadKeys.parentSessionKey,
     },
@@ -1385,6 +1434,8 @@ export async function prepareSlackMessage(params: {
   if (!replyTarget) {
     return null;
   }
+
+  touchRuntimeConversationBindingRoute({ bindingRecord: runtimeBinding });
 
   if (shouldLogVerbose()) {
     logVerbose(`slack inbound: channel=${message.channel} from=${slackFrom} preview="${preview}"`);

@@ -9,7 +9,9 @@ import {
 import type { ResolvedAgentRoute } from "../../routing/resolve-route.js";
 import {
   ensureConfiguredBindingRouteReady,
+  lookupRuntimeConversationBindingRoute,
   resolveRuntimeConversationBindingRoute,
+  touchRuntimeConversationBindingRoute,
 } from "./binding-routing.js";
 import {
   registerStatefulBindingTargetDriver,
@@ -95,6 +97,26 @@ describe("runtime conversation binding route", () => {
       lastRoutePolicy: "session",
       matchedBy: "binding.channel",
     });
+  });
+
+  it("keeps lookup read-only until the admitted caller touches once", () => {
+    const binding = createBinding();
+    const { touch } = registerAdapter(binding);
+
+    const result = lookupRuntimeConversationBindingRoute({
+      route: createRoute(),
+      conversation: {
+        channel: "demo",
+        accountId: "default",
+        conversationId: "room-1",
+      },
+    });
+
+    expect(result.bindingRecord).toBe(binding);
+    expect(touch).not.toHaveBeenCalled();
+    touchRuntimeConversationBindingRoute(result);
+    expect(touch).toHaveBeenCalledOnce();
+    expect(touch).toHaveBeenCalledWith("binding-1", undefined);
   });
 
   it("touches plugin-owned bindings without rewriting the channel route", () => {

@@ -85,6 +85,71 @@ type ResolvedDriveCommentEventTurn = {
   preview: string;
 };
 
+export type FeishuDriveCommentNoticeFacts = {
+  eventId: string;
+  commentId: string;
+  replyId?: string;
+  noticeType: "add_comment" | "add_reply";
+  fileToken: string;
+  fileType: CommentFileType;
+  senderId: string;
+  senderUserId?: string;
+  timestamp?: string;
+  isMentioned?: boolean;
+};
+
+export function resolveDriveCommentNoticeFacts(params: {
+  event: FeishuDriveCommentNoticeEvent;
+  accountId: string;
+  botOpenId?: string;
+  logger?: (message: string) => void;
+}): FeishuDriveCommentNoticeFacts | null {
+  const { event, accountId, botOpenId, logger } = params;
+  const eventId = event.event_id?.trim();
+  const commentId = event.comment_id?.trim();
+  const replyId = event.reply_id?.trim();
+  const noticeType = event.notice_meta?.notice_type?.trim();
+  const fileToken = event.notice_meta?.file_token?.trim();
+  const fileType = normalizeCommentFileType(event.notice_meta?.file_type);
+  const senderId = event.notice_meta?.from_user_id?.open_id?.trim();
+  const senderUserId = normalizeString(event.notice_meta?.from_user_id?.user_id);
+  if (!eventId || !commentId || !noticeType || !fileToken || !fileType || !senderId) {
+    logger?.(
+      `feishu[${accountId}]: drive comment notice missing required fields event=${eventId ?? "unknown"} comment=${commentId ?? "unknown"}`,
+    );
+    return null;
+  }
+  if (noticeType !== "add_comment" && noticeType !== "add_reply") {
+    logger?.(`feishu[${accountId}]: unsupported drive comment notice type ${noticeType}`);
+    return null;
+  }
+  if (!botOpenId) {
+    logger?.(
+      `feishu[${accountId}]: skipping drive comment notice because bot open_id is unavailable ` +
+        `event=${eventId}`,
+    );
+    return null;
+  }
+  if (senderId === botOpenId) {
+    logger?.(
+      `feishu[${accountId}]: ignoring self-authored drive comment notice event=${eventId} sender=${senderId}`,
+    );
+    return null;
+  }
+  return {
+    eventId,
+    commentId,
+    replyId,
+    noticeType,
+    fileToken,
+    fileType,
+    senderId,
+    senderUserId,
+    timestamp: event.timestamp,
+    isMentioned: event.is_mentioned,
+  };
+}
+
 type FeishuRequestClient = ReturnType<typeof createFeishuClient> & {
   request(params: {
     method: "GET" | "POST";
@@ -1234,37 +1299,12 @@ async function resolveDriveCommentEventCore(params: ResolveDriveCommentEventPara
     logger,
     waitMs = delayMs,
   } = params;
-  const eventId = event.event_id?.trim();
-  const commentId = event.comment_id?.trim();
-  const replyId = event.reply_id?.trim();
-  const noticeType = event.notice_meta?.notice_type?.trim();
-  const fileToken = event.notice_meta?.file_token?.trim();
-  const fileType = normalizeCommentFileType(event.notice_meta?.file_type);
-  const senderId = event.notice_meta?.from_user_id?.open_id?.trim();
-  const senderUserId = normalizeString(event.notice_meta?.from_user_id?.user_id);
-  if (!eventId || !commentId || !noticeType || !fileToken || !fileType || !senderId) {
-    logger?.(
-      `feishu[${accountId}]: drive comment notice missing required fields event=${eventId ?? "unknown"} comment=${commentId ?? "unknown"}`,
-    );
+  const facts = resolveDriveCommentNoticeFacts({ event, accountId, botOpenId, logger });
+  if (!facts) {
     return null;
   }
-  if (noticeType !== "add_comment" && noticeType !== "add_reply") {
-    logger?.(`feishu[${accountId}]: unsupported drive comment notice type ${noticeType}`);
-    return null;
-  }
-  if (!botOpenId) {
-    logger?.(
-      `feishu[${accountId}]: skipping drive comment notice because bot open_id is unavailable ` +
-        `event=${eventId}`,
-    );
-    return null;
-  }
-  if (senderId === botOpenId) {
-    logger?.(
-      `feishu[${accountId}]: ignoring self-authored drive comment notice event=${eventId} sender=${senderId}`,
-    );
-    return null;
-  }
+  const { eventId, commentId, replyId, noticeType, fileToken, fileType, senderId, senderUserId } =
+    facts;
 
   const client = createClient
     ? createClient(account ?? ({ accountId } as ResolvedFeishuAccount))
@@ -1293,8 +1333,8 @@ async function resolveDriveCommentEventCore(params: ResolveDriveCommentEventPara
     isWholeComment: context.isWholeComment,
     senderId,
     senderUserId,
-    timestamp: event.timestamp,
-    isMentioned: event.is_mentioned,
+    timestamp: facts.timestamp,
+    isMentioned: facts.isMentioned,
     context,
   };
 }

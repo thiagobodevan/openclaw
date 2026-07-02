@@ -1,5 +1,6 @@
 // Qqbot type declarations define plugin contracts.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import type { AgentRouteMatch } from "openclaw/plugin-sdk/routing";
 import type { EngineLogger } from "../types.js";
 export type { EngineLogger };
 
@@ -21,7 +22,12 @@ export interface GatewayPluginRuntime {
         channel: string;
         accountId: string;
         peer: { kind: "group" | "direct"; id: string };
-      }) => { sessionKey: string; accountId: string; agentId?: string };
+      }) => {
+        sessionKey: string;
+        accountId: string;
+        agentId?: string;
+        matchedBy: AgentRouteMatch;
+      };
     };
     commands?: {
       isControlCommandMessage?: (text?: string, cfg?: unknown) => boolean;

@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isAllowlistedCaller, normalizePhoneNumber } from "../allowlist.js";
 import { resolveVoiceCallEffectiveConfig, resolveVoiceCallSessionKey } from "../config.js";
-import type { CallRecord, NormalizedEvent } from "../types.js";
+import type { CallRecord, NormalizedEvent, VoiceCallInboundIdentity } from "../types.js";
 import type { CallManagerContext } from "./context.js";
 import { finalizeCall } from "./lifecycle.js";
 import { findCall } from "./lookup.js";
@@ -29,37 +29,57 @@ type EventContext = Pick<
   | "maxDurationTimers"
   | "onCallAnswered"
   | "streamSessionIssuer"
+  | "admitInbound"
 >;
 
-function shouldAcceptInbound(config: EventContext["config"], from: string | undefined): boolean {
+function resolveInboundAdmission(
+  ctx: EventContext,
+  from: string | undefined,
+  to: string | undefined,
+): { accepted: boolean; identity?: VoiceCallInboundIdentity } {
+  const config = ctx.config;
   const { inboundPolicy: policy, allowFrom } = config;
 
   switch (policy) {
     case "disabled":
       console.log("[voice-call] Inbound call rejected: policy is disabled");
-      return false;
+      return { accepted: false };
 
-    case "open":
+    case "open": {
       console.log("[voice-call] Inbound call accepted: policy is open");
-      return true;
+      if (!ctx.admitInbound) {
+        return { accepted: true };
+      }
+      const openIdentity = ctx.admitInbound({ from, to });
+      return openIdentity ? { accepted: true, identity: openIdentity } : { accepted: false };
+    }
 
     case "allowlist":
     case "pairing": {
       const normalized = normalizePhoneNumber(from);
       if (!normalized) {
         console.log("[voice-call] Inbound call rejected: missing caller ID");
-        return false;
+        return { accepted: false };
       }
       const allowed = isAllowlistedCaller(normalized, allowFrom);
       const status = allowed ? "accepted" : "rejected";
       console.log(
         `[voice-call] Inbound call ${status}: ${from} ${allowed ? "is in" : "not in"} allowlist`,
       );
-      return allowed;
+      if (!allowed) {
+        return { accepted: false };
+      }
+      if (!ctx.admitInbound) {
+        return { accepted: true };
+      }
+      const allowlistedIdentity = ctx.admitInbound({ from, to });
+      return allowlistedIdentity
+        ? { accepted: true, identity: allowlistedIdentity }
+        : { accepted: false };
     }
 
     default:
-      return false;
+      return { accepted: false };
   }
 }
 
@@ -69,6 +89,7 @@ function createWebhookCall(params: {
   direction: "inbound" | "outbound";
   from: string;
   to: string;
+  inboundIdentity?: VoiceCallInboundIdentity;
 }): CallRecord {
   const callId = crypto.randomUUID();
   const effective = resolveVoiceCallEffectiveConfig(
@@ -93,6 +114,7 @@ function createWebhookCall(params: {
     startedAt: Date.now(),
     transcript: [],
     processedEventIds: [],
+    inboundIdentity: params.inboundIdentity,
     metadata: {
       initialMessage:
         params.direction === "inbound"
@@ -160,7 +182,11 @@ export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
   if (!call && providerCallId && eventDirection) {
     // Apply inbound policy for true inbound calls; external outbound-api calls
     // are implicitly trusted because the caller controls the webhook URL.
-    if (eventDirection === "inbound" && !shouldAcceptInbound(ctx.config, event.from)) {
+    const inboundAdmission =
+      eventDirection === "inbound"
+        ? resolveInboundAdmission(ctx, event.from, event.to)
+        : { accepted: true as const };
+    if (!inboundAdmission.accepted) {
       const pid = providerCallId;
       if (!ctx.provider) {
         console.warn(
@@ -196,6 +222,7 @@ export function processEvent(ctx: EventContext, event: NormalizedEvent): void {
       direction: eventDirection === "outbound" ? "outbound" : "inbound",
       from: event.from || "unknown",
       to: event.to || ctx.config.fromNumber || "unknown",
+      inboundIdentity: inboundAdmission.identity,
     });
 
     // Normalize event to internal ID for downstream consumers.

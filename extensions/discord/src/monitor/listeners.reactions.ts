@@ -1,6 +1,5 @@
 // Discord plugin module implements listeners.reactions behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import { danger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 import {
@@ -10,6 +9,7 @@ import {
   MessageReactionRemoveListener,
   type User,
 } from "../internal/discord.js";
+import { resolveAgentComponentRouteReady } from "./agent-components-context.js";
 import {
   isDiscordGroupAllowedByPolicy,
   normalizeDiscordSlug,
@@ -22,6 +22,7 @@ import {
 import { resolveDiscordDmCommandAccess } from "./dm-command-auth.js";
 import { formatDiscordReactionEmoji, formatDiscordUserTag } from "./format.js";
 import { runDiscordListenerWithSlowLog, type DiscordListenerLogger } from "./listeners.queue.js";
+import { resolveDiscordStableSenderIsOwner } from "./native-command-auth.js";
 import { resolveFetchedDiscordThreadLikeChannelContext } from "./thread-channel-context.js";
 
 type LoadedConfig = OpenClawConfig;
@@ -463,6 +464,32 @@ async function handleDiscordReactionEvent(
     const parentId = isThreadChannel ? channelContext.threadParentId : channelContext.parentId;
     const parentName = isThreadChannel ? channelContext.threadParentName : undefined;
     const parentSlug = isThreadChannel ? channelContext.threadParentSlug : "";
+    const route = await resolveAgentComponentRouteReady({
+      ctx: {
+        cfg: params.cfg,
+        accountId: params.accountId,
+        allowFrom: params.allowFrom,
+      },
+      rawGuildId: data.guild_id ?? undefined,
+      memberRoleIds,
+      isDirectMessage,
+      isGroupDm,
+      userId: user.id,
+      channelId: data.channel_id,
+      parentId,
+      senderIsOwner: resolveDiscordStableSenderIsOwner({
+        cfg: params.cfg,
+        providerAllowFrom: params.allowFrom,
+        sender: {
+          id: user.id,
+          name: user.username,
+          tag: formatDiscordUserTag(user),
+        },
+      }),
+    });
+    if (!route) {
+      return;
+    }
     let reactionBase: { baseText: string; contextKey: string } | null = null;
     const resolveReactionBase = () => {
       if (reactionBase) {
@@ -485,23 +512,12 @@ async function handleDiscordReactionEvent(
       reactionBase = { baseText, contextKey };
       return reactionBase;
     };
-    const emitReaction = (text: string, parentPeerId?: string) => {
+    const emitReaction = (text: string) => {
       const { contextKey } = resolveReactionBase();
-      const route = resolveAgentRoute({
-        cfg: params.cfg,
-        channel: "discord",
-        accountId: params.accountId,
-        guildId: data.guild_id ?? undefined,
-        memberRoleIds,
-        peer: {
-          kind: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
-          id: isDirectMessage ? user.id : data.channel_id,
-        },
-        parentPeer: parentPeerId ? { kind: "channel", id: parentPeerId } : undefined,
-      });
       enqueueSystemEvent(text, {
         sessionKey: route.sessionKey,
         contextKey,
+        actor: { channel: "discord", accountId: params.accountId, senderId: user.id },
       });
     };
     const shouldNotifyReaction = (options: {
@@ -525,7 +541,7 @@ async function handleDiscordReactionEvent(
       const { baseText } = resolveReactionBase();
       const authorLabel = message?.author ? formatDiscordUserTag(message.author) : undefined;
       const text = authorLabel ? `${baseText} from ${authorLabel}` : baseText;
-      emitReaction(text, parentId);
+      emitReaction(text);
     };
     const resolveThreadChannelConfig = () =>
       resolveDiscordChannelConfigWithFallback({

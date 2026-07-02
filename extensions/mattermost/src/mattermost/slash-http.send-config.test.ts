@@ -2,6 +2,7 @@
 import { ServerResponse, type IncomingMessage } from "node:http";
 import { PassThrough } from "node:stream";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
+import { EXTERNAL_CONVERSATION_IDENTITY_DENIAL } from "openclaw/plugin-sdk/routing";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedMattermostAccount } from "./accounts.js";
@@ -20,6 +21,9 @@ const mockState = vi.hoisted(() => ({
   resolveCommandText: vi.fn((_trigger: string, text: string) => text),
   buildModelsProviderData: vi.fn(async () => ({ providers: [], modelNames: new Map() })),
   resolveMattermostModelPickerEntry: vi.fn(() => ({ kind: "summary" })),
+  resolveAgentRoute: vi.fn(),
+  readAllowFromStore: vi.fn(async () => []),
+  upsertPairingRequest: vi.fn(async () => ({ code: "PAIRCODE", created: true })),
   authorizeMattermostCommandInvocation: vi.fn(() => ({
     ok: true,
     commandAuthorized: true,
@@ -85,14 +89,12 @@ vi.mock("../runtime.js", () => ({
         hasControlCommand: () => false,
       },
       pairing: {
-        readAllowFromStore: vi.fn(async () => []),
+        readAllowFromStore: mockState.readAllowFromStore,
+        upsertPairingRequest: mockState.upsertPairingRequest,
+        buildPairingReply: vi.fn(() => "Pairing required."),
       },
       routing: {
-        resolveAgentRoute: vi.fn(() => ({
-          agentId: "agent-1",
-          sessionKey: "mattermost:session:1",
-          accountId: "default",
-        })),
+        resolveAgentRoute: mockState.resolveAgentRoute,
       },
     },
   }),
@@ -120,6 +122,29 @@ vi.mock("./model-picker.js", () => ({
 vi.mock("./monitor-auth.js", () => ({
   authorizeMattermostCommandInvocation: mockState.authorizeMattermostCommandInvocation,
   normalizeMattermostAllowList: mockState.normalizeMattermostAllowList,
+  resolveMattermostCommandAudience: ({
+    channelId,
+    channelInfo,
+  }: {
+    channelId: string;
+    channelInfo: { type?: string; name?: string; display_name?: string } | null;
+  }) => {
+    if (!channelInfo?.type) {
+      return null;
+    }
+    const normalizedType = channelInfo.type.trim().toUpperCase();
+    const kind = normalizedType === "D" ? "direct" : normalizedType === "G" ? "group" : "channel";
+    const channelName = channelInfo.name ?? "";
+    const channelDisplay = channelInfo.display_name ?? channelName;
+    return {
+      channelInfo,
+      kind,
+      chatType: kind,
+      channelName,
+      channelDisplay,
+      roomLabel: channelName ? `#${channelName}` : channelDisplay || `#${channelId}`,
+    };
+  },
 }));
 
 vi.mock("./reply-delivery.js", () => ({
@@ -218,7 +243,15 @@ describe("slash-http cfg threading", () => {
     mockState.resolveCommandText.mockClear();
     mockState.buildModelsProviderData.mockClear();
     mockState.resolveMattermostModelPickerEntry.mockClear();
+    mockState.resolveAgentRoute.mockReset().mockReturnValue({
+      agentId: "agent-1",
+      sessionKey: "mattermost:session:1",
+      accountId: "default",
+      matchedBy: "binding.peer",
+    });
     mockState.authorizeMattermostCommandInvocation.mockClear();
+    mockState.readAllowFromStore.mockClear();
+    mockState.upsertPairingRequest.mockClear();
     mockState.createMattermostClient.mockClear();
     mockState.fetchMattermostChannel.mockClear();
     mockState.sendMessageMattermost.mockClear();
@@ -265,6 +298,96 @@ describe("slash-http cfg threading", () => {
         accountId: "default",
       },
     );
+  });
+
+  it("rejects an unbound shared picker before reading model state", async () => {
+    mockState.resolveAgentRoute.mockReturnValueOnce({
+      agentId: "main",
+      sessionKey: "agent:main:mattermost:channel:chan-1",
+      accountId: "default",
+      matchedBy: "default",
+    });
+    const cfg = {
+      agents: { list: [{ id: "main", default: true }] },
+    } as OpenClawConfig;
+    const handler = createSlashCommandHttpHandler({
+      account: accountFixture,
+      cfg,
+      runtime: {} as RuntimeEnv,
+      registeredCommands: [
+        {
+          id: "cmd-1",
+          teamId: "team-1",
+          trigger: "oc_models",
+          token: "valid-token",
+          url: callbackUrlFixture,
+          managed: false,
+        },
+      ],
+    });
+    const response = createResponse();
+
+    await handler(createRequest(), response.res);
+
+    expect(response.res.statusCode).toBe(200);
+    expect(response.getBody()).toContain(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+    expect(mockState.authorizeMattermostCommandInvocation).not.toHaveBeenCalled();
+    expect(mockState.buildModelsProviderData).not.toHaveBeenCalled();
+    expect(mockState.sendMessageMattermost).not.toHaveBeenCalled();
+  });
+
+  it("denies an untrusted personal route before creating a pairing request", async () => {
+    mockState.fetchMattermostChannel.mockResolvedValueOnce({
+      id: "chan-1",
+      type: "D",
+      name: "",
+      display_name: "",
+    });
+    mockState.resolveAgentRoute.mockReturnValueOnce({
+      agentId: "main",
+      sessionKey: "agent:main:mattermost:direct:user-1",
+      accountId: "default",
+      matchedBy: "default",
+    });
+    mockState.authorizeMattermostCommandInvocation.mockReturnValueOnce({
+      ok: false,
+      denyReason: "dm-pairing",
+      commandAuthorized: false,
+      channelInfo: { id: "chan-1", type: "D" },
+      kind: "direct",
+      chatType: "direct",
+      channelName: "",
+      channelDisplay: "",
+      roomLabel: "#chan-1",
+    });
+    const cfg = {
+      agents: { list: [{ id: "main", default: true }] },
+      commands: { ownerAllowFrom: ["U_OWNER"] },
+    } as OpenClawConfig;
+    const handler = createSlashCommandHttpHandler({
+      account: accountFixture,
+      cfg,
+      runtime: {} as RuntimeEnv,
+      registeredCommands: [
+        {
+          id: "cmd-1",
+          teamId: "team-1",
+          trigger: "oc_models",
+          token: "valid-token",
+          url: callbackUrlFixture,
+          managed: false,
+        },
+      ],
+    });
+    const response = createResponse();
+
+    await handler(createRequest(), response.res);
+
+    expect(response.res.statusCode).toBe(200);
+    expect(response.getBody()).toContain(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+    expect(mockState.authorizeMattermostCommandInvocation).not.toHaveBeenCalled();
+    expect(mockState.readAllowFromStore).not.toHaveBeenCalled();
+    expect(mockState.upsertPairingRequest).not.toHaveBeenCalled();
   });
 
   it("rejects a callback when Mattermost reports a different current command token", async () => {

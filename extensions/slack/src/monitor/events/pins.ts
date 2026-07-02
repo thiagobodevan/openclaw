@@ -44,6 +44,7 @@ async function handleSlackPinEvent(params: {
       {
         sessionKey: ingressContext.sessionKey,
         contextKey: `slack:pin:${contextKeySuffix}:${channelId ?? "unknown"}:${messageId ?? "unknown"}`,
+        actor: { channel: "slack", accountId: ctx.accountId, senderId: payload.user ?? "" },
       },
     );
   } catch (err) {

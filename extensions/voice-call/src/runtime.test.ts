@@ -398,6 +398,34 @@ describe("createVoiceCallRuntime lifecycle", () => {
     await runtime.stop();
   });
 
+  it("warns at startup when inbound calls can fall through to the personal default", async () => {
+    const config = createBaseConfig();
+    config.inboundPolicy = "allowlist";
+    config.allowFrom = ["+15550005678"];
+    config.numbers["+15550009999"] = {};
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const runtime = await createVoiceCallRuntime({
+      config,
+      coreConfig: { agents: { list: [{ id: "personal", default: true }] } } as CoreConfig,
+      agentRuntime: {} as never,
+      logger,
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "[voice-call] Inbound calls without a matching number route will be rejected. Configure agentId with a non-default service agent.",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "[voice-call] 1 inbound number route(s) will be rejected. Configure numbers.<dialed-number>.agentId with a non-default service agent.",
+    );
+
+    await runtime.stop();
+  });
+
   it("wires realtime consults and keeps outbound calls off inbound number routes", async () => {
     const config = createBaseConfig();
     config.inboundPolicy = "allowlist";
@@ -406,6 +434,8 @@ describe("createVoiceCallRuntime lifecycle", () => {
       responseModel: "openai/gpt-5.5",
     };
     config.realtime.enabled = true;
+    config.realtime.agentContext.enabled = true;
+    config.realtime.agentContext.includeIdentity = true;
     config.realtime.tools = [
       {
         type: "function",
@@ -423,7 +453,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
       defaults: { provider: "openai", model: "gpt-5.4" },
       resolveAgentDir: vi.fn(() => "/tmp/agent"),
       resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace"),
-      resolveAgentIdentity: vi.fn(),
+      resolveAgentIdentity: vi.fn(() => ({ name: "Personal Agent" })),
       resolveThinkingDefault: vi.fn(() => "high"),
       resolveAgentTimeoutMs: vi.fn(() => 30_000),
       ensureAgentWorkspace: vi.fn(async () => {}),
@@ -457,6 +487,8 @@ describe("createVoiceCallRuntime lifecycle", () => {
       "openclaw_agent_consult",
       "custom_tool",
     ]);
+    expect(realtimeHandlerOptions.instructions).not.toContain("Personal Agent");
+    expect(agentRuntime.resolveAgentIdentity).not.toHaveBeenCalled();
     const handler = requireRealtimeConsultToolHandler();
     await expect(
       handler({ question: "What should I say?" }, "call-1", {
@@ -489,11 +521,12 @@ describe("createVoiceCallRuntime lifecycle", () => {
     expect(consultParams.prompt).toContain("Caller: Also check the ETA.");
   });
 
-  it("canonicalizes restored legacy per-call keys for realtime consults", async () => {
+  it("keeps restored realtime calls on their admitted agent after route reassignment", async () => {
     const config = createBaseConfig();
     config.inboundPolicy = "allowlist";
     config.realtime.enabled = true;
     config.sessionScope = "per-call";
+    config.agentId = "reassigned-service";
     const runEmbeddedAgent = vi.fn(async () => ({
       payloads: [{ text: "Per-call consult answer." }],
       meta: {},
@@ -516,12 +549,29 @@ describe("createVoiceCallRuntime lifecycle", () => {
       direction: "inbound",
       from: "+15550001234",
       to: "+15550009999",
+      inboundIdentity: {
+        agentId: "team-service",
+        routeMatchedBy: "config.agent",
+        chatType: "direct",
+        senderId: "+15550001234",
+        senderE164: "+15550001234",
+        senderIsOwner: false,
+        responsePolicy: {
+          model: "openai/admission-model",
+          systemPrompt: "Admission-time service prompt.",
+          timeoutMs: 7000,
+        },
+      },
       transcript: [],
     });
 
     await createVoiceCallRuntime({
       config,
-      coreConfig: {} as CoreConfig,
+      coreConfig: {
+        agents: {
+          list: [{ id: "team-service" }, { id: "reassigned-service", default: true }],
+        },
+      } as CoreConfig,
       agentRuntime: agentRuntime as never,
     });
 
@@ -537,7 +587,73 @@ describe("createVoiceCallRuntime lifecycle", () => {
       ),
       "per-call embedded OpenClaw consult params",
     );
-    expect(consultParams.sessionKey).toBe("agent:main:voice:call:call-1");
+    expect(consultParams.sessionKey).toBe("agent:team-service:voice:call:call-1");
+    expect(consultParams).toMatchObject({
+      routeMatchedBy: "config.agent",
+      chatType: "direct",
+      senderId: "+15550001234",
+      senderE164: "+15550001234",
+      senderIsOwner: false,
+      provider: "openai",
+      model: "admission-model",
+      timeoutMs: 7000,
+    });
+    expect(mocks.resolveRealtimeFastContextConsult).not.toHaveBeenCalled();
+  });
+
+  it("rejects restored realtime calls after their admitted agent is removed", async () => {
+    const config = createBaseConfig();
+    config.inboundPolicy = "allowlist";
+    config.realtime.enabled = true;
+    config.sessionScope = "per-call";
+    config.agentId = "reassigned-service";
+    const runEmbeddedAgent = vi.fn();
+    const sessionRuntime = createMockSessionRuntime({});
+    const agentRuntime = {
+      defaults: { provider: "openai", model: "gpt-5.4" },
+      resolveAgentDir: vi.fn(() => "/tmp/agent"),
+      resolveAgentWorkspaceDir: vi.fn(() => "/tmp/workspace"),
+      resolveAgentIdentity: vi.fn(),
+      resolveThinkingDefault: vi.fn(() => "high"),
+      resolveAgentTimeoutMs: vi.fn(() => 30_000),
+      ensureAgentWorkspace: vi.fn(async () => {}),
+      session: sessionRuntime,
+      runEmbeddedAgent,
+    };
+    mocks.managerGetCall.mockReturnValue({
+      callId: "call-1",
+      sessionKey: "voice:call:call-1",
+      direction: "inbound",
+      from: "+15550001234",
+      to: "+15550009999",
+      inboundIdentity: {
+        agentId: "removed-service",
+        routeMatchedBy: "config.agent",
+        chatType: "direct",
+        senderId: "+15550001234",
+        senderE164: "+15550001234",
+        senderIsOwner: false,
+        responsePolicy: { model: null, systemPrompt: null, timeoutMs: 30000 },
+      },
+      transcript: [],
+    });
+
+    await createVoiceCallRuntime({
+      config,
+      coreConfig: {
+        agents: { list: [{ id: "reassigned-service", default: true }] },
+      } as CoreConfig,
+      agentRuntime: agentRuntime as never,
+    });
+
+    const handler = requireRealtimeConsultToolHandler();
+    await expect(handler({ question: "What should I say?" }, "call-1")).resolves.toEqual({
+      error: "Inbound call agent is no longer configured",
+    });
+    expect(runEmbeddedAgent).not.toHaveBeenCalled();
+    expect(sessionRuntime.resolveStorePath).not.toHaveBeenCalled();
+    expect(agentRuntime.resolveAgentWorkspaceDir).not.toHaveBeenCalled();
+    expect(mocks.resolveRealtimeFastContextConsult).not.toHaveBeenCalled();
   });
 
   it("answers realtime consults from fast memory context before starting the full agent", async () => {
@@ -567,7 +683,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
     };
     mocks.managerGetCall.mockReturnValue({
       callId: "call-1",
-      direction: "inbound",
+      direction: "outbound",
       from: "+15550001234",
       to: "+15550009999",
       transcript: [],
@@ -606,7 +722,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
         error: console.error,
         debug: console.debug,
       },
-      sessionKey: "agent:main:voice:15550001234",
+      sessionKey: "agent:main:voice:15550009999",
     });
     expect(runEmbeddedAgent).not.toHaveBeenCalled();
   });

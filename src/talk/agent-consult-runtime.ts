@@ -2,10 +2,12 @@
 import { randomUUID } from "node:crypto";
 import type { RunEmbeddedAgentParams } from "../agents/embedded-agent-runner/run/params.js";
 import { forkSessionEntryFromParent } from "../auto-reply/reply/session-fork.js";
+import type { ChatType } from "../channels/chat-type.js";
 import { parseSessionThreadInfoFast } from "../config/sessions/thread-info.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { RuntimeLogger, PluginRuntimeCore } from "../plugins/runtime/types-core.js";
+import type { AgentRouteMatch } from "../routing/resolve-route.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import {
   deliveryContextFromSession,
@@ -222,6 +224,14 @@ export async function consultRealtimeVoiceAgent(params: {
   assistantLabel?: string;
   questionSourceLabel?: string;
   agentId?: string;
+  routeMatchedBy?: AgentRouteMatch;
+  chatType?: ChatType;
+  groupId?: string | null;
+  groupChannel?: string | null;
+  groupSpace?: string | null;
+  senderId?: string | null;
+  senderE164?: string | null;
+  senderIsOwner?: boolean;
   spawnedBy?: string | null;
   contextMode?: RealtimeVoiceAgentConsultContextMode;
   provider?: RunEmbeddedAgentParams["provider"];
@@ -277,6 +287,14 @@ export async function consultRealtimeVoiceAgent(params: {
     },
     sandboxSessionKey: resolveRealtimeVoiceAgentSandboxSessionKey(agentId, params.sessionKey),
     agentId,
+    routeMatchedBy: params.routeMatchedBy,
+    chatType: params.chatType,
+    groupId: params.groupId,
+    groupChannel: params.groupChannel,
+    groupSpace: params.groupSpace,
+    senderId: params.senderId,
+    senderE164: params.senderE164,
+    senderIsOwner: params.senderIsOwner,
     spawnedBy: params.spawnedBy,
     messageProvider: consultDeliveryContext?.channel ?? params.messageProvider,
     agentAccountId: consultDeliveryContext?.accountId,

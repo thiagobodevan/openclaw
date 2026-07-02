@@ -5,7 +5,12 @@ import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { VoiceCallConfig, VoiceCallCoreSessionConfig } from "./config.js";
-import type { CallManagerContext, StreamSessionIssuer } from "./manager/context.js";
+import type {
+  CallManagerContext,
+  InboundCallAdmission,
+  InboundCallIdentityValidation,
+  StreamSessionIssuer,
+} from "./manager/context.js";
 import { processEvent as processManagerEvent } from "./manager/events.js";
 import { getCallByProviderCallId as getCallByProviderCallIdFromMaps } from "./manager/lookup.js";
 import {
@@ -103,15 +108,21 @@ export class CallManager {
    * Telnyx) that attach Media Streaming at dial or answer time.
    */
   streamSessionIssuer: StreamSessionIssuer | undefined;
+  private readonly admitInbound: InboundCallAdmission | undefined;
+  private readonly validateInboundIdentity: InboundCallIdentityValidation | undefined;
 
   constructor(
     config: VoiceCallConfig,
     storePath?: string,
     coreSession?: VoiceCallCoreSessionConfig,
+    admitInbound?: InboundCallAdmission,
+    validateInboundIdentity?: InboundCallIdentityValidation,
   ) {
     this.config = config;
     this.coreSession = coreSession;
     this.storePath = resolveDefaultStoreBase(config, storePath);
+    this.admitInbound = admitInbound;
+    this.validateInboundIdentity = validateInboundIdentity;
   }
 
   /**
@@ -202,12 +213,39 @@ export class CallManager {
     const verifyTasks: Array<{ callId: CallId; call: CallRecord; promise: Promise<void> }> = [];
     let skippedNoProviderCallId = 0;
     let skippedOlderThanMaxDuration = 0;
+    let skippedRemovedInboundIdentity = 0;
     const skippedTerminalStatuses = new Map<string, number>();
     let keptVerifiedActive = 0;
     let keptUnknownProviderStatus = 0;
     let keptVerificationFailures = 0;
 
     for (const [callId, call] of candidates) {
+      if (
+        call.direction === "inbound" &&
+        call.inboundIdentity &&
+        this.validateInboundIdentity &&
+        !this.validateInboundIdentity(call.inboundIdentity, call)
+      ) {
+        skippedRemovedInboundIdentity += 1;
+        markRestoredCallSkipped(call, "completed");
+        persistCallRecord(this.storePath, call);
+        if (call.providerCallId) {
+          await provider
+            .hangupCall({
+              callId,
+              providerCallId: call.providerCallId,
+              reason: "hangup-bot",
+            })
+            .catch((err: unknown) => {
+              console.warn(
+                `[voice-call] Failed to hang up restored call for removed agent ${callId}:`,
+                err instanceof Error ? err.message : String(err),
+              );
+            });
+        }
+        continue;
+      }
+
       // Skip calls without a provider ID — can't verify
       if (!call.providerCallId) {
         skippedNoProviderCallId += 1;
@@ -270,6 +308,11 @@ export class CallManager {
     if (skippedOlderThanMaxDuration > 0) {
       console.log(
         `[voice-call] Skipped ${skippedOlderThanMaxDuration} restored call(s) older than maxDurationSeconds`,
+      );
+    }
+    if (skippedRemovedInboundIdentity > 0) {
+      console.log(
+        `[voice-call] Skipped ${skippedRemovedInboundIdentity} restored inbound call(s) for removed agents`,
       );
     }
     for (const [status, count] of [...skippedTerminalStatuses].toSorted(([a], [b]) =>
@@ -370,6 +413,7 @@ export class CallManager {
         this.maybeSpeakInitialMessageOnAnswered(call);
       },
       streamSessionIssuer: this.streamSessionIssuer,
+      admitInbound: this.admitInbound,
     };
   }
 

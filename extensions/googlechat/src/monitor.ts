@@ -7,6 +7,7 @@ import { mergePairLoopGuardConfig } from "openclaw/plugin-sdk/pair-loop-guard-ru
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../runtime-api.js";
 import {
+  resolveConversationIdentityMode,
   resolveInboundRouteEnvelopeBuilderWithRuntime,
   resolveWebhookPath,
 } from "../runtime-api.js";
@@ -14,7 +15,10 @@ import type { ResolvedGoogleChatAccount } from "./accounts.js";
 import { downloadGoogleChatMedia, sendGoogleChatMessage } from "./api.js";
 import { maybeHandleGoogleChatApprovalCardClick } from "./approval-card-click.js";
 import type { GoogleChatAudienceType } from "./auth.js";
-import { applyGoogleChatInboundAccessPolicy } from "./monitor-access.js";
+import {
+  applyGoogleChatInboundAccessPolicy,
+  resolveGoogleChatStableSenderIsOwner,
+} from "./monitor-access.js";
 import { resolveGoogleChatDurableReplyOptions } from "./monitor-durable.js";
 import { deliverGoogleChatReply } from "./monitor-reply-delivery.js";
 import {
@@ -276,6 +280,23 @@ async function processMessageWithPipeline(params: {
     runtime: core.channel,
     sessionStore: config.session?.store,
   });
+  const identityDecision = resolveConversationIdentityMode({
+    config,
+    agentId: route.agentId,
+    routeMatchedBy: route.matchedBy,
+    chatType: isGroup ? "group" : "direct",
+    groupId: isGroup ? spaceId : undefined,
+    groupSpace: isGroup ? (space.displayName ?? spaceId) : undefined,
+    senderIsOwner: !isGroup && resolveGoogleChatStableSenderIsOwner({ config, account, senderId }),
+  });
+  if (!identityDecision.allowed) {
+    logVerbose(
+      core,
+      runtime,
+      `conversation identity denied before media preparation (${identityDecision.reason})`,
+    );
+    return;
+  }
 
   let mediaPath: string | undefined;
   let mediaType: string | undefined;
@@ -321,6 +342,7 @@ async function processMessageWithPipeline(params: {
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
+      matchedBy: route.matchedBy,
       routeSessionKey: route.sessionKey,
     },
     reply: {
@@ -445,6 +467,7 @@ async function processMessageWithPipeline(params: {
           },
         },
         replyPipeline: {},
+        replyOptions: { identityContractVersion: 1 },
         record: {
           onRecordError: (err) => {
             runtime.error?.(`googlechat: failed updating session meta: ${String(err)}`);

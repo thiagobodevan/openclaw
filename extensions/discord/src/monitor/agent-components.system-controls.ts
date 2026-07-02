@@ -13,10 +13,8 @@ import {
   AGENT_BUTTON_KEY,
   AGENT_SELECT_KEY,
   ackComponentInteraction,
-  ensureAgentComponentInteractionAllowed,
   parseAgentComponentData,
-  resolveAgentComponentRoute,
-  resolveInteractionContextWithDmAuth,
+  resolveAuthorizedComponentInteraction,
   type AgentComponentContext,
   type AgentComponentMessageInteraction,
 } from "./agent-components-helpers.js";
@@ -27,7 +25,6 @@ type AgentSystemControlParams = {
   interaction: AgentComponentMessageInteraction;
   data: ComponentData;
   label: string;
-  interactionComponentLabel: string;
   authorizationComponentLabel: string;
   invalidReply: string;
   unauthorizedReply: string;
@@ -51,53 +48,20 @@ async function runAgentSystemControlInteraction(params: AgentSystemControlParams
   }
 
   const { componentId } = parsed;
-  const interactionCtx = await resolveInteractionContextWithDmAuth({
+  const authorized = await resolveAuthorizedComponentInteraction({
     ctx: params.ctx,
     interaction: params.interaction,
     label: params.label,
-    componentLabel: params.interactionComponentLabel,
-    defer: false,
-  });
-  if (!interactionCtx) {
-    return;
-  }
-  const {
-    channelId,
-    user,
-    username,
-    userId,
-    replyOpts,
-    rawGuildId,
-    isDirectMessage,
-    isGroupDm,
-    memberRoleIds,
-  } = interactionCtx;
-
-  const allowed = await ensureAgentComponentInteractionAllowed({
-    ctx: params.ctx,
-    interaction: params.interaction,
-    channelId,
-    rawGuildId,
-    memberRoleIds,
-    user,
-    replyOpts,
     componentLabel: params.authorizationComponentLabel,
     unauthorizedReply: params.unauthorizedReply,
+    defer: false,
   });
-  if (!allowed) {
+  if (!authorized) {
     return;
   }
-
-  const route = resolveAgentComponentRoute({
-    ctx: params.ctx,
-    rawGuildId,
-    memberRoleIds,
-    isDirectMessage,
-    isGroupDm,
-    userId,
-    channelId,
-    parentId: allowed.parentId,
-  });
+  const { interactionCtx, admittedRoute, replyOpts } = authorized;
+  const { channelId, username, userId } = interactionCtx;
+  const route = admittedRoute.route;
 
   const eventText = params.formatEventText({ componentId, username, userId });
   logDebug(`${params.label}: enqueuing event for channel ${channelId}: ${eventText}`);
@@ -105,6 +69,7 @@ async function runAgentSystemControlInteraction(params: AgentSystemControlParams
   enqueueSystemEvent(eventText, {
     sessionKey: route.sessionKey,
     contextKey: `${params.contextKeyPrefix}:${channelId}:${componentId}:${userId}`,
+    actor: { channel: "discord", accountId: params.ctx.accountId, senderId: userId },
   });
 
   await ackComponentInteraction({
@@ -131,7 +96,6 @@ export class AgentComponentButton extends Button {
       interaction,
       data,
       label: "agent button",
-      interactionComponentLabel: "button",
       authorizationComponentLabel: "button",
       invalidReply: "This button is no longer valid.",
       unauthorizedReply: "You are not authorized to use this button.",
@@ -160,7 +124,6 @@ export class AgentSelectMenu extends StringSelectMenu {
       interaction,
       data,
       label: "agent select",
-      interactionComponentLabel: "select menu",
       authorizationComponentLabel: "select",
       invalidReply: "This select menu is no longer valid.",
       unauthorizedReply: "You are not authorized to use this select menu.",

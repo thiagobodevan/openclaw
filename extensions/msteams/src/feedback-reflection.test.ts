@@ -13,6 +13,7 @@ import {
   loadSessionLearnings,
   parseReflectionResponse,
   recordReflectionTime,
+  testing as feedbackReflectionTesting,
 } from "./feedback-reflection.js";
 import { setMSTeamsRuntime } from "./runtime.js";
 import { msteamsRuntimeStub } from "./test-support/runtime.js";
@@ -54,6 +55,44 @@ describe("buildFeedbackEvent", () => {
 
     expect(event.comment).toBeUndefined();
     expect(event.value).toBe("positive");
+  });
+});
+
+describe("feedback reflection context", () => {
+  it("preserves the admitted Teams sender, audience, and route", () => {
+    let captured: Record<string, unknown> | undefined;
+    setMSTeamsRuntime({
+      channel: {
+        reply: {
+          resolveEnvelopeFormatOptions: () => ({}),
+          formatAgentEnvelope: ({ body }: { body: string }) => body,
+          finalizeInboundContext: (ctx: Record<string, unknown>) => {
+            captured = ctx;
+            return ctx;
+          },
+        },
+      },
+    } as never);
+
+    feedbackReflectionTesting.buildReflectionContext({
+      cfg: {},
+      conversationId: "conversation-1",
+      sessionKey: "agent:team-ops:msteams:channel:conversation-1",
+      reflectionPrompt: "Reflect on the prior answer.",
+      routeMatchedBy: "binding.channel",
+      chatType: "channel",
+      senderId: "aad-user-1",
+    });
+
+    expect(captured).toMatchObject({
+      Provider: "exec-event",
+      Surface: "msteams",
+      OriginatingChannel: "msteams",
+      AgentRouteMatchedBy: "binding.channel",
+      ChatType: "channel",
+      SenderId: "aad-user-1",
+    });
+    setMSTeamsRuntime(msteamsRuntimeStub);
   });
 });
 

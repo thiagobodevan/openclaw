@@ -107,6 +107,7 @@ export async function maybeBroadcastMessage(params: {
     const baseAgentRoute = {
       ...params.route,
       agentId: normalizedAgentId,
+      matchedBy: "config.agent" as const,
       ...routeKeys,
     };
     const agentRoute = isGroupConversation

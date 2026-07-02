@@ -1,8 +1,9 @@
 // Telegram plugin module implements conversation route behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
+  lookupRuntimeConversationBindingRoute,
   resolveConfiguredBindingRoute,
-  resolveRuntimeConversationBindingRoute,
+  touchRuntimeConversationBindingRoute,
   type ConfiguredBindingRouteResult,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import {
@@ -10,6 +11,7 @@ import {
   deriveLastRoutePolicy,
   normalizeAccountId,
   resolveAgentRoute,
+  resolveConversationIdentityMode,
 } from "openclaw/plugin-sdk/routing";
 import { buildAgentMainSessionKey, sanitizeAgentId } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
@@ -40,6 +42,7 @@ export type TelegramConversationBindingMode =
 export type TelegramConversationRouteResult = {
   route: TelegramResolvedRoute;
   bindingMode: TelegramConversationBindingMode;
+  runtimeBinding: ReturnType<typeof lookupRuntimeConversationBindingRoute>["bindingRecord"];
 };
 
 export function resolveTelegramConversationRoute(params: {
@@ -76,8 +79,8 @@ export function resolveTelegramConversationRoute(params: {
 
   const rawTopicAgentId = params.topicAgentId?.trim();
   if (rawTopicAgentId) {
-    // Preserve the configured topic agent ID so topic-bound sessions stay stable
-    // even when that agent is not present in the current config snapshot.
+    // Preserve the configured topic agent ID so valid topic-bound sessions stay stable.
+    // Conversation identity admission rejects targets absent from the agent registry.
     const topicAgentId = sanitizeAgentId(rawTopicAgentId);
     const sessionKey = normalizeLowercaseStringOrEmpty(
       buildAgentSessionKey({
@@ -97,6 +100,7 @@ export function resolveTelegramConversationRoute(params: {
     route = {
       ...route,
       agentId: topicAgentId,
+      matchedBy: "config.agent",
       sessionKey,
       mainSessionKey,
       lastRoutePolicy: deriveLastRoutePolicy({
@@ -132,7 +136,7 @@ export function resolveTelegramConversationRoute(params: {
     params.replyThreadId != null
       ? `${params.chatId}:topic:${params.replyThreadId}`
       : String(params.chatId);
-  const runtimeRoute = resolveRuntimeConversationBindingRoute({
+  const runtimeRoute = lookupRuntimeConversationBindingRoute({
     route,
     conversation: {
       channel: "telegram",
@@ -155,6 +159,34 @@ export function resolveTelegramConversationRoute(params: {
   return {
     route,
     bindingMode,
+    runtimeBinding: runtimeRoute.bindingRecord,
+  };
+}
+
+export function touchTelegramConversationRoute(
+  result: Pick<TelegramConversationRouteResult, "runtimeBinding">,
+): void {
+  touchRuntimeConversationBindingRoute({ bindingRecord: result.runtimeBinding });
+}
+
+export function resolveTelegramConversationIdentityRoute(
+  params: Parameters<typeof resolveTelegramConversationRoute>[0] & {
+    groupTitle?: string;
+    senderIsOwner?: boolean;
+  },
+) {
+  const resolved = resolveTelegramConversationRoute(params);
+  return {
+    ...resolved,
+    identity: resolveConversationIdentityMode({
+      config: params.cfg,
+      agentId: resolved.route.agentId,
+      routeMatchedBy: resolved.route.matchedBy,
+      chatType: params.isGroup ? "group" : "direct",
+      groupId: params.isGroup ? String(params.chatId) : undefined,
+      groupChannel: params.isGroup ? params.groupTitle : undefined,
+      senderIsOwner: params.senderIsOwner,
+    }),
   };
 }
 

@@ -6,7 +6,7 @@ import type { TypingKeepAlive } from "../typing-keepalive.js";
 
 interface BaseStubFields {
   event: QueuedMessage;
-  route: { sessionKey: string; accountId: string; agentId?: string };
+  route: InboundContext["route"];
   isGroupChat: boolean;
   peerId: string;
   qualifiedTarget: string;
@@ -46,13 +46,14 @@ function emptyInboundContext(fields: BaseStubFields): InboundContext {
 export function buildBlockedInboundContext(
   params: BaseStubFields & {
     access: QQBotInboundAccess;
+    blockReason?: string;
   },
 ): InboundContext {
   return {
     ...emptyInboundContext(params),
     blocked: true,
-    blockReason: params.access.senderAccess.reasonCode,
-    blockReasonCode: params.access.senderAccess.reasonCode,
+    blockReason: params.blockReason ?? params.access.senderAccess.reasonCode,
+    blockReasonCode: params.blockReason ?? params.access.senderAccess.reasonCode,
     accessDecision: params.access.senderAccess.decision,
   };
 }

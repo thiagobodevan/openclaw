@@ -15,6 +15,7 @@ describe("discord buildDiscordMessageProcessContext sender bot status", () => {
     }
 
     expect(result.ctxPayload.SenderIsBot).toBe(true);
+    expect(result.ctxPayload.AgentRouteMatchedBy).toBe("default");
   });
 
   it("omits SenderIsBot for human authors", async () => {

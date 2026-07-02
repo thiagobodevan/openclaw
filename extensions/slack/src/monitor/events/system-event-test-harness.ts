@@ -24,8 +24,26 @@ export function createSlackSystemEventTestHarness(overrides?: SlackSystemEventTe
       handlers[name] = handler;
     },
   };
+  const resolveIdentityRoute = ({ senderIsOwner }: { senderIsOwner?: boolean }) =>
+    channelType === "channel"
+      ? {
+          sessionKey: "agent:service:slack:channel:c1",
+          agentId: "service",
+          matchedBy: "binding.channel" as const,
+          chatType: "channel" as const,
+        }
+      : senderIsOwner
+        ? {
+            sessionKey: "agent:main:main",
+            agentId: "main",
+            matchedBy: "default" as const,
+            chatType: "direct" as const,
+          }
+        : null;
   const ctx = {
     app,
+    cfg: {},
+    accountId: "default",
     runtime: { error: () => {} },
     botUserId: "U_BOT",
     botId: "B_BOT",
@@ -42,7 +60,7 @@ export function createSlackSystemEventTestHarness(overrides?: SlackSystemEventTe
         }
       : undefined,
     groupPolicy: "open",
-    allowFrom: overrides?.allowFrom ?? [],
+    allowFrom: overrides?.allowFrom ?? ["U1"],
     allowNameMatching: false,
     reactionMode: overrides?.reactionMode ?? "all",
     reactionAllowlist: overrides?.reactionAllowlist ?? [],
@@ -56,6 +74,9 @@ export function createSlackSystemEventTestHarness(overrides?: SlackSystemEventTe
       name: overrides?.userNames?.[userId] ?? "alice",
     }),
     resolveSlackSystemEventSessionKey: () => "agent:main:main",
+    resolveSlackSystemEventIdentityRoute: resolveIdentityRoute,
+    resolveSlackSystemEventRouteReady: async (params: { senderIsOwner?: boolean }) =>
+      resolveIdentityRoute(params),
   } as unknown as SlackMonitorContext;
 
   return {

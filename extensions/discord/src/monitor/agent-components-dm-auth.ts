@@ -14,6 +14,7 @@ import { replySilently } from "./agent-components-reply.js";
 import type {
   AgentComponentContext,
   AgentComponentInteraction,
+  ComponentInteractionContext,
   DiscordUser,
 } from "./agent-components.types.js";
 import { resolveGroupDmAllow } from "./allow-list.js";
@@ -150,6 +151,22 @@ export async function resolveInteractionContextWithDmAuth(params: {
   if (!interactionCtx) {
     return null;
   }
+  const authorized = await ensureResolvedComponentInteractionAuthorized({
+    ctx: params.ctx,
+    interaction: params.interaction,
+    interactionCtx,
+    componentLabel: params.componentLabel,
+  });
+  return authorized ? interactionCtx : null;
+}
+
+export async function ensureResolvedComponentInteractionAuthorized(params: {
+  ctx: AgentComponentContext;
+  interaction: AgentComponentInteraction;
+  interactionCtx: ComponentInteractionContext;
+  componentLabel: string;
+}) {
+  const { interactionCtx } = params;
   if (interactionCtx.isDirectMessage) {
     const authorized = await ensureDmComponentAuthorized({
       ctx: params.ctx,
@@ -159,7 +176,7 @@ export async function resolveInteractionContextWithDmAuth(params: {
       replyOpts: interactionCtx.replyOpts,
     });
     if (!authorized) {
-      return null;
+      return false;
     }
   }
   if (interactionCtx.isGroupDm) {
@@ -171,8 +188,8 @@ export async function resolveInteractionContextWithDmAuth(params: {
       replyOpts: interactionCtx.replyOpts,
     });
     if (!authorized) {
-      return null;
+      return false;
     }
   }
-  return interactionCtx;
+  return true;
 }

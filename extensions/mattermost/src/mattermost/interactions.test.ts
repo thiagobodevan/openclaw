@@ -871,6 +871,7 @@ describe("createMattermostInteractionHandler", () => {
       {
         sessionKey: "session:thread:root-9",
         contextKey: "mattermost:interaction:post-1:approve",
+        actor: { channel: "mattermost", accountId: "acct", senderId: "user-1" },
       },
     );
     expect(dispatchButtonClick).toHaveBeenCalledWith({

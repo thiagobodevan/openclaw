@@ -10,12 +10,12 @@ import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 import { logError } from "openclaw/plugin-sdk/logging-core";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
 import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
 import { createNonExitingRuntime, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveDiscordMaxLinesPerMessage } from "../accounts.js";
 import { createDiscordRestClient } from "../client.js";
 import { resolveDiscordConversationIdentity } from "../conversation-identity.js";
 import {
-  resolveAgentComponentRoute,
   resolveComponentCommandAuthorized,
   resolvePinnedMainDmOwnerFromAllowlist,
   type AgentComponentContext,
@@ -71,6 +71,34 @@ function resolveDiscordComponentChatType(interactionCtx: ComponentInteractionCon
   return "channel";
 }
 
+type DiscordComponentRouteOverrides = {
+  sessionKey?: string;
+  agentId?: string;
+  accountId?: string;
+};
+
+export function applyMatchingDiscordComponentRouteOverrides(
+  route: ResolvedAgentRoute,
+  overrides: DiscordComponentRouteOverrides | undefined,
+): ResolvedAgentRoute | null {
+  if (!overrides) {
+    return route;
+  }
+  const matchesLiveRoute =
+    (!overrides.sessionKey || overrides.sessionKey === route.sessionKey) &&
+    (!overrides.agentId || overrides.agentId === route.agentId) &&
+    (!overrides.accountId || overrides.accountId === route.accountId);
+  if (!matchesLiveRoute) {
+    return null;
+  }
+  return {
+    ...route,
+    sessionKey: overrides.sessionKey ?? route.sessionKey,
+    agentId: overrides.agentId ?? route.agentId,
+    accountId: overrides.accountId ?? route.accountId,
+  };
+}
+
 export function resolveDiscordComponentOriginatingTo(
   interactionCtx: Pick<ComponentInteractionContext, "isDirectMessage" | "userId" | "channelId">,
 ) {
@@ -89,23 +117,21 @@ export async function dispatchDiscordComponentEvent(params: {
   guildInfo: ReturnType<typeof resolveDiscordGuildEntry>;
   eventText: string;
   replyToId?: string;
-  routeOverrides?: { sessionKey?: string; agentId?: string; accountId?: string };
+  admittedRoute: { route: ResolvedAgentRoute; senderIsOwner: boolean };
+  routeOverrides?: DiscordComponentRouteOverrides;
 }): Promise<void> {
   const { ctx, interaction, interactionCtx, channelCtx, guildInfo, eventText } = params;
   const runtime = ctx.runtime ?? createNonExitingRuntime();
-  const route = resolveAgentComponentRoute({
-    ctx,
-    rawGuildId: interactionCtx.rawGuildId,
-    memberRoleIds: interactionCtx.memberRoleIds,
-    isDirectMessage: interactionCtx.isDirectMessage,
-    isGroupDm: interactionCtx.isGroupDm,
-    userId: interactionCtx.userId,
-    channelId: interactionCtx.channelId,
-    parentId: channelCtx.parentId,
-  });
-  const sessionKey = params.routeOverrides?.sessionKey ?? route.sessionKey;
-  const agentId = params.routeOverrides?.agentId ?? route.agentId;
-  const accountId = params.routeOverrides?.accountId ?? route.accountId;
+  // Persisted component metadata may select only the route that is still proven
+  // by the live channel binding. Stale metadata must not manufacture trust.
+  const effectiveRoute = applyMatchingDiscordComponentRouteOverrides(
+    params.admittedRoute.route,
+    params.routeOverrides,
+  );
+  if (!effectiveRoute) {
+    return;
+  }
+  const { sessionKey, agentId, accountId } = effectiveRoute;
   const inboundLastRouteSessionKey = sessionKey;
   const fromLabel = buildDiscordComponentConversationLabel({
     interactionCtx,
@@ -202,6 +228,7 @@ export async function dispatchDiscordComponentEvent(params: {
         : `discord:channel:${interactionCtx.channelId}`,
     To: `channel:${interactionCtx.channelId}`,
     SessionKey: sessionKey,
+    AgentRouteMatchedBy: effectiveRoute.matchedBy,
     AccountId: accountId,
     ChatType: chatType,
     ConversationLabel: fromLabel,
@@ -214,7 +241,7 @@ export async function dispatchDiscordComponentEvent(params: {
     MemberRoleIds: interactionCtx.memberRoleIds,
     GroupSystemPrompt: interactionCtx.isDirectMessage ? undefined : groupSystemPrompt,
     GroupSpace: guildInfo?.id ?? guildInfo?.slug ?? interactionCtx.rawGuildId ?? undefined,
-    OwnerAllowFrom: ownerAllowFrom,
+    OwnerAllowFrom: params.admittedRoute.senderIsOwner ? [interactionCtx.userId] : ownerAllowFrom,
     Provider: "discord" as const,
     Surface: "discord" as const,
     WasMentioned: true,
@@ -279,6 +306,7 @@ export async function dispatchDiscordComponentEvent(params: {
         ctxPayload,
         recordInboundSession,
         dispatchReplyWithBufferedBlockDispatcher,
+        replyOptions: { identityContractVersion: 1 },
         record: {
           updateLastRoute: interactionCtx.isDirectMessage
             ? {
@@ -289,7 +317,8 @@ export async function dispatchDiscordComponentEvent(params: {
                   `user:${interactionCtx.userId}`,
                 accountId,
                 mainDmOwnerPin:
-                  inboundLastRouteSessionKey === route.mainSessionKey && pinnedMainDmOwner
+                  inboundLastRouteSessionKey === params.admittedRoute.route.mainSessionKey &&
+                  pinnedMainDmOwner
                     ? {
                         ownerRecipient: pinnedMainDmOwner,
                         senderRecipient: interactionCtx.userId,
@@ -352,3 +381,7 @@ export async function dispatchDiscordComponentEvent(params: {
     },
   });
 }
+
+export const testing = {
+  applyMatchingDiscordComponentRouteOverrides,
+};

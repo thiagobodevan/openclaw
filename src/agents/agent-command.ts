@@ -39,6 +39,11 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
 import { loadManifestMetadataSnapshot } from "../plugins/manifest-contract-eligibility.js";
 import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  isInterSessionIdentityTransitionAllowed,
+  resolveConversationIdentityMode,
+} from "../routing/conversation-identity.js";
+import {
   classifySessionKeyShape,
   isUnscopedSessionKeySentinel,
   isSubagentSessionKey,
@@ -102,7 +107,12 @@ import {
 } from "./command/attempt-execution.shared.js";
 import { resolveAgentRunContext } from "./command/run-context.js";
 import { resolveSession } from "./command/session.js";
-import type { AgentCommandIngressOpts, AgentCommandOpts } from "./command/types.js";
+import type {
+  AgentCommandIdentityIngressOpts,
+  AgentCommandIngressOpts,
+  AgentCommandOpts,
+} from "./command/types.js";
+export type { AgentCommandIdentityIngressOpts, AgentCommandIngressOpts } from "./command/types.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import {
   classifyEmbeddedAgentRunResultForModelFallback,
@@ -621,7 +631,11 @@ function resolveExplicitAgentCommandSessionKey(params: {
   });
 }
 
-async function prepareAgentCommandExecution(opts: AgentCommandOpts, runtime: RuntimeEnv) {
+async function prepareAgentCommandExecution(
+  opts: AgentCommandOpts,
+  runtime: RuntimeEnv,
+  execution?: { enforceConversationIdentity?: boolean },
+) {
   const isRawModelRun = opts.modelRun === true || opts.promptMode === "none";
   const message = opts.message ?? "";
   if (!message.trim()) {
@@ -722,6 +736,45 @@ async function prepareAgentCommandExecution(opts: AgentCommandOpts, runtime: Run
   const commandOpts = toSessionKey
     ? { ...opts, to: undefined, sessionKey: explicitSessionKey }
     : opts;
+  const runContext = resolveAgentRunContext(commandOpts);
+  const requestedAgentId =
+    agentIdOverride ??
+    resolveSessionAgentId({
+      sessionKey: explicitSessionKey,
+      config: cfg,
+    });
+  const isInterSession = commandOpts.inputProvenance?.kind === "inter_session";
+  const isAllowedInterSession =
+    isInterSession &&
+    isInterSessionIdentityTransitionAllowed({
+      config: cfg,
+      sourceSessionKey: commandOpts.inputProvenance?.sourceSessionKey,
+      sourceTool: commandOpts.inputProvenance?.sourceTool,
+      targetAgentId: requestedAgentId,
+      targetIsLiveOwnedChild: commandOpts.trustedInterSessionTargetIsLiveOwnedChild,
+    });
+  if (execution?.enforceConversationIdentity) {
+    if (isInterSession && !isAllowedInterSession) {
+      throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+    }
+    // Admit public ingress before resolving persisted session state. A denied
+    // audience must not probe or mutate another identity's session.
+    const identity = resolveConversationIdentityMode({
+      config: cfg,
+      isInternal: runContext.isInternal || isAllowedInterSession,
+      agentId: requestedAgentId,
+      agentIsLiveOwnedChild: commandOpts.trustedInterSessionTargetIsLiveOwnedChild,
+      routeMatchedBy: runContext.routeMatchedBy,
+      chatType: runContext.chatType,
+      groupId: runContext.groupId,
+      groupChannel: runContext.groupChannel,
+      groupSpace: runContext.groupSpace,
+      senderIsOwner: commandOpts.senderIsOwner,
+    });
+    if (!identity.allowed) {
+      throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+    }
+  }
   const sessionResolution = resolveSession({
     cfg,
     to: commandOpts.to,
@@ -744,6 +797,37 @@ async function prepareAgentCommandExecution(opts: AgentCommandOpts, runtime: Run
       sessionKey: sessionKey ?? explicitSessionKey,
       config: cfg,
     });
+  if (execution?.enforceConversationIdentity && sessionAgentId !== requestedAgentId) {
+    const isAllowedResolvedInterSession =
+      isInterSession &&
+      isInterSessionIdentityTransitionAllowed({
+        config: cfg,
+        sourceSessionKey: commandOpts.inputProvenance?.sourceSessionKey,
+        sourceTool: commandOpts.inputProvenance?.sourceTool,
+        targetAgentId: sessionAgentId,
+        targetIsLiveOwnedChild: commandOpts.trustedInterSessionTargetIsLiveOwnedChild,
+      });
+    if (isInterSession && !isAllowedResolvedInterSession) {
+      throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+    }
+    // A session-id lookup can refine the owning agent. Recheck that resolved
+    // identity without weakening the pre-store admission above.
+    const identity = resolveConversationIdentityMode({
+      config: cfg,
+      isInternal: runContext.isInternal || isAllowedResolvedInterSession,
+      agentId: sessionAgentId,
+      agentIsLiveOwnedChild: commandOpts.trustedInterSessionTargetIsLiveOwnedChild,
+      routeMatchedBy: runContext.routeMatchedBy,
+      chatType: runContext.chatType,
+      groupId: runContext.groupId,
+      groupChannel: runContext.groupChannel,
+      groupSpace: runContext.groupSpace,
+      senderIsOwner: commandOpts.senderIsOwner,
+    });
+    if (!identity.allowed) {
+      throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+    }
+  }
   const outboundSession = buildOutboundSessionContext({
     cfg,
     agentId: sessionAgentId,
@@ -854,13 +938,14 @@ async function agentCommandInternal(
   initialOpts: AgentCommandOpts,
   runtime: RuntimeEnv = defaultRuntime,
   deps?: CliDeps,
+  execution?: { enforceConversationIdentity?: boolean },
 ) {
   const resolvedDeps = await resolveAgentCommandDeps(deps);
   const isRawModelRun = initialOpts.modelRun === true || initialOpts.promptMode === "none";
   const suppressVisibleSessionEffects = initialOpts.sessionEffects === "internal";
   const preserveUserFacingSessionModelState =
     initialOpts.preserveUserFacingSessionModelState === true;
-  const prepared = await prepareAgentCommandExecution(initialOpts, runtime);
+  const prepared = await prepareAgentCommandExecution(initialOpts, runtime, execution);
   const opts = prepared.opts;
   const {
     body,
@@ -2557,9 +2642,14 @@ function emitIngressModelUsageDiagnostic(
   });
 }
 
-/** Runs an agent turn from an inbound channel/gateway ingress context. */
+/**
+ * Runs an agent turn from an inbound channel/gateway ingress context.
+ *
+ * Current callers pass identityContractVersion 1. Unversioned calls retain the
+ * pre-identity SDK behavior for plugins built against the shipped public API.
+ */
 export async function agentCommandFromIngress(
-  opts: AgentCommandIngressOpts,
+  opts: AgentCommandIngressOpts | AgentCommandIdentityIngressOpts,
   runtime: RuntimeEnv = defaultRuntime,
   deps?: CliDeps,
 ) {
@@ -2568,6 +2658,13 @@ export async function agentCommandFromIngress(
   }
   const lifecycleGeneration =
     opts.lifecycleGeneration ?? captureAgentRunLifecycleGeneration(opts.runId ?? "");
+  const identityContractVersion = (opts as { identityContractVersion?: unknown })
+    .identityContractVersion;
+  if (identityContractVersion !== undefined && identityContractVersion !== 1) {
+    throw new Error(
+      `Unsupported ingress identity contract version: ${String(identityContractVersion)}`,
+    );
+  }
   return await withAgentRunLifecycleGeneration(lifecycleGeneration, async () => {
     const result = await agentCommandInternal(
       {
@@ -2577,6 +2674,7 @@ export async function agentCommandFromIngress(
       },
       runtime,
       deps,
+      { enforceConversationIdentity: identityContractVersion === 1 },
     );
 
     if (result) {

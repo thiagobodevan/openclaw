@@ -1,5 +1,6 @@
 // Tlon plugin entrypoint registers its OpenClaw integration.
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 import { asFiniteNumber } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { sliceUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
@@ -45,6 +46,7 @@ import {
   isGroupInviteAllowed,
   isSummarizationRequest,
   resolveAuthorizedMessageText,
+  resolveTlonOwnerAllowFrom,
   resolveTlonCommandAuthorizationWithIngress,
   stripBotMention,
 } from "./utils.js";
@@ -302,6 +304,50 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
     return /^~?[a-z-]+$/i.test(normalized) ? normalized : "";
   }
 
+  const resolveAdmittedMessageRoute = (params: {
+    senderShip: string;
+    isGroup: boolean;
+    groupChannel?: string;
+  }) => {
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "tlon",
+      accountId: opts.accountId ?? undefined,
+      peer: {
+        kind: params.isGroup ? "group" : "direct",
+        id: params.isGroup ? (params.groupChannel ?? params.senderShip) : params.senderShip,
+      },
+    });
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: params.isGroup ? "group" : "direct",
+        ChatId: params.isGroup ? (params.groupChannel ?? params.senderShip) : undefined,
+        GroupChannel: params.isGroup ? params.groupChannel : undefined,
+        SenderId: params.senderShip,
+        Provider: "tlon",
+        Surface: "tlon",
+        // ownerShip is the stable Tlon owner contract; DM allowlists are only access filters.
+        OwnerAllowFrom: resolveTlonOwnerAllowFrom({
+          senderShip: params.senderShip,
+          ownerShip: effectiveOwnerShip,
+          isGroup: params.isGroup,
+        }),
+      },
+    });
+    if (!identityDecision.allowed) {
+      runtime.log?.(
+        `[tlon] Dropped message before provider, media, or history preparation (${identityDecision.reason})`,
+      );
+      return null;
+    }
+    return route;
+  };
+
   const processMessage = async (params: {
     messageId: string;
     senderShip: string;
@@ -314,6 +360,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
     timestamp: number;
     parentId?: string | null;
     isThreadReply?: boolean;
+    route?: ReturnType<typeof core.channel.routing.resolveAgentRoute>;
   }) => {
     const {
       messageId,
@@ -326,9 +373,15 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
       parentId,
       isThreadReply,
       messageContent,
+      route: admittedRoute,
     } = params;
     const groupChannel = channelNest; // For compatibility
     let messageText = params.messageText;
+    const route =
+      admittedRoute ?? resolveAdmittedMessageRoute({ senderShip, isGroup, groupChannel });
+    if (!route) {
+      return;
+    }
 
     // Download any images from the message content
     let attachments: Array<{ path: string; contentType: string }> = [];
@@ -428,16 +481,6 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
       }
     }
 
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: "tlon",
-      accountId: opts.accountId ?? undefined,
-      peer: {
-        kind: isGroup ? "group" : "direct",
-        id: isGroup ? (groupChannel ?? senderShip) : senderShip,
-      },
-    });
-
     if (!isGroup) {
       const sessionKey = route.sessionKey;
       if (!dmSendersBySession.has(sessionKey)) {
@@ -475,6 +518,11 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
     }
 
     const senderRole = isOwner(senderShip) ? "owner" : "user";
+    const ownerAllowFrom = resolveTlonOwnerAllowFrom({
+      senderShip,
+      ownerShip: effectiveOwnerShip,
+      isGroup,
+    });
     const fromLabel = isGroup
       ? `${senderShip} [${senderRole}] in ${channelNest}`
       : `${senderShip} [${senderRole}]`;
@@ -537,6 +585,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
       route: {
         agentId: route.agentId,
         accountId: route.accountId,
+        matchedBy: route.matchedBy,
         routeSessionKey: route.sessionKey,
       },
       reply: {
@@ -552,6 +601,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
       },
       extra: {
         GroupSubject: undefined,
+        OwnerAllowFrom: ownerAllowFrom,
         SenderRole: senderRole,
         CommandAuthorized: commandAuthorized,
         CommandSource: "text" as const,
@@ -667,6 +717,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
         responsePrefix,
         humanDelay,
       },
+      replyOptions: { identityContractVersion: 1 },
       record: {
         onRecordError: (err) => {
           runtime.error?.(`[tlon] failed updating session meta: ${String(err)}`);
@@ -809,35 +860,18 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
 
           const contentBody = content.content;
           const sentAt = readNumber(content, "sent") ?? Date.now();
-
-          cacheMessage(nest, {
-            author: senderShip,
-            content: rawText,
-            timestamp: sentAt,
-            id: messageId,
+          const route = resolveAdmittedMessageRoute({
+            senderShip,
+            isGroup: true,
+            groupChannel: nest,
           });
+          if (!route) {
+            return;
+          }
 
           // Get thread info early for participation check
           const seal = isThreadReply ? asRecord(replySet?.seal) : asRecord(set?.seal);
           const parentId = readString(seal, "parent-id") ?? readString(seal, "parent") ?? null;
-
-          // Check if we should respond:
-          // 1. Direct mention always triggers response
-          // 2. Thread replies where we've participated - respond if relevant (let agent decide)
-          const mentioned = isBotMentioned(rawText, botShipName, botNickname ?? undefined);
-          const inParticipatedThread =
-            isThreadReply && parentId && participatedThreads.has(parentId);
-
-          if (!mentioned && !inParticipatedThread) {
-            return;
-          }
-
-          // Log why we're responding
-          if (inParticipatedThread && !mentioned) {
-            runtime.log?.(
-              `[tlon] Responding to thread we participated in (no mention): ${parentId}`,
-            );
-          }
 
           // Owner is always allowed
           if (isOwner(senderShip)) {
@@ -874,6 +908,31 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
             }
           }
 
+          cacheMessage(nest, {
+            author: senderShip,
+            content: rawText,
+            timestamp: sentAt,
+            id: messageId,
+          });
+
+          // Check if we should respond:
+          // 1. Direct mention always triggers response
+          // 2. Thread replies where we've participated - respond if relevant (let agent decide)
+          const mentioned = isBotMentioned(rawText, botShipName, botNickname ?? undefined);
+          const inParticipatedThread =
+            isThreadReply && parentId && participatedThreads.has(parentId);
+
+          if (!mentioned && !inParticipatedThread) {
+            return;
+          }
+
+          // Log why we're responding
+          if (inParticipatedThread && !mentioned) {
+            runtime.log?.(
+              `[tlon] Responding to thread we participated in (no mention): ${parentId}`,
+            );
+          }
+
           const messageText = await resolveAuthorizedMessageText({
             rawText,
             content: contentBody,
@@ -894,6 +953,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
             timestamp: sentAt,
             parentId,
             isThreadReply,
+            route,
           });
         },
       });
@@ -1030,6 +1090,11 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
             }
           }
 
+          const route = resolveAdmittedMessageRoute({ senderShip, isGroup: false });
+          if (!route) {
+            return;
+          }
+
           // Owner is always allowed to DM (bypass allowlist)
           if (isOwner(senderShip)) {
             const resolvedMessageText = await resolveAuthorizedMessageText({
@@ -1046,6 +1111,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
               messageContent: essay.content,
               isGroup: false,
               timestamp: readNumber(essay, "sent") ?? Date.now(),
+              route,
             });
             return;
           }
@@ -1084,6 +1150,7 @@ export async function monitorTlonProvider(opts: MonitorTlonOpts = {}): Promise<v
             messageContent: essay.content, // Pass raw content for media extraction
             isGroup: false,
             timestamp: readNumber(essay, "sent") ?? Date.now(),
+            route,
           });
         },
       });

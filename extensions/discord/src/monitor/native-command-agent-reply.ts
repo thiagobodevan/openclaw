@@ -94,6 +94,7 @@ export async function dispatchDiscordNativeAgentReply(params: {
       },
     },
     replyOptions: {
+      identityContractVersion: 1,
       skillFilter: params.channelConfig?.skills,
       disableBlockStreaming:
         typeof blockStreamingEnabled === "boolean" ? !blockStreamingEnabled : undefined,

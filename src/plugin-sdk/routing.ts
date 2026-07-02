@@ -6,10 +6,23 @@ export {
   deriveLastRoutePolicy,
   resolveAgentRoute,
   resolveInboundLastRouteSessionKey,
+  type AgentRouteMatch,
   type ResolvedAgentRoute,
   type RoutePeer,
   type RoutePeerKind,
 } from "../routing/resolve-route.js";
+export {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  isConversationIdentityPersistedAgentCurrent,
+  resolveConversationIdentityMode,
+  resolveConversationScope,
+  resolveStableSenderIsOwner,
+  type ConversationCapabilityScope,
+  type ConversationIdentityDecision,
+  type ConversationIdentityMode,
+  type ConversationIdentityParams,
+} from "../routing/conversation-identity.js";
+export { resolveConversationIdentityAdmission } from "../auto-reply/reply/conversation-identity-admission.js";
 export {
   buildAgentMainSessionKey,
   DEFAULT_ACCOUNT_ID,

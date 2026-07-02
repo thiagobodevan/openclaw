@@ -7,12 +7,16 @@ import {
   type CommandArgs,
 } from "openclaw/plugin-sdk/command-auth-native";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
+import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  type ResolvedAgentRoute,
+} from "openclaw/plugin-sdk/routing";
 import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveDiscordAccountAllowFrom } from "../accounts.js";
 import {
   Container,
   TextDisplay,
@@ -33,6 +37,7 @@ import {
   toDiscordModelPickerMessagePayload,
   type DiscordModelPickerCommandContext,
 } from "./model-picker.js";
+import { resolveDiscordStableSenderIsOwner } from "./native-command-auth.js";
 import { resolveDiscordNativeInteractionRouteState } from "./native-command-route.js";
 import type { SafeDiscordInteractionCall } from "./native-command-ui.types.js";
 import { resolveDiscordNativeInteractionChannelContext } from "./native-interaction-channel-context.js";
@@ -43,6 +48,16 @@ type DiscordNativeChoiceInteraction =
   | CommandInteraction
   | ButtonInteraction
   | StringSelectMenuInteraction;
+
+export type DiscordNativeChoiceContextResolution =
+  | {
+      allowed: true;
+      context: { provider?: string; model?: string } | null;
+    }
+  | {
+      allowed: false;
+      reason: "identity_denied" | "binding_unavailable" | "route_unavailable";
+    };
 
 function resolveDiscordModelPickerCommandContext(
   command: ChatCommandDefinition,
@@ -159,6 +174,11 @@ async function resolveDiscordModelPickerRouteState(params: {
     conversationId: rawChannelId,
     parentConversationId: threadParentId,
     threadBinding,
+    senderIsOwner: resolveDiscordStableSenderIsOwner({
+      cfg,
+      providerAllowFrom: resolveDiscordAccountAllowFrom({ cfg, accountId }) ?? [],
+      sender: { id: interaction.user?.id ?? "" },
+    }),
     enforceConfiguredBindingReadiness: params.enforceConfiguredBindingReadiness,
   });
 }
@@ -174,6 +194,9 @@ export async function resolveDiscordModelPickerRoute(params: {
   threadBindings: ThreadBindingManager;
 }) {
   const resolved = await resolveDiscordModelPickerRouteState(params);
+  if (!resolved.identityDecision.allowed) {
+    throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+  }
   return resolved.effectiveRoute;
 }
 
@@ -182,31 +205,52 @@ export async function resolveDiscordNativeChoiceContext(params: {
   cfg: OpenClawConfig;
   accountId: string;
   threadBindings: ThreadBindingManager;
-}): Promise<{ provider?: string; model?: string } | null> {
+}): Promise<DiscordNativeChoiceContextResolution> {
+  let resolved: Awaited<ReturnType<typeof resolveDiscordModelPickerRouteState>>;
   try {
-    const resolved = await resolveDiscordModelPickerRouteState({
+    resolved = await resolveDiscordModelPickerRouteState({
       interaction: params.interaction,
       cfg: params.cfg,
       accountId: params.accountId,
       threadBindings: params.threadBindings,
       enforceConfiguredBindingReadiness: true,
     });
-    if (resolved.bindingReadiness && !resolved.bindingReadiness.ok) {
-      return null;
-    }
-    const route = resolved.effectiveRoute;
+  } catch {
+    return { allowed: false, reason: "route_unavailable" };
+  }
+  if (!resolved.identityDecision.allowed) {
+    return { allowed: false, reason: "identity_denied" };
+  }
+  if (resolved.bindingReadiness && !resolved.bindingReadiness.ok) {
+    return { allowed: false, reason: "binding_unavailable" };
+  }
+
+  return {
+    allowed: true,
+    context: resolveDiscordNativeChoiceContextForRoute({
+      cfg: params.cfg,
+      route: resolved.effectiveRoute,
+    }),
+  };
+}
+
+export function resolveDiscordNativeChoiceContextForRoute(params: {
+  cfg: OpenClawConfig;
+  route: ResolvedAgentRoute;
+}): { provider?: string; model?: string } | null {
+  try {
     const fallback = resolveDefaultModelForAgent({
       cfg: params.cfg,
-      agentId: route.agentId,
+      agentId: params.route.agentId,
     });
     const storePath = resolveStorePath(params.cfg.session?.store, {
-      agentId: route.agentId,
+      agentId: params.route.agentId,
     });
-    const sessionEntry = getSessionEntry({ storePath, sessionKey: route.sessionKey });
+    const sessionEntry = getSessionEntry({ storePath, sessionKey: params.route.sessionKey });
     const override = resolveStoredModelOverride({
       sessionEntry,
       loadSessionEntry: (sessionKey) => getSessionEntry({ storePath, sessionKey }),
-      sessionKey: route.sessionKey,
+      sessionKey: params.route.sessionKey,
       defaultProvider: fallback.provider,
     });
     if (!override?.model) {

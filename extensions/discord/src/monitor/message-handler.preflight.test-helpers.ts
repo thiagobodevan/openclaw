@@ -9,6 +9,15 @@ export type DiscordMessageEvent = import("./listeners.js").DiscordMessageEvent;
 export type DiscordClient = import("../internal/discord.js").Client;
 
 export const DEFAULT_PREFLIGHT_CFG = {
+  agents: {
+    list: [{ id: "personal", default: true }, { id: "main" }],
+  },
+  bindings: [
+    {
+      agentId: "main",
+      match: { channel: "discord", accountId: "default" },
+    },
+  ],
   session: {
     mainKey: "main",
     scope: "per-sender",

@@ -180,6 +180,19 @@ function buildBaseAllowFrom(ctx: SlackMonitorContext): string[] {
   return normalizeAllowListLower(normalizeAllowList(ctx.allowFrom));
 }
 
+export function resolveSlackSenderIsOwner(ctx: SlackMonitorContext, senderId: string): boolean {
+  const normalizedSenderId = normalizeSlackAllowOwnerEntry(senderId);
+  if (!normalizedSenderId) {
+    return false;
+  }
+  const providerOwners = buildBaseAllowFrom(ctx);
+  const commandOwners = normalizeAllowListLower(ctx.cfg.commands?.ownerAllowFrom);
+  const ownerAllowFrom = commandOwners.length > 0 ? commandOwners : providerOwners;
+  return ownerAllowFrom.some(
+    (entry) => normalizeSlackAllowOwnerEntry(entry) === normalizedSenderId,
+  );
+}
+
 export async function resolveSlackEffectiveAllowFrom(
   ctx: SlackMonitorContext,
   options?: { includePairingStore?: boolean },

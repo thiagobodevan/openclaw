@@ -1,4 +1,6 @@
 // Msteams plugin module implements feedback reflection behavior.
+import type { ChatType } from "openclaw/plugin-sdk/core";
+import type { AgentRouteMatch } from "openclaw/plugin-sdk/routing";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   dispatchReplyFromConfigWithSettledDispatcher,
@@ -64,6 +66,9 @@ export type RunFeedbackReflectionParams = {
   sessionKey: string;
   agentId: string;
   conversationId: string;
+  routeMatchedBy: AgentRouteMatch;
+  chatType: ChatType;
+  senderId: string;
   feedbackMessageId: string;
   thumbedDownResponse?: string;
   userComment?: string;
@@ -75,6 +80,9 @@ function buildReflectionContext(params: {
   conversationId: string;
   sessionKey: string;
   reflectionPrompt: string;
+  routeMatchedBy: AgentRouteMatch;
+  chatType: ChatType;
+  senderId: string;
 }) {
   const core = getMSTeamsRuntime();
   const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(params.cfg);
@@ -94,10 +102,11 @@ function buildReflectionContext(params: {
       From: `msteams:system:${params.conversationId}`,
       To: `conversation:${params.conversationId}`,
       SessionKey: params.sessionKey,
-      ChatType: "direct" as const,
+      AgentRouteMatchedBy: params.routeMatchedBy,
+      ChatType: params.chatType,
       SenderName: "system",
-      SenderId: "system",
-      Provider: "msteams" as const,
+      SenderId: params.senderId,
+      Provider: "exec-event" as const,
       Surface: "msteams" as const,
       Timestamp: Date.now(),
       WasMentioned: true,
@@ -181,6 +190,9 @@ export async function runFeedbackReflection(params: RunFeedbackReflectionParams)
     conversationId: params.conversationId,
     sessionKey: params.sessionKey,
     reflectionPrompt,
+    routeMatchedBy: params.routeMatchedBy,
+    chatType: params.chatType,
+    senderId: params.senderId,
   });
 
   const capture = createReflectionCaptureDispatcher({
@@ -195,7 +207,7 @@ export async function runFeedbackReflection(params: RunFeedbackReflectionParams)
       cfg,
       dispatcher: capture.dispatcher,
       onSettled: () => {},
-      replyOptions: capture.replyOptions,
+      replyOptions: { ...capture.replyOptions, identityContractVersion: 1 },
     });
   } catch (err) {
     log.error("reflection dispatch failed", { error: formatUnknownError(err) });
@@ -270,3 +282,5 @@ export {
   parseReflectionResponse,
   recordReflectionTime,
 };
+
+export const testing = { buildReflectionContext };

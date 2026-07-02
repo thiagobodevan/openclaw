@@ -204,6 +204,28 @@ function createContext(overrides?: {
     name?: string;
     type?: "im" | "mpim" | "channel" | "group";
   }>;
+  resolveSlackSystemEventRouteReady?: (params: {
+    channelId?: string | null;
+    channelType?: string | null;
+    senderId?: string | null;
+    threadTs?: string | null;
+  }) => Promise<{
+    sessionKey: string;
+    agentId: string;
+    matchedBy: "binding.channel";
+    chatType: "direct" | "group" | "channel";
+  } | null>;
+  resolveSlackSystemEventIdentityRoute?: (params: {
+    channelId?: string | null;
+    channelType?: string | null;
+    senderId?: string | null;
+    threadTs?: string | null;
+  }) => {
+    sessionKey: string;
+    agentId: string;
+    matchedBy: "binding.channel";
+    chatType: "direct" | "group" | "channel";
+  } | null;
 }) {
   let handler: RegisteredHandler | null = null;
   let actionMatcher: RegExp | null = null;
@@ -283,6 +305,64 @@ function createContext(overrides?: {
     resolveUserName,
     resolveChannelName,
     resolveSlackSystemEventSessionKey: resolveSessionKey,
+    resolveSlackSystemEventRoute: (params: {
+      channelId?: string | null;
+      channelType?: string | null;
+      senderId?: string | null;
+      threadTs?: string | null;
+    }) => ({
+      sessionKey: resolveSessionKey(params),
+      agentId: "ops",
+      matchedBy: "binding.channel" as const,
+      chatType:
+        params.channelType === "im"
+          ? ("direct" as const)
+          : params.channelType === "mpim"
+            ? ("group" as const)
+            : ("channel" as const),
+    }),
+    resolveSlackSystemEventIdentityRoute: (params: {
+      channelId?: string | null;
+      channelType?: string | null;
+      senderId?: string | null;
+      threadTs?: string | null;
+    }) => {
+      if (overrides?.resolveSlackSystemEventIdentityRoute) {
+        return overrides.resolveSlackSystemEventIdentityRoute(params);
+      }
+      return {
+        sessionKey: resolveSessionKey(params),
+        agentId: "ops",
+        matchedBy: "binding.channel" as const,
+        chatType:
+          params.channelType === "im"
+            ? ("direct" as const)
+            : params.channelType === "mpim"
+              ? ("group" as const)
+              : ("channel" as const),
+      };
+    },
+    resolveSlackSystemEventRouteReady: async (params: {
+      channelId?: string | null;
+      channelType?: string | null;
+      senderId?: string | null;
+      threadTs?: string | null;
+    }) => {
+      if (overrides?.resolveSlackSystemEventRouteReady) {
+        return overrides.resolveSlackSystemEventRouteReady(params);
+      }
+      return {
+        sessionKey: resolveSessionKey(params),
+        agentId: "ops",
+        matchedBy: "binding.channel" as const,
+        chatType:
+          params.channelType === "im"
+            ? ("direct" as const)
+            : params.channelType === "mpim"
+              ? ("group" as const)
+              : ("channel" as const),
+      };
+    },
   };
   return {
     ctx,
@@ -405,7 +485,7 @@ describe("registerSlackInteractionEvents", () => {
     enqueueSystemEventMock.mockReset();
     enqueueSystemEventMock.mockReturnValue(true);
     requestHeartbeatMock.mockClear();
-    dispatchPluginInteractiveHandlerMock.mockClear();
+    dispatchPluginInteractiveHandlerMock.mockReset();
     resolvePluginConversationBindingApprovalMock.mockClear();
     resolvePluginConversationBindingApprovalMock.mockResolvedValue({ status: "expired" });
     buildPluginBindingResolvedTextMock.mockClear();
@@ -444,6 +524,7 @@ describe("registerSlackInteractionEvents", () => {
       channelId: undefined,
       channelType: "im",
       senderId: "U123",
+      senderIsOwner: false,
       threadTs: undefined,
     });
     expect(slackInteractionPayload()).toMatchObject({
@@ -458,6 +539,7 @@ describe("registerSlackInteractionEvents", () => {
     expect(enqueueSystemEventText()).not.toContain("secret");
     expect(mockCallArg(enqueueSystemEventMock, 0, "enqueueSystemEvent", 1)).toMatchObject({
       sessionKey: "agent:ops:slack:channel:C1",
+      actor: { channel: "slack", accountId: "default", senderId: "U123" },
       deliveryContext: {
         channel: "slack",
         to: "user:U123",
@@ -748,6 +830,61 @@ describe("registerSlackInteractionEvents", () => {
     expect(app.client.chat.update).not.toHaveBeenCalled();
   });
 
+  it("admits shared block actions before plugin or legacy mutations", async () => {
+    dispatchPluginInteractiveHandlerMock.mockResolvedValueOnce({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    const resolveRouteReady = vi.fn().mockResolvedValue(null);
+    const { ctx, app, getHandler } = createContext({
+      resolveSlackSystemEventRouteReady: resolveRouteReady,
+    });
+    registerSlackInteractionEvents({ ctx: ctx as never });
+
+    const ack = vi.fn().mockResolvedValue(undefined);
+    const respond = vi.fn().mockResolvedValue(undefined);
+    await getHandler()({
+      ack,
+      respond,
+      body: {
+        user: { id: "U_GUEST" },
+        team: { id: "T9" },
+        channel: { id: "C1" },
+        container: { channel_id: "C1", message_ts: "100.200" },
+        message: {
+          ts: "100.200",
+          text: "fallback",
+          blocks: [
+            {
+              type: "actions",
+              block_id: "service_actions",
+              elements: [{ type: "button", action_id: "service" }],
+            },
+          ],
+        },
+      },
+      action: {
+        type: "button",
+        action_id: "service",
+        block_id: "service_actions",
+        value: "approve:thread-1",
+      },
+    });
+
+    expect(ack).toHaveBeenCalledTimes(1);
+    expect(resolveRouteReady).toHaveBeenCalledWith({
+      channelId: "C1",
+      channelType: "channel",
+      senderId: "U_GUEST",
+      threadTs: undefined,
+    });
+    expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(app.client.chat.update).not.toHaveBeenCalled();
+    expect(respond).not.toHaveBeenCalled();
+  });
+
   it("passes false command auth to Slack plugin interactions for non-allowlisted senders", async () => {
     dispatchPluginInteractiveHandlerMock.mockResolvedValueOnce({
       matched: true,
@@ -938,7 +1075,9 @@ describe("registerSlackInteractionEvents", () => {
         "event options",
       ),
       {
-        contextKey: "slack:interaction:C1:100.200:openclaw:reply_button",
+        contextKey: "slack:interaction:C1:100.200:openclaw:reply_button:U123",
+        contextMode: "exact",
+        actor: { channel: "slack", accountId: "default", senderId: "U123" },
         deliveryContext: {
           accountId: "default",
           channel: "slack",
@@ -955,11 +1094,22 @@ describe("registerSlackInteractionEvents", () => {
       threadTs: "100.100",
     });
     expect(requestHeartbeatMock).toHaveBeenCalledWith({
-      source: "hook",
+      source: "channel-interaction",
       intent: "immediate",
       reason: "hook:slack-interaction",
       sessionKey: "agent:ops:slack:channel:C1",
       heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        accountId: "default",
+        systemEventContextKey: "slack:interaction:C1:100.200:openclaw:reply_button:U123",
+        routeMatchedBy: "binding.channel",
+        chatType: "channel",
+        groupId: "C1",
+        groupSpace: undefined,
+        senderId: "U123",
+        resolveCurrentRoute: expect.any(Function),
+      },
     });
     expect(app.client.chat.update).toHaveBeenCalledTimes(1);
   });
@@ -1046,6 +1196,18 @@ describe("registerSlackInteractionEvents", () => {
     expect(firstCall?.dedupeId).toContain(":trigger-1:");
     expect(secondCall?.dedupeId).toContain(":trigger-2:");
     expect(firstCall?.dedupeId).not.toBe(secondCall?.dedupeId);
+    expect(enqueueSystemEventMock).toHaveBeenCalledTimes(2);
+    expect(requestHeartbeatMock).toHaveBeenCalledTimes(2);
+    const heartbeatCalls = requestHeartbeatMock.mock.calls as unknown[][];
+    const firstHeartbeat = requireRecord(heartbeatCalls[0]?.[0], "first heartbeat");
+    const secondHeartbeat = requireRecord(heartbeatCalls[1]?.[0], "second heartbeat");
+    const firstConversation = requireRecord(firstHeartbeat.conversation, "first conversation");
+    const secondConversation = requireRecord(secondHeartbeat.conversation, "second conversation");
+    expect(firstConversation.systemEventContextKey).toContain(":U123:trigger-1");
+    expect(secondConversation.systemEventContextKey).toContain(":U123:trigger-2");
+    expect(firstConversation.systemEventContextKey).not.toBe(
+      secondConversation.systemEventContextKey,
+    );
   });
 
   it("resolves plugin binding approvals from shared interactive Slack actions", async () => {
@@ -2374,6 +2536,7 @@ describe("registerSlackInteractionEvents", () => {
           private_metadata: JSON.stringify({
             channelId: "D123",
             channelType: "im",
+            threadTs: "1712345678.123456",
             userId: "U777",
           }),
           state: {
@@ -2412,6 +2575,7 @@ describe("registerSlackInteractionEvents", () => {
       channelId: "D123",
       channelType: "im",
       senderId: "U777",
+      threadTs: "1712345678.123456",
     });
     expect(enqueueSystemEventMock).toHaveBeenCalledTimes(1);
     const eventText = enqueueSystemEventText();
@@ -2447,6 +2611,27 @@ describe("registerSlackInteractionEvents", () => {
     expect(envInput?.selectedValues).toEqual(["prod"]);
     expect(notesInput?.inputValue).toBe("ship now");
     expect(trackEvent).toHaveBeenCalledTimes(1);
+    expect(mockCallArg(enqueueSystemEventMock, 0, "enqueueSystemEvent", 1)).toMatchObject({
+      actor: { channel: "slack", accountId: "default", senderId: "U777" },
+    });
+    expect(requestHeartbeatMock).toHaveBeenCalledWith({
+      source: "channel-interaction",
+      intent: "immediate",
+      reason: "hook:slack-interaction",
+      sessionKey: "agent:ops:slack:channel:C1",
+      heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        accountId: "default",
+        routeMatchedBy: "binding.channel",
+        chatType: "direct",
+        systemEventContextKey: "slack:interaction:view:openclaw:deploy_form:V123:U777",
+        groupId: undefined,
+        groupSpace: "T1",
+        senderId: "U777",
+        resolveCurrentRoute: expect.any(Function),
+      },
+    });
   });
 
   it("dispatches plugin-owned modal submissions with full view state before compacting events", async () => {
@@ -2746,8 +2931,9 @@ describe("registerSlackInteractionEvents", () => {
     expect(enqueueSystemEventMock).not.toHaveBeenCalled();
   });
 
-  it("keeps no-channel modal events open when allowFrom is unset", async () => {
+  it("drops modal events when their live audience metadata is missing", async () => {
     enqueueSystemEventMock.mockClear();
+    dispatchPluginInteractiveHandlerMock.mockClear();
     const { ctx, getViewHandler } = createContext({ allowFrom: [] });
     registerSlackInteractionEvents({ ctx: ctx as never });
     const viewHandler = getViewHandler();
@@ -2769,7 +2955,8 @@ describe("registerSlackInteractionEvents", () => {
     } as never);
 
     expect(ack).toHaveBeenCalled();
-    expect(enqueueSystemEventMock).toHaveBeenCalledTimes(1);
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
   });
 
   it("captures modal input labels and picker values across block types", async () => {
@@ -2786,7 +2973,11 @@ describe("registerSlackInteractionEvents", () => {
         view: {
           id: "V400",
           callback_id: "openclaw:routing_form",
-          private_metadata: JSON.stringify({ userId: "U444" }),
+          private_metadata: JSON.stringify({
+            channelId: "D444",
+            channelType: "im",
+            userId: "U444",
+          }),
           state: {
             values: {
               env_block: {
@@ -2988,7 +3179,11 @@ describe("registerSlackInteractionEvents", () => {
         view: {
           id: "V555",
           callback_id: "openclaw:long_richtext",
-          private_metadata: JSON.stringify({ userId: "U555" }),
+          private_metadata: JSON.stringify({
+            channelId: "D555",
+            channelType: "im",
+            userId: "U555",
+          }),
           state: {
             values: {
               richtext_block: {
@@ -3045,7 +3240,8 @@ describe("registerSlackInteractionEvents", () => {
           external_id: "deploy-ext-900",
           hash: "view-hash-900",
           private_metadata: JSON.stringify({
-            sessionKey: "agent:main:slack:channel:C99",
+            channelId: "C99",
+            channelType: "channel",
             userId: "U900",
           }),
           state: {
@@ -3066,7 +3262,11 @@ describe("registerSlackInteractionEvents", () => {
     });
 
     expect(ack).toHaveBeenCalled();
-    expect(resolveSessionKey).not.toHaveBeenCalled();
+    expect(resolveSessionKey).toHaveBeenCalledWith({
+      channelId: "C99",
+      channelType: "channel",
+      senderId: "U900",
+    });
     expect(enqueueSystemEventMock).toHaveBeenCalledTimes(1);
     const eventText = enqueueSystemEventText();
     const options = requireRecord(
@@ -3107,7 +3307,7 @@ describe("registerSlackInteractionEvents", () => {
         .selectedValues,
     ).toEqual(["canary"]);
     expect(trackEvent).toHaveBeenCalledTimes(1);
-    expect(options.sessionKey).toBe("agent:main:slack:channel:C99");
+    expect(options.sessionKey).toBe("agent:ops:slack:channel:C1");
   });
 
   it("defaults modal close isCleared to false when Slack omits the flag", async () => {
@@ -3124,7 +3324,11 @@ describe("registerSlackInteractionEvents", () => {
         view: {
           id: "V901",
           callback_id: "openclaw:deploy_form",
-          private_metadata: JSON.stringify({ userId: "U901" }),
+          private_metadata: JSON.stringify({
+            channelId: "D901",
+            channelType: "im",
+            userId: "U901",
+          }),
         },
       },
     });

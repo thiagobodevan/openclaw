@@ -26,15 +26,17 @@ import {
   authorizeSlackSystemEventSender,
   resolveSlackCommandIngress,
   resolveSlackEffectiveAllowFrom,
+  resolveSlackSenderIsOwner,
 } from "../auth.js";
 import { resolveSlackChannelConfig } from "../channel-config.js";
-import type { SlackMonitorContext } from "../context.js";
+import type { SlackMonitorContext, SlackSystemEventRoute } from "../context.js";
 import {
   buildPluginBindingResolvedText,
   parsePluginBindingApprovalCustomId,
   resolvePluginConversationBindingApproval,
 } from "../conversation.runtime.js";
 import { escapeSlackMrkdwn } from "../mrkdwn.js";
+import { resolveSlackSystemEventIdentityPreflight } from "./system-event-context.js";
 
 type InteractionMessageBlock = {
   type?: string;
@@ -747,12 +749,35 @@ async function resolveSlackBlockActionCommandAuthorized(params: {
   return commandIngress.commandAccess.authorized;
 }
 
-function enqueueSlackBlockActionEvent(params: {
+async function resolveAdmittedSlackBlockActionRoute(params: {
   ctx: SlackMonitorContext;
   parsed: ParsedSlackBlockAction;
   auth: { channelType?: "im" | "mpim" | "channel" | "group" };
+}): Promise<SlackSystemEventRoute | null> {
+  const route = await params.ctx.resolveSlackSystemEventRouteReady({
+    channelId: params.parsed.channelId,
+    channelType: params.auth.channelType,
+    senderId: params.parsed.userId,
+    ...(params.auth.channelType === "im"
+      ? { senderIsOwner: resolveSlackSenderIsOwner(params.ctx, params.parsed.userId) }
+      : {}),
+    threadTs: params.parsed.threadTs,
+  });
+  if (!route) {
+    params.ctx.runtime.log?.(
+      `slack:interaction drop action=${params.parsed.actionId} reason=identity-or-binding-unavailable`,
+    );
+  }
+  return route;
+}
+
+async function enqueueSlackBlockActionEvent(params: {
+  ctx: SlackMonitorContext;
+  parsed: ParsedSlackBlockAction;
+  auth: { channelType?: "im" | "mpim" | "channel" | "group" };
+  route: SlackSystemEventRoute;
   formatSystemEvent: (payload: Record<string, unknown>) => string;
-}): void {
+}): Promise<void> {
   const eventPayload: InteractionSummary = {
     interactionType: "block_action",
     actionId: params.parsed.actionId,
@@ -769,21 +794,27 @@ function enqueueSlackBlockActionEvent(params: {
   params.ctx.runtime.log?.(
     `slack:interaction action=${params.parsed.actionId} type=${params.parsed.actionSummary.actionType ?? "unknown"} user=${params.parsed.userId} channel=${params.parsed.channelId}`,
   );
-  const sessionKey = params.ctx.resolveSlackSystemEventSessionKey({
-    channelId: params.parsed.channelId,
-    channelType: params.auth.channelType,
-    senderId: params.parsed.userId,
-    threadTs: params.parsed.threadTs,
-  });
+  const sessionKey = params.route.sessionKey;
   const contextParts = [
     "slack:interaction",
     params.parsed.channelId,
     params.parsed.messageTs,
     params.parsed.actionId,
+    params.parsed.userId,
+    params.parsed.typedBody.trigger_id,
+    typeof params.parsed.typedAction.action_ts === "string"
+      ? params.parsed.typedAction.action_ts
+      : undefined,
   ].filter(Boolean);
   const queued = enqueueSystemEvent(params.formatSystemEvent(eventPayload), {
     sessionKey,
     contextKey: contextParts.join(":"),
+    contextMode: "exact",
+    actor: {
+      channel: "slack",
+      accountId: params.ctx.accountId,
+      senderId: params.parsed.userId,
+    },
     deliveryContext: {
       channel: "slack",
       to:
@@ -798,11 +829,29 @@ function enqueueSlackBlockActionEvent(params: {
   });
   if (queued) {
     requestHeartbeat({
-      source: "hook",
+      source: "channel-interaction",
       intent: "immediate",
       reason: "hook:slack-interaction",
       sessionKey,
       heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        accountId: params.ctx.accountId,
+        routeMatchedBy: params.route.matchedBy,
+        chatType: params.route.chatType,
+        systemEventContextKey: contextParts.join(":"),
+        groupId: params.route.chatType === "direct" ? undefined : params.parsed.channelId,
+        groupSpace: params.parsed.typedBody.team?.id,
+        senderId: params.parsed.userId,
+        resolveCurrentRoute: (cfg) =>
+          params.ctx.resolveSlackSystemEventCurrentRoute?.({
+            cfg,
+            channelId: params.parsed.channelId,
+            channelType: params.auth.channelType,
+            senderId: params.parsed.userId,
+            threadTs: params.parsed.threadTs,
+          }) ?? null,
+      },
     });
   }
 }
@@ -920,12 +969,34 @@ async function handleSlackBlockAction(params: {
       return;
     }
   }
+  if (
+    !resolveSlackSystemEventIdentityPreflight({
+      ctx: params.ctx,
+      senderId: parsed.userId,
+      channelId: parsed.channelId,
+      threadTs: parsed.threadTs,
+      eventKind: "block-action",
+    })
+  ) {
+    await respondEphemeral(respond, "You are not authorized to use this control.");
+    return;
+  }
   const auth = await authorizeSlackBlockAction({
     ctx: params.ctx,
     parsed,
     respond,
   });
   if (!auth.allowed) {
+    return;
+  }
+  // Admit once before any plugin or legacy action mutates product state.
+  // Shared contexts must never inherit the default personal route on a side path.
+  const route = await resolveAdmittedSlackBlockActionRoute({
+    ctx: params.ctx,
+    parsed,
+    auth,
+  });
+  if (!route) {
     return;
   }
   if (pluginInteractionData && isSlackReplyActionId(parsed.actionId)) {
@@ -957,10 +1028,11 @@ async function handleSlackBlockAction(params: {
       return;
     }
   }
-  enqueueSlackBlockActionEvent({
+  await enqueueSlackBlockActionEvent({
     ctx: params.ctx,
     parsed,
     auth,
+    route,
     formatSystemEvent: params.formatSystemEvent,
   });
   await updateSlackLegacyBlockAction({

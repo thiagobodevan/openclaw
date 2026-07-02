@@ -20,6 +20,7 @@ import {
   createChannelHistoryWindow,
   type HistoryEntry,
 } from "openclaw/plugin-sdk/reply-history";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import { sliceUtf16Safe, truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { serializeMSTeamsAdaptiveCardActionValue } from "../adaptive-card-submit.js";
 import {
@@ -312,6 +313,46 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     const effectiveDmAllowFrom = senderAccess.effectiveAllowFrom;
     const effectiveGroupAllowFrom = senderAccess.effectiveGroupAllowFrom;
     const isChannel = conversationType === "channel";
+    const chatType = isDirectMessage ? "direct" : isChannel ? "channel" : "group";
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "msteams",
+      teamId,
+      peer: {
+        kind: chatType,
+        id: isDirectMessage ? senderId : conversationId,
+      },
+    });
+    // Channel threads need distinct sessions, but retain the binding provenance
+    // used to admit the shared service identity before pairing or conversation writes.
+    route.sessionKey = resolveMSTeamsRouteSessionKey({
+      baseSessionKey: route.sessionKey,
+      isChannel,
+      conversationMessageId,
+      replyToId: activity.replyToId,
+    });
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: chatType,
+        ChatId: isDirectMessage ? undefined : conversationId,
+        GroupSpace: teamId,
+        SenderId: senderId,
+        Provider: "msteams",
+        Surface: "msteams",
+        CommandAuthorized: commandAuthorized,
+      },
+    });
+    if (!identityDecision.allowed) {
+      logVerboseMessage(
+        `msteams: drop message before pairing or conversation writes (${identityDecision.reason})`,
+      );
+      return;
+    }
 
     if (isDirectMessage && msteamsCfg && senderAccess.decision !== "allow") {
       if (senderAccess.reasonCode === "dm_policy_disabled") {
@@ -482,28 +523,6 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         : `msteams:group:${conversationId}`;
     const teamsTo = isDirectMessage ? `user:${senderId}` : `conversation:${conversationId}`;
 
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: "msteams",
-      teamId,
-      peer: {
-        kind: isDirectMessage ? "direct" : isChannel ? "channel" : "group",
-        id: isDirectMessage ? senderId : conversationId,
-      },
-    });
-
-    // Isolate channel thread sessions: each thread gets its own session key so
-    // context does not bleed across threads. Prefer conversationMessageId (the
-    // ;messageid= portion of conversation.id, i.e. the thread root) over
-    // activity.replyToId (which may point to a non-root parent in deep threads).
-    // DMs and group chats are unaffected — only channel thread replies fork.
-    route.sessionKey = resolveMSTeamsRouteSessionKey({
-      baseSessionKey: route.sessionKey,
-      isChannel,
-      conversationMessageId,
-      replyToId: activity.replyToId,
-    });
-
     const preview = sliceUtf16Safe(rawBody.replace(/\s+/g, " "), 0, 160);
     const inboundLabel = isDirectMessage
       ? `Teams DM from ${senderName}`
@@ -513,6 +532,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       core.system.enqueueSystemEvent(inboundLabel, {
         sessionKey: route.sessionKey,
         contextKey: `msteams:message:${conversationId}:${activity.id ?? "unknown"}`,
+        actor: { channel: "msteams", accountId: route.accountId, senderId },
       });
 
     const channelId = conversationId;
@@ -679,6 +699,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
           core.system.enqueueSystemEvent(formatParentContextEvent(parentSummary), {
             sessionKey: route.sessionKey,
             contextKey: `msteams:thread-parent:${conversationId}:${activity.replyToId}`,
+            actor: { channel: "msteams", accountId: route.accountId, senderId },
           });
           markParentContextInjected(route.sessionKey, activity.replyToId);
         }
@@ -801,6 +822,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       route: {
         agentId: route.agentId,
         accountId: route.accountId,
+        matchedBy: route.matchedBy,
         routeSessionKey: route.sessionKey,
       },
       reply: {
@@ -918,7 +940,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
                 ctxPayload,
                 dispatcher,
                 onSettled: () => markDispatchIdle(),
-                replyOptions,
+                replyOptions: { ...replyOptions, identityContractVersion: 1 },
                 configOverride,
               }),
           }),

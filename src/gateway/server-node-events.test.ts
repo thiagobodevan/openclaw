@@ -69,6 +69,9 @@ const sanitizeInboundSystemTagsMock = vi.hoisted(() =>
 );
 const updatePairedDeviceMetadataMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
 const updatePairedNodeMetadataMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+const resolveConversationIdentityModeMock = vi.hoisted(() =>
+  vi.fn(() => ({ mode: "personal", allowed: true, reason: "internal" })),
+);
 
 const runtimeMocks = vi.hoisted(() => ({
   agentCommandFromIngress: ingressAgentCommandMock,
@@ -92,6 +95,7 @@ const runtimeMocks = vi.hoisted(() => ({
   parseMessageWithAttachments: parseMessageWithAttachmentsMock,
   registerApnsRegistration: registerApnsRegistrationMock,
   requestHeartbeat: vi.fn(),
+  resolveConversationIdentityMode: resolveConversationIdentityModeMock,
   resolveChatAttachmentMaxBytes: vi.fn(() => 20 * 1024 * 1024),
   resolveGatewayModelSupportsImages: vi.fn(
     async ({
@@ -124,6 +128,7 @@ const runtimeMocks = vi.hoisted(() => ({
     }),
   ),
   sanitizeInboundSystemTags: sanitizeInboundSystemTagsMock,
+  sendDurableMessageBatch: vi.fn(async () => ({ status: "sent" })),
   scopedHeartbeatWakeOptions: vi.fn((sessionKey?: string, opts?: { reason: string }) => {
     const wakeOptions = { reason: opts?.reason };
     return /^agent:[^:]+:.+$/i.test(sessionKey ?? "")
@@ -142,6 +147,7 @@ vi.mock("../infra/node-pairing.js", () => ({
 
 import type { CliDeps } from "../cli/deps.js";
 import type { HealthSummary } from "../commands/health.js";
+import { resolveConversationIdentityMode as resolveConversationIdentityModeActual } from "../routing/conversation-identity.js";
 import type { NodeEventContext } from "./server-node-events-types.js";
 import {
   getRecentNodePresencePersistCountForTests,
@@ -157,6 +163,9 @@ const canonicalizeSessionEntryAliasesMock = runtimeMocks.canonicalizeSessionEntr
 const loadSessionEntryMock = runtimeMocks.loadSessionEntry;
 const registerApnsRegistrationVi = runtimeMocks.registerApnsRegistration;
 const normalizeChannelIdVi = runtimeMocks.normalizeChannelId;
+const resolveConversationIdentityModeVi = runtimeMocks.resolveConversationIdentityMode;
+const resolveSessionAgentIdVi = runtimeMocks.resolveSessionAgentId;
+const sendDurableMessageBatchVi = runtimeMocks.sendDurableMessageBatch;
 
 const execEventHeartbeatOptions = (sessionKey?: string) => ({
   source: "exec-event",
@@ -766,13 +775,64 @@ describe("node exec events", () => {
 
 describe("voice transcript events", () => {
   beforeEach(() => {
+    resetNodeEventDeduplicationForTests();
     agentCommandMock.mockClear();
     canonicalizeSessionEntryAliasesMock.mockClear();
+    loadSessionEntryMock.mockClear();
+    loadSessionEntryMock.mockImplementation((sessionKey: string) => buildSessionLookup(sessionKey));
+    loadConfigMock.mockReset();
+    loadConfigMock.mockReturnValue({ session: { mainKey: "agent:main:main" } });
+    resolveSessionAgentIdVi.mockReset();
+    resolveSessionAgentIdVi.mockReturnValue("main");
     agentCommandMock.mockResolvedValue({ status: "ok" } as never);
     canonicalizeSessionEntryAliasesMock.mockImplementation(async ({ target, update }) => {
       const entry = update ? await update(undefined) : undefined;
       return { canonicalKey: target.canonicalKey, entry };
     });
+    resolveConversationIdentityModeVi.mockReset();
+    resolveConversationIdentityModeVi.mockReturnValue({
+      mode: "personal",
+      allowed: true,
+      reason: "owner_direct",
+    });
+  });
+
+  it("admits the current agent before dedupe or session state", async () => {
+    const addChatRun = vi.fn();
+    const ctx = buildCtx();
+    ctx.addChatRun = addChatRun;
+    loadConfigMock
+      .mockReturnValueOnce({
+        agents: { list: [{ id: "main", default: true }] },
+        session: { mainKey: "agent:main:main" },
+      })
+      .mockReturnValueOnce({
+        agents: { list: [{ id: "main", default: true }, { id: "removed" }] },
+        session: { mainKey: "agent:main:main" },
+      });
+    resolveSessionAgentIdVi.mockReturnValue("removed");
+    resolveConversationIdentityModeVi.mockImplementation(resolveConversationIdentityModeActual);
+    const event = {
+      event: "voice.transcript",
+      payloadJSON: JSON.stringify({
+        text: "same transcript",
+        sessionKey: "agent:removed:main",
+      }),
+    };
+
+    await handleNodeEvent(ctx, "node-revoked", event);
+
+    expect(loadSessionEntryMock).not.toHaveBeenCalled();
+    expect(canonicalizeSessionEntryAliasesMock).not.toHaveBeenCalled();
+    expect(addChatRun).not.toHaveBeenCalled();
+    expect(agentCommandMock).not.toHaveBeenCalled();
+
+    await handleNodeEvent(ctx, "node-revoked", event);
+
+    expect(loadSessionEntryMock).toHaveBeenCalledTimes(1);
+    expect(canonicalizeSessionEntryAliasesMock).toHaveBeenCalledTimes(1);
+    expect(addChatRun).toHaveBeenCalledTimes(1);
+    expect(agentCommandMock).toHaveBeenCalledTimes(1);
   });
 
   it("dedupes repeated transcript payloads for the same session", async () => {
@@ -945,6 +1005,10 @@ describe("notifications changed events", () => {
     normalizeChannelIdVi.mockClear();
     normalizeChannelIdVi.mockImplementation((channel?: string | null) => channel ?? null);
     loadSessionEntryMock.mockImplementation((sessionKey: string) => buildSessionLookup(sessionKey));
+    loadConfigMock.mockReset();
+    loadConfigMock.mockReturnValue({ session: { mainKey: "agent:main:main" } });
+    resolveSessionAgentIdVi.mockReset();
+    resolveSessionAgentIdVi.mockReturnValue("main");
     enqueueSystemEventMock.mockReturnValue(true);
   });
 
@@ -1148,6 +1212,42 @@ describe("agent request events", () => {
       return { canonicalKey: target.canonicalKey, entry };
     });
     loadSessionEntryMock.mockImplementation((sessionKey: string) => buildSessionLookup(sessionKey));
+    resolveConversationIdentityModeVi.mockReset();
+    resolveConversationIdentityModeVi.mockReturnValue({
+      mode: "personal",
+      allowed: true,
+      reason: "internal",
+    });
+    sendDurableMessageBatchVi.mockClear();
+  });
+
+  it("rejects a removed session agent before reads, receipts, or writes", async () => {
+    const addChatRun = vi.fn();
+    const ctx = buildCtx();
+    ctx.addChatRun = addChatRun;
+    loadConfigMock.mockReturnValueOnce({
+      agents: { list: [{ id: "main", default: true }] },
+      session: { mainKey: "agent:main:main" },
+    });
+    resolveSessionAgentIdVi.mockReturnValueOnce("removed");
+    resolveConversationIdentityModeVi.mockImplementationOnce(resolveConversationIdentityModeActual);
+
+    await handleNodeEvent(ctx, "node-revoked", {
+      event: "agent.request",
+      payloadJSON: JSON.stringify({
+        message: "run this",
+        sessionKey: "agent:removed:main",
+        deliver: true,
+        receipt: true,
+      }),
+    });
+
+    expect(loadSessionEntryMock).not.toHaveBeenCalled();
+    expect(parseMessageWithAttachmentsMock).not.toHaveBeenCalled();
+    expect(canonicalizeSessionEntryAliasesMock).not.toHaveBeenCalled();
+    expect(sendDurableMessageBatchVi).not.toHaveBeenCalled();
+    expect(addChatRun).not.toHaveBeenCalled();
+    expect(agentCommandMock).not.toHaveBeenCalled();
   });
 
   it("disables delivery when route is unresolved instead of falling back globally", async () => {

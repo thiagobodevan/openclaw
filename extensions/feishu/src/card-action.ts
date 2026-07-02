@@ -139,9 +139,8 @@ function buildSyntheticMessageEvent(
   // card-action-c-* IDs are temporary callback tokens, not valid Feishu message IDs.
   // Using them as reply targets causes "Invalid ids" errors from the streaming reply API.
   const isTemporaryCardActionId = replyTargetMessageId?.startsWith("card-action-c-");
-  const validReplyTargetId = replyTargetMessageId && !isTemporaryCardActionId
-    ? replyTargetMessageId
-    : undefined;
+  const validReplyTargetId =
+    replyTargetMessageId && !isTemporaryCardActionId ? replyTargetMessageId : undefined;
   return {
     sender: {
       sender_id: {
@@ -202,14 +201,13 @@ async function dispatchSyntheticCommand(params: {
 //   chat_mode: conversation type — "p2p" | "group" | "topic"
 //   chat_type: privacy classification — "private" | "public"
 // We check chat_mode first because it directly indicates conversation type.
-// "private" maps to "p2p" as the safe-failure direction (restrictive DM
-// policy) — a private group chat misclassified as p2p is safer than the
-// reverse. "topic" and "public" are treated as group semantics.
+// Privacy-only `private` is ambiguous: it can describe a private group. Keep
+// an explicit p2p mode, but fail ambiguous audiences closed as shared.
 function normalizeResolvedCardActionChatType(value: unknown): "p2p" | "group" | undefined {
   if (value === "group" || value === "topic" || value === "public") {
     return "group";
   }
-  if (value === "p2p" || value === "private") {
+  if (value === "p2p") {
     return "p2p";
   }
   return undefined;
@@ -307,21 +305,21 @@ async function resolveCardActionChatType(params: {
         return resolvedChatType;
       }
       params.log(
-        `feishu[${params.account.accountId}]: card action missing chat type for chat; defaulting to p2p`,
+        `feishu[${params.account.accountId}]: card action missing chat type for chat; defaulting to group`,
       );
     } else {
       params.log(
-        `feishu[${params.account.accountId}]: failed to resolve chat type: ${sanitizeLogValue(response.msg ?? "unknown error")}; defaulting to p2p`,
+        `feishu[${params.account.accountId}]: failed to resolve chat type: ${sanitizeLogValue(response.msg ?? "unknown error")}; defaulting to group`,
       );
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     params.log(
-      `feishu[${params.account.accountId}]: failed to resolve chat type: ${sanitizeLogValue(message)}; defaulting to p2p`,
+      `feishu[${params.account.accountId}]: failed to resolve chat type: ${sanitizeLogValue(message)}; defaulting to group`,
     );
   }
 
-  return "p2p";
+  return "group";
 }
 
 async function sendInvalidInteractionNotice(params: {

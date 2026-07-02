@@ -256,6 +256,12 @@ describe("handleQaInbound", () => {
     const assembled = firstRunAssembledParams(runtime);
     expect(assembled.replyPipeline).toEqual({});
     expect(assembled.ctxPayload.WasMentioned).toBe(true);
+    expect(assembled.ctxPayload.InputProvenance).toEqual({
+      kind: "internal_system",
+      sourceChannel: "qa-channel",
+      sourceTool: "qa_channel_harness",
+    });
+    expect(assembled.replyOptions).toMatchObject({ identityContractVersion: 1 });
   });
 
   it("drops direct messages outside the configured sender allowlist", async () => {

@@ -177,6 +177,13 @@ function buildAgentCommandInput(params: {
     runId: params.runId,
     deliver: false as const,
     messageChannel: params.messageChannel,
+    runContext: {
+      messageChannel: params.messageChannel,
+      chatType: "direct" as const,
+      routeMatchedBy: "default" as const,
+    },
+    identityContractVersion: 1 as const,
+    senderIsOwner: true,
     bestEffortDeliver: false as const,
     allowModelOverride: params.modelOverride !== undefined,
     abortSignal: params.abortSignal,

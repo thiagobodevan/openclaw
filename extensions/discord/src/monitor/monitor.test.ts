@@ -116,6 +116,24 @@ describe("discord component interactions", () => {
       ...overrides,
     }) as DiscordAccountConfig;
 
+  const createSharedServiceConfig = (params: {
+    config: OpenClawConfig;
+    peer: { kind: "channel" | "group"; id: string };
+  }): OpenClawConfig => ({
+    ...params.config,
+    agents: {
+      ...params.config.agents,
+      list: [{ id: "personal", default: true }, { id: "service" }],
+    },
+    bindings: [
+      ...(params.config.bindings ?? []),
+      {
+        agentId: "service",
+        match: { channel: "discord", accountId: "default", peer: params.peer },
+      },
+    ],
+  });
+
   type DispatchParams = Parameters<DispatchReplyWithBufferedBlockDispatcherFn>[0];
 
   type ComponentContext = Parameters<CreateDiscordComponentButton>[0];
@@ -209,8 +227,8 @@ describe("discord component interactions", () => {
     kind: "button",
     label: "Approve",
     messageId: "msg-1",
-    sessionKey: "session-1",
-    agentId: "agent-1",
+    sessionKey: "agent:main:main",
+    agentId: "main",
     accountId: "default",
     ...overrides,
   });
@@ -219,8 +237,8 @@ describe("discord component interactions", () => {
     id: "mdl_1",
     title: "Details",
     messageId: "msg-2",
-    sessionKey: "session-2",
-    agentId: "agent-2",
+    sessionKey: "agent:main:main",
+    agentId: "main",
     accountId: "default",
     fields: [
       {
@@ -236,10 +254,13 @@ describe("discord component interactions", () => {
   const createGuildPluginButton = (allowFrom: string[]) =>
     createDiscordComponentButton(
       createComponentContext({
-        cfg: {
-          commands: { useAccessGroups: true },
-          channels: { discord: { replyToMode: "first" } },
-        } as OpenClawConfig,
+        cfg: createSharedServiceConfig({
+          config: {
+            commands: { useAccessGroups: true },
+            channels: { discord: { replyToMode: "first" } },
+          },
+          peer: { kind: "channel", id: "guild-channel" },
+        }),
         allowFrom,
       }),
     );
@@ -261,7 +282,13 @@ describe("discord component interactions", () => {
     isAuthorizedSender: boolean;
   }) {
     registerDiscordComponentEntries({
-      entries: [createButtonEntry({ callbackData: "codex:approve" })],
+      entries: [
+        createButtonEntry({
+          callbackData: "codex:approve",
+          sessionKey: "agent:service:discord:channel:guild-channel",
+          agentId: "service",
+        }),
+      ],
       modals: [],
     });
     dispatchPluginInteractiveHandlerMock.mockResolvedValue({
@@ -375,7 +402,7 @@ describe("discord component interactions", () => {
         to?: string;
       };
     };
-    expect(recordParams.updateLastRoute?.sessionKey).toBe("session-1");
+    expect(recordParams.updateLastRoute?.sessionKey).toBe("agent:main:main");
     expect(recordParams.updateLastRoute?.sessionKey).not.toBe("agent:agent-1:main");
     expect(recordParams.updateLastRoute?.channel).toBe("discord");
     expect(recordParams.updateLastRoute?.to).toBe("user:123456789");
@@ -427,8 +454,8 @@ describe("discord component interactions", () => {
           kind: "select",
           label: "Pick",
           messageId: "msg-1",
-          sessionKey: "session-1",
-          agentId: "agent-1",
+          sessionKey: "agent:main:main",
+          agentId: "main",
           accountId: "default",
           callbackData: "/codex_resume",
           selectType: "string",
@@ -456,8 +483,8 @@ describe("discord component interactions", () => {
           kind: "select",
           label: "Pick",
           messageId: "msg-1",
-          sessionKey: "session-1",
-          agentId: "agent-1",
+          sessionKey: "agent:main:main",
+          agentId: "main",
           accountId: "default",
           callbackDataKind: "command",
           selectType: "string",
@@ -487,8 +514,8 @@ describe("discord component interactions", () => {
           kind: "select",
           label: "Pick",
           messageId: "msg-1",
-          sessionKey: "session-1",
-          agentId: "agent-1",
+          sessionKey: "agent:main:main",
+          agentId: "main",
           accountId: "default",
           callbackDataKind: "callback",
           selectType: "string",
@@ -681,15 +708,23 @@ describe("discord component interactions", () => {
   }) {
     registerDiscordComponentEntries({
       entries: [],
-      modals: [createModalEntry()],
+      modals: [
+        createModalEntry({
+          sessionKey: "agent:service:discord:channel:guild-channel",
+          agentId: "service",
+        }),
+      ],
     });
 
     const modal = createDiscordComponentModal(
       createComponentContext({
-        cfg: {
-          commands: { useAccessGroups: true },
-          channels: { discord: { replyToMode: "first" } },
-        } as OpenClawConfig,
+        cfg: createSharedServiceConfig({
+          config: {
+            commands: { useAccessGroups: true },
+            channels: { discord: { replyToMode: "first" } },
+          },
+          peer: { kind: "channel", id: "guild-channel" },
+        }),
         allowFrom: params.allowFrom,
       }),
     );
@@ -764,9 +799,165 @@ describe("discord component interactions", () => {
     });
   });
 
+  it("admits a shared route before plugin dispatch or component consumption", async () => {
+    registerDiscordComponentEntries({
+      entries: [createButtonEntry({ callbackData: "service:approve" })],
+      modals: [],
+    });
+    dispatchPluginInteractiveHandlerMock.mockResolvedValue({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    const button = createDiscordComponentButton(
+      createComponentContext({
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }] },
+          commands: { useAccessGroups: true },
+          channels: { discord: { replyToMode: "first" } },
+        },
+      }),
+    );
+    const { interaction, reply } = createGuildPluginButtonInteraction("interaction-unbound-plugin");
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this button.",
+      ephemeral: true,
+    });
+    expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+    expect(resolveDiscordComponentEntry({ id: "btn_1", consume: false })).not.toBeNull();
+  });
+
+  it("rejects a stale component route before plugin dispatch or consumption", async () => {
+    registerDiscordComponentEntries({
+      entries: [
+        createButtonEntry({
+          callbackData: "service:approve",
+          sessionKey: "agent:retired-service:discord:channel:guild-channel",
+          agentId: "retired-service",
+        }),
+      ],
+      modals: [],
+    });
+    dispatchPluginInteractiveHandlerMock.mockResolvedValue({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    const button = createGuildPluginButton(["123456789"]);
+    const { interaction, reply } = createGuildPluginButtonInteraction("interaction-stale-service");
+
+    await button.run(interaction, { cid: "btn_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({
+      content: "This component is no longer valid.",
+      ephemeral: true,
+    });
+    expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+    expect(resolveDiscordComponentEntry({ id: "btn_1", consume: false })).not.toBeNull();
+  });
+
+  it("admits a shared route before modal plugin dispatch or consumption", async () => {
+    registerDiscordComponentEntries({
+      entries: [],
+      modals: [createModalEntry({ callbackData: "service:submit" })],
+    });
+    dispatchPluginInteractiveHandlerMock.mockResolvedValue({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    const modal = createDiscordComponentModal(
+      createComponentContext({
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }] },
+          commands: { useAccessGroups: true },
+          channels: { discord: { replyToMode: "first" } },
+        },
+      }),
+    );
+    const { interaction, reply } = createModalInteraction({
+      rawData: {
+        channel_id: "guild-channel",
+        guild_id: "guild-1",
+        id: "interaction-unbound-modal",
+        member: { roles: [] },
+      } as unknown as ModalInteraction["rawData"],
+      guild: { id: "guild-1", name: "Test Guild" } as unknown as ModalInteraction["guild"],
+    });
+
+    await modal.run(interaction, { mid: "mdl_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this form.",
+      ephemeral: true,
+    });
+    expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+    expect(resolveDiscordModalEntry({ id: "mdl_1", consume: false })).not.toBeNull();
+  });
+
+  it("rejects a stale modal route before plugin dispatch or consumption", async () => {
+    registerDiscordComponentEntries({
+      entries: [],
+      modals: [
+        createModalEntry({
+          callbackData: "service:submit",
+          sessionKey: "agent:retired-service:discord:channel:guild-channel",
+          agentId: "retired-service",
+        }),
+      ],
+    });
+    dispatchPluginInteractiveHandlerMock.mockResolvedValue({
+      matched: true,
+      handled: true,
+      duplicate: false,
+    });
+    const modal = createDiscordComponentModal(
+      createComponentContext({
+        cfg: createSharedServiceConfig({
+          config: {
+            commands: { useAccessGroups: true },
+            channels: { discord: { replyToMode: "first" } },
+          },
+          peer: { kind: "channel", id: "guild-channel" },
+        }),
+      }),
+    );
+    const { interaction, reply } = createModalInteraction({
+      rawData: {
+        channel_id: "guild-channel",
+        guild_id: "guild-1",
+        id: "interaction-stale-modal",
+        member: { roles: [] },
+      } as unknown as ModalInteraction["rawData"],
+      guild: { id: "guild-1", name: "Test Guild" } as unknown as ModalInteraction["guild"],
+    });
+
+    await modal.run(interaction, { mid: "mdl_1" } as ComponentData);
+
+    expect(reply).toHaveBeenCalledWith({
+      content: "This form is no longer valid.",
+      ephemeral: true,
+    });
+    expect(dispatchPluginInteractiveHandlerMock).not.toHaveBeenCalled();
+    expect(dispatchReplyMock).not.toHaveBeenCalled();
+    expect(resolveDiscordModalEntry({ id: "mdl_1", consume: false })).not.toBeNull();
+  });
+
   it("routes plugin Discord interactions in group DMs by channel id instead of sender id", async () => {
     registerDiscordComponentEntries({
-      entries: [createButtonEntry({ callbackData: "codex:approve" })],
+      entries: [
+        createButtonEntry({
+          callbackData: "codex:approve",
+          sessionKey: "agent:service:discord:group:group-dm-1",
+          agentId: "service",
+        }),
+      ],
       modals: [],
     });
     dispatchPluginInteractiveHandlerMock.mockResolvedValue({
@@ -777,6 +968,10 @@ describe("discord component interactions", () => {
 
     const button = createDiscordComponentButton(
       createComponentContext({
+        cfg: createSharedServiceConfig({
+          config: { channels: { discord: { replyToMode: "first" } } },
+          peer: { kind: "group", id: "group-dm-1" },
+        }),
         discordConfig: createDiscordConfig({
           dm: {
             groupEnabled: true,
@@ -807,12 +1002,21 @@ describe("discord component interactions", () => {
 
   it("marks built-in Group DM component fallbacks with group metadata", async () => {
     registerDiscordComponentEntries({
-      entries: [createButtonEntry()],
+      entries: [
+        createButtonEntry({
+          sessionKey: "agent:service:discord:group:group-dm-1",
+          agentId: "service",
+        }),
+      ],
       modals: [],
     });
 
     const button = createDiscordComponentButton(
       createComponentContext({
+        cfg: createSharedServiceConfig({
+          config: { channels: { discord: { replyToMode: "first" } } },
+          peer: { kind: "group", id: "group-dm-1" },
+        }),
         discordConfig: createDiscordConfig({
           dm: {
             groupEnabled: true,

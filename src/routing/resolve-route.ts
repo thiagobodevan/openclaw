@@ -31,6 +31,18 @@ export type RoutePeer = {
   id: string;
 };
 
+export type AgentRouteMatch =
+  | "binding.peer"
+  | "binding.peer.parent"
+  | "binding.peer.wildcard"
+  | "binding.guild+roles"
+  | "binding.guild"
+  | "binding.team"
+  | "binding.account"
+  | "binding.channel"
+  | "config.agent"
+  | "default";
+
 export type ResolveAgentRouteInput = {
   cfg: OpenClawConfig;
   channel: string;
@@ -55,16 +67,7 @@ export type ResolvedAgentRoute = {
   /** Which session should receive inbound last-route updates. */
   lastRoutePolicy: "main" | "session";
   /** Match description for debugging/logging. */
-  matchedBy:
-    | "binding.peer"
-    | "binding.peer.parent"
-    | "binding.peer.wildcard"
-    | "binding.guild+roles"
-    | "binding.guild"
-    | "binding.team"
-    | "binding.account"
-    | "binding.channel"
-    | "default";
+  matchedBy: AgentRouteMatch;
 };
 
 export { DEFAULT_ACCOUNT_ID } from "./session-key.js";

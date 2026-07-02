@@ -110,6 +110,7 @@ export function installMSTeamsTestRuntime(options: MSTeamsTestRuntimeOptions = {
             sessionKey: `msteams:${peer.kind}:${peer.id}`,
             agentId: "default",
             accountId: "default",
+            matchedBy: "binding.channel" as const,
           })),
       },
       reply: {

@@ -15,7 +15,11 @@ import {
   getReplyPayloadTtsSupplement,
   isReasoningReplyPayload,
 } from "openclaw/plugin-sdk/reply-payload";
-import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
+import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  resolveConversationIdentityAdmission,
+  resolveInboundLastRouteSessionKey,
+} from "openclaw/plugin-sdk/routing";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
 import { isPrivateNetworkOptInEnabled } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
@@ -59,6 +63,7 @@ import {
   authorizeMattermostCommandInvocation,
   formatMattermostDirectMessageDropLog,
   normalizeMattermostAllowEntry,
+  resolveMattermostCommandAudience,
   resolveMattermostMonitorInboundAccess,
 } from "./monitor-auth.js";
 import {
@@ -637,8 +642,57 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       trustedProxies: cfg.gateway?.trustedProxies,
       allowRealIpFallback: cfg.gateway?.allowRealIpFallback === true,
       handleInteraction: handleModelPickerInteraction,
-      authorizeButtonClick: async ({ payload, post }) => {
+      authorizeButtonClick: async ({ payload }) => {
         const channelInfo = await resolveChannelInfo(payload.channel_id);
+        const audience = resolveMattermostCommandAudience({
+          channelId: payload.channel_id,
+          channelInfo,
+        });
+        if (!audience) {
+          return {
+            ok: false,
+            response: {
+              ephemeral_text:
+                "Temporary error: unable to determine channel type. Please try again.",
+            },
+          };
+        }
+        const teamId = audience.channelInfo.team_id ?? payload.team_id ?? undefined;
+        const route = core.channel.routing.resolveAgentRoute({
+          cfg,
+          channel: "mattermost",
+          accountId: account.accountId,
+          teamId,
+          peer: {
+            kind: audience.kind,
+            id: audience.kind === "direct" ? payload.user_id : payload.channel_id,
+          },
+        });
+        const identityDecision = resolveConversationIdentityAdmission({
+          cfg,
+          ctx: {
+            AgentId: route.agentId,
+            AgentRouteMatchedBy: route.matchedBy,
+            SessionKey: route.sessionKey,
+            AccountId: route.accountId,
+            ChatType: audience.chatType,
+            ChatId: audience.kind === "direct" ? undefined : payload.channel_id,
+            GroupChannel: audience.kind === "direct" ? undefined : audience.channelName,
+            GroupSpace: audience.kind === "direct" ? undefined : teamId,
+            SenderId: payload.user_id,
+            Provider: "mattermost",
+            Surface: "mattermost",
+            CommandAuthorized: false,
+          },
+        });
+        if (!identityDecision.allowed) {
+          return {
+            ok: false,
+            response: {
+              ephemeral_text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+            },
+          };
+        }
         const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
           cfg,
           surface: "mattermost",
@@ -655,20 +709,16 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           hasControlCommand: false,
         });
         if (decision.ok) {
-          return { ok: true };
+          return { ok: true, route };
         }
         return {
           ok: false,
           response: {
-            update: {
-              message: post.message ?? "",
-              props: post.props ?? undefined,
-            },
             ephemeral_text: `OpenClaw ignored this action for ${decision.roomLabel}.`,
           },
         };
       },
-      resolveSessionKey: async ({ channelId, userId, post }) => {
+      resolveSessionKey: async ({ channelId, post, route }) => {
         const channelInfo = await resolveChannelInfo(channelId);
         if (!channelInfo?.type) {
           logVerboseMessage(
@@ -677,17 +727,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           throw new Error("Mattermost channel type could not be resolved");
         }
         const kind = mapMattermostChannelTypeToChatType(channelInfo.type);
-        const teamId = channelInfo?.team_id ?? undefined;
-        const route = core.channel.routing.resolveAgentRoute({
-          cfg,
-          channel: "mattermost",
-          accountId: account.accountId,
-          teamId,
-          peer: {
-            kind,
-            id: kind === "direct" ? userId : channelId,
-          },
-        });
+        if (!route) {
+          throw new Error("Mattermost interaction route was not admitted");
+        }
         const replyToMode = resolveMattermostReplyToMode(account, kind);
         return resolveMattermostThreadSessionContext({
           baseSessionKey: route.sessionKey,
@@ -710,16 +752,10 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         const teamId = channelInfo?.team_id ?? undefined;
         const channelName = channelInfo?.name ?? undefined;
         const channelDisplay = channelInfo?.display_name ?? channelName ?? optsLocal.channelId;
-        const route = core.channel.routing.resolveAgentRoute({
-          cfg,
-          channel: "mattermost",
-          accountId: account.accountId,
-          teamId,
-          peer: {
-            kind,
-            id: kind === "direct" ? optsLocal.userId : optsLocal.channelId,
-          },
-        });
+        const route = optsLocal.route;
+        if (!route) {
+          throw new Error("Mattermost interaction route was not admitted");
+        }
         const replyToMode = resolveMattermostReplyToMode(account, kind);
         const threadContext = resolveMattermostThreadSessionContext({
           baseSessionKey: route.sessionKey,
@@ -744,6 +780,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                 : `mattermost:channel:${optsLocal.channelId}`,
           To: to,
           SessionKey: threadContext.sessionKey,
+          AgentRouteMatchedBy: route.matchedBy,
           ParentSessionKey: threadContext.parentSessionKey,
           AccountId: route.accountId,
           ChatType: chatType,
@@ -836,6 +873,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           dispatcher,
           replyOptions: {
             ...replyOptions,
+            identityContractVersion: 1,
             disableBlockStreaming:
               typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
             onModelSelected,
@@ -940,6 +978,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             : `mattermost:channel:${params.channelId}`,
       To: to,
       SessionKey: params.sessionKey,
+      AgentRouteMatchedBy: params.route.matchedBy,
       ParentSessionKey: params.parentSessionKey,
       AccountId: params.route.accountId,
       ChatType: params.chatType,
@@ -1058,6 +1097,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           dispatcher,
           replyOptions: {
             ...replyOptions,
+            identityContractVersion: 1,
             disableBlockStreaming:
               typeof account.blockStreaming === "boolean" ? !account.blockStreaming : undefined,
             onModelSelected,
@@ -1091,6 +1131,46 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     }
 
     const channelInfo = await resolveChannelInfo(params.payload.channel_id);
+    const audience = resolveMattermostCommandAudience({
+      channelId: params.payload.channel_id,
+      channelInfo,
+    });
+    if (!audience) {
+      return {
+        ephemeral_text: "Temporary error: unable to determine channel type. Please try again.",
+      };
+    }
+    const teamId = audience.channelInfo.team_id ?? params.payload.team_id ?? undefined;
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "mattermost",
+      accountId: account.accountId,
+      teamId,
+      peer: {
+        kind: audience.kind,
+        id: audience.kind === "direct" ? params.payload.user_id : params.payload.channel_id,
+      },
+    });
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId ?? account.accountId,
+        ChatType: audience.chatType,
+        ChatId: audience.kind === "direct" ? undefined : params.payload.channel_id,
+        GroupChannel: audience.kind === "direct" ? undefined : audience.channelName,
+        GroupSpace: audience.kind === "direct" ? undefined : teamId,
+        SenderId: params.payload.user_id,
+        Provider: "mattermost",
+        Surface: "mattermost",
+        CommandAuthorized: false,
+      },
+    });
+    if (!identityDecision.allowed) {
+      return { ephemeral_text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL };
+    }
     const pickerCommandText =
       pickerState.action === "select"
         ? `/model ${pickerState.provider}/${pickerState.model}`
@@ -1143,20 +1223,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     }
     const kind = auth.kind;
     const chatType = auth.chatType;
-    const teamId = auth.channelInfo.team_id ?? params.payload.team_id ?? undefined;
     const channelName = auth.channelName || undefined;
     const channelDisplay = auth.channelDisplay || auth.channelName || params.payload.channel_id;
     const roomLabel = auth.roomLabel;
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: "mattermost",
-      accountId: account.accountId,
-      teamId,
-      peer: {
-        kind,
-        id: kind === "direct" ? params.payload.user_id : params.payload.channel_id,
-      },
-    });
     const replyToMode = resolveMattermostReplyToMode(account, kind);
     const threadContext = resolveMattermostThreadSessionContext({
       baseSessionKey: route.sessionKey,
@@ -1326,6 +1395,44 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           channelType,
         });
         const chatType = channelChatType(kind);
+        const teamId = payload.data?.team_id ?? channelInfo?.team_id ?? undefined;
+        const channelName = payload.data?.channel_name ?? channelInfo?.name ?? "";
+        const channelDisplay =
+          payload.data?.channel_display_name ?? channelInfo?.display_name ?? channelName;
+        const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${channelId}`;
+        const route = core.channel.routing.resolveAgentRoute({
+          cfg,
+          channel: "mattermost",
+          accountId: account.accountId,
+          teamId,
+          peer: {
+            kind,
+            id: kind === "direct" ? senderId : channelId,
+          },
+        });
+        const identityDecision = resolveConversationIdentityAdmission({
+          cfg,
+          ctx: {
+            AgentId: route.agentId,
+            AgentRouteMatchedBy: route.matchedBy,
+            SessionKey: route.sessionKey,
+            AccountId: route.accountId,
+            ChatType: chatType,
+            ChatId: kind === "direct" ? undefined : channelId,
+            GroupChannel: kind === "direct" ? undefined : channelName,
+            GroupSpace: kind === "direct" ? undefined : teamId,
+            SenderId: senderId,
+            Provider: "mattermost",
+            Surface: "mattermost",
+            CommandAuthorized: false,
+          },
+        });
+        if (!identityDecision.allowed) {
+          logVerboseMessage(
+            `mattermost: drop message before sender access (${identityDecision.reason})`,
+          );
+          return;
+        }
 
         const senderName =
           normalizeOptionalString(payload.data?.sender_name) ??
@@ -1425,23 +1532,6 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           });
           return;
         }
-
-        const teamId = payload.data?.team_id ?? channelInfo?.team_id ?? undefined;
-        const channelName = payload.data?.channel_name ?? channelInfo?.name ?? "";
-        const channelDisplay =
-          payload.data?.channel_display_name ?? channelInfo?.display_name ?? channelName;
-        const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${channelId}`;
-
-        const route = core.channel.routing.resolveAgentRoute({
-          cfg,
-          channel: "mattermost",
-          accountId: account.accountId,
-          teamId,
-          peer: {
-            kind,
-            id: kind === "direct" ? senderId : channelId,
-          },
-        });
 
         const baseSessionKey = route.sessionKey;
         const threadRootId = normalizeOptionalString(post.root_id);
@@ -1623,6 +1713,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                 : `mattermost:channel:${channelId}`,
           To: to,
           SessionKey: sessionKey,
+          AgentRouteMatchedBy: route.matchedBy,
           ParentSessionKey: parentSessionKey,
           AccountId: route.accountId,
           ChatType: chatType,
@@ -1960,6 +2051,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                         dispatcher,
                         replyOptions: {
                           ...replyOptions,
+                          identityContractVersion: 1,
                           allowProgressCallbacksWhenSourceDeliverySuppressed:
                             draftToolProgressEnabled ? true : undefined,
                           onObservedReplyDelivery: draftToolProgressEnabled
@@ -2102,9 +2194,6 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     const isRemoved = payload.event === "reaction_removed";
     const action = isRemoved ? "removed" : "added";
 
-    const senderInfo = await resolveUserInfo(userId);
-    const senderName = normalizeOptionalString(senderInfo?.username) ?? userId;
-
     // Resolve the channel from broadcast or post to route to the correct agent session
     const channelId = resolveMattermostReactionChannelId(payload);
     if (!channelId) {
@@ -2121,6 +2210,43 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return;
     }
     const kind = mapMattermostChannelTypeToChatType(channelInfo.type);
+
+    const teamId = channelInfo.team_id ?? undefined;
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "mattermost",
+      accountId: account.accountId,
+      teamId,
+      peer: {
+        kind,
+        id: kind === "direct" ? userId : channelId,
+      },
+    });
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: kind,
+        ChatId: kind === "direct" ? undefined : channelId,
+        GroupSpace: teamId,
+        SenderId: userId,
+        Provider: "mattermost",
+        Surface: "mattermost",
+        CommandAuthorized: true,
+      },
+    });
+    if (!identityDecision.allowed) {
+      logVerboseMessage(
+        `mattermost: drop reaction before sender hydration (${identityDecision.reason})`,
+      );
+      return;
+    }
+
+    const senderInfo = await resolveUserInfo(userId);
+    const senderName = normalizeOptionalString(senderInfo?.username) ?? userId;
 
     // Enforce DM/group policy and allowlist checks (same as normal messages).
     const reactionAccess = await resolveMattermostMonitorInboundAccess({
@@ -2150,17 +2276,6 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return;
     }
 
-    const teamId = channelInfo?.team_id ?? undefined;
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: "mattermost",
-      accountId: account.accountId,
-      teamId,
-      peer: {
-        kind,
-        id: kind === "direct" ? userId : channelId,
-      },
-    });
     const sessionKey = route.sessionKey;
 
     const eventText = `Mattermost reaction ${action}: :${emojiName}: by @${senderName} on post ${postId} in channel ${channelId}`;
@@ -2168,6 +2283,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     core.system.enqueueSystemEvent(eventText, {
       sessionKey,
       contextKey: `mattermost:reaction:${postId}:${emojiName}:${userId}:${action}`,
+      actor: { channel: "mattermost", accountId: account.accountId, senderId: userId },
     });
 
     logVerboseMessage(

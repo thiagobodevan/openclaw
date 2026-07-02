@@ -28,6 +28,7 @@ import { resolveModelRefFromString, type ModelRef } from "../agents/model-select
 import { resolvePersistedSessionRuntimeId } from "../agents/session-runtime-compat.js";
 import { STREAM_ERROR_FALLBACK_TEXT } from "../agents/stream-message-shared.js";
 import { DEFAULT_HEARTBEAT_FILENAME } from "../agents/workspace.js";
+import { resolveCommandAuthorization } from "../auto-reply/command-auth.js";
 import { resolveHeartbeatReplyPayload } from "../auto-reply/heartbeat-reply-payload.js";
 import {
   getHeartbeatToolNotificationText,
@@ -98,6 +99,7 @@ import {
   type CommandLaneSnapshot,
 } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
+import { resolveConversationIdentityMode } from "../routing/conversation-identity.js";
 import {
   isSubagentSessionKey,
   normalizeAgentId,
@@ -139,6 +141,7 @@ import {
   HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT,
   type HeartbeatRunResult,
   type HeartbeatWakeHandler,
+  type HeartbeatWakeConversation,
   type HeartbeatWakeIntent,
   type HeartbeatWakeRequest,
   type HeartbeatWakeSource,
@@ -1006,7 +1009,11 @@ function resolveHeartbeatWakePayloadFlags(params: {
   return {
     isExecEventWake: source === "exec-event",
     isCronWake: source === "cron",
-    isWakePayload: source === "hook" || source === "acp-spawn" || reason === "wake",
+    isWakePayload:
+      source === "hook" ||
+      source === "channel-interaction" ||
+      source === "acp-spawn" ||
+      reason === "wake",
   };
 }
 
@@ -1018,6 +1025,7 @@ async function resolveHeartbeatPreflight(params: {
   forcedSessionKey?: string;
   reason?: string;
   source?: HeartbeatWakeSource;
+  systemEventContextKey?: string;
   nowMs?: number;
 }): Promise<HeartbeatPreflight> {
   const wakeFlags = resolveHeartbeatWakePayloadFlags({
@@ -1030,8 +1038,14 @@ async function resolveHeartbeatPreflight(params: {
     params.heartbeat,
     params.forcedSessionKey,
   );
-  const pendingEventEntries =
+  const queuedSystemEvents =
     params.runScope === "commitment-only" ? [] : peekSystemEventEntries(session.sessionKey);
+  const normalizedSystemEventContextKey = params.systemEventContextKey?.trim().toLowerCase();
+  const pendingEventEntries = queuedSystemEvents.filter((event) =>
+    normalizedSystemEventContextKey
+      ? event.contextKey === normalizedSystemEventContextKey
+      : event.contextMode !== "exact" && event.actor === undefined,
+  );
   const dueCommitments = canHeartbeatDeliverCommitments(params.heartbeat)
     ? selectCommitmentDeliveryBatch(
         await listDueCommitmentsForSession({
@@ -1398,6 +1412,7 @@ export async function runHeartbeatOnce(opts: {
   sessionKey?: string;
   heartbeat?: HeartbeatConfig;
   source?: HeartbeatWakeSource;
+  conversation?: HeartbeatWakeConversation;
   intent?: HeartbeatWakeIntent;
   reason?: string;
   runScope?: HeartbeatRunScope;
@@ -1410,6 +1425,45 @@ export async function runHeartbeatOnce(opts: {
   const agentId = normalizeAgentId(
     explicitAgentId || forcedSessionAgentId || resolveDefaultAgentId(cfg),
   );
+  if (opts.source === "channel-interaction" && opts.conversation) {
+    const conversation = opts.conversation;
+    const expectedSessionKey = normalizeOptionalString(opts.sessionKey);
+    if (!expectedSessionKey) {
+      return { status: "skipped", reason: "identity-unknown_audience" };
+    }
+    const currentRoute = conversation.resolveCurrentRoute(cfg);
+    if (
+      !currentRoute ||
+      normalizeAgentId(currentRoute.agentId) !== agentId ||
+      currentRoute.sessionKey !== expectedSessionKey
+    ) {
+      return { status: "skipped", reason: "identity-stale_route" };
+    }
+    const stableSenderIsOwner = resolveCommandAuthorization({
+      ctx: {
+        Provider: conversation.messageChannel,
+        Surface: conversation.messageChannel,
+        AccountId: conversation.accountId,
+        ChatType: conversation.chatType,
+        SenderId: conversation.senderId,
+      },
+      cfg,
+      commandAuthorized: false,
+    }).stableSenderIsOwner;
+    const identity = resolveConversationIdentityMode({
+      config: cfg,
+      agentId: currentRoute.agentId,
+      routeMatchedBy: currentRoute.matchedBy,
+      chatType: conversation.chatType,
+      groupId: conversation.groupId,
+      groupChannel: conversation.groupChannel,
+      groupSpace: conversation.groupSpace,
+      senderIsOwner: stableSenderIsOwner,
+    });
+    if (!identity.allowed) {
+      return { status: "skipped", reason: `identity-${identity.reason}` };
+    }
+  }
   const heartbeat = resolveHeartbeatForWake({
     cfg,
     agentId,
@@ -1512,6 +1566,7 @@ export async function runHeartbeatOnce(opts: {
     runScope,
     forcedSessionKey: opts.sessionKey,
     source: opts.source,
+    systemEventContextKey: opts.conversation?.systemEventContextKey,
     reason: opts.reason,
     nowMs: startedAt,
   });
@@ -1814,6 +1869,7 @@ export async function runHeartbeatOnce(opts: {
     consumeSelectedSystemEventEntries(sessionKey, inspectedSystemEventsToConsume);
   };
 
+  const conversation = opts.conversation;
   const ctx = {
     Body: appendCronStyleCurrentTimeLine(prompt, cfg, startedAt),
     From: sender,
@@ -1824,6 +1880,26 @@ export async function runHeartbeatOnce(opts: {
     AccountId: delivery.accountId,
     MessageThreadId: delivery.threadId,
     Provider: hasExecCompletion ? "exec-event" : hasCronEvents ? "cron-event" : "heartbeat",
+    ...(conversation
+      ? {
+          Surface: conversation.messageChannel,
+          AgentRouteMatchedBy: conversation.routeMatchedBy,
+          ChatType: conversation.chatType,
+          ChatId: conversation.groupId,
+          GroupChannel: conversation.groupChannel,
+          GroupSpace: conversation.groupSpace,
+          SenderId: conversation.senderId,
+          SystemEventContextKey: conversation.systemEventContextKey,
+        }
+      : {}),
+    ...(opts.source === "channel-interaction"
+      ? {}
+      : {
+          InputProvenance: {
+            kind: "internal_system" as const,
+            sourceTool: `heartbeat:${opts.source ?? "direct"}`,
+          },
+        }),
     SessionKey: runSessionKey,
   };
   if (!visibility.showAlerts && !visibility.showOk && !visibility.useIndicator) {
@@ -1928,6 +2004,7 @@ export async function runHeartbeatOnce(opts: {
       heartbeat?.lightContext === true ? "lightweight" : undefined;
     const replyOperationRunState: ReplyOperationRunState = {};
     const replyOpts = {
+      identityContractVersion: 1 as const,
       isHeartbeat: true,
       [HEARTBEAT_RUN_SCOPE]: runScope,
       [REPLY_OPERATION_RUN_STATE]: replyOperationRunState,
@@ -2596,6 +2673,7 @@ export function startHeartbeatRunner(opts: {
               mergeRequestedHeartbeat: true,
             }),
             source: params.source,
+            conversation: params.conversation,
             intent,
             reason,
             runScope: "global",
@@ -2654,6 +2732,7 @@ export function startHeartbeatRunner(opts: {
             agentId: agent.agentId,
             heartbeat: agent.heartbeat,
             source: params.source,
+            conversation: params.conversation,
             intent,
             reason,
             runScope: "global",
@@ -2771,6 +2850,7 @@ export function startHeartbeatRunner(opts: {
       sessionKey: params.sessionKey,
       heartbeat: params.heartbeat,
       source: params.source,
+      conversation: params.conversation,
       intent: params.intent,
     });
   const disposeWakeHandler = setHeartbeatWakeHandler(wakeHandler);

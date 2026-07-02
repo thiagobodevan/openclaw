@@ -94,6 +94,7 @@ export type WhatsAppInboundAdmission = {
   sender: {
     id: string;
     isSamePhone: boolean;
+    isOwner: boolean;
   };
   ingress: WhatsAppInboundIngressDecision;
   senderAccess: WhatsAppInboundSenderAccess;
@@ -127,6 +128,7 @@ export function buildWhatsAppInboundAdmission(params: {
   isGroup: boolean;
   conversationId: string;
   senderId: string;
+  senderIsOwner: boolean;
 }): WhatsAppInboundAdmission {
   return {
     accountId: params.policy.account.accountId,
@@ -140,6 +142,7 @@ export function buildWhatsAppInboundAdmission(params: {
     sender: {
       id: params.senderId,
       isSamePhone: params.policy.isSamePhone(params.senderId),
+      isOwner: params.senderIsOwner,
     },
     ingress: {
       admission: params.access.ingress.admission,
@@ -235,6 +238,7 @@ export function buildDeprecatedFlatWhatsAppInboundAdmission(
     isGroup: msg.chatType === "group",
     conversationId,
     senderId,
+    senderIsOwner: false,
   });
 }
 

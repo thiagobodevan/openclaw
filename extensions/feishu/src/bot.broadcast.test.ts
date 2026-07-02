@@ -171,8 +171,10 @@ describe("broadcast dispatch", () => {
 
   function createBroadcastConfig(): ClawdbotConfig {
     return {
-      broadcast: { "oc-broadcast-group": ["susan", "main"] },
-      agents: { list: [{ id: "main" }, { id: "susan" }] },
+      broadcast: { "oc-broadcast-group": ["ops", "susan"] },
+      agents: {
+        list: [{ id: "main", default: true }, { id: "susan" }, { id: "ops" }],
+      },
       channels: {
         feishu: {
           appId: "cli_test",
@@ -221,13 +223,13 @@ describe("broadcast dispatch", () => {
     clearGroupNameCache();
     finalizeInboundContextCalls.length = 0;
     mockResolveAgentRoute.mockReturnValue({
-      agentId: "main",
+      agentId: "susan",
       channel: "feishu",
       accountId: "default",
-      sessionKey: "agent:main:feishu:group:oc-broadcast-group",
-      mainSessionKey: "agent:main:main",
+      sessionKey: "agent:susan:feishu:group:oc-broadcast-group",
+      mainSessionKey: "agent:susan:main",
       lastRoutePolicy: "session",
-      matchedBy: "default",
+      matchedBy: "binding.channel",
     });
     mockCreateFeishuReplyDispatcher.mockReturnValue({
       dispatcher: {
@@ -279,7 +281,7 @@ describe("broadcast dispatch", () => {
     expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(2);
     const sessionKeys = finalizeInboundContextCalls.map((call) => call.SessionKey);
     expect(sessionKeys).toContain("agent:susan:feishu:group:oc-broadcast-group");
-    expect(sessionKeys).toContain("agent:main:feishu:group:oc-broadcast-group");
+    expect(sessionKeys).toContain("agent:ops:feishu:group:oc-broadcast-group");
     const recordCalls = (
       runtimeStub.channel.session.recordInboundSession as unknown as {
         mock: {
@@ -307,7 +309,7 @@ describe("broadcast dispatch", () => {
         .toSorted((left, right) => String(left.sessionKey).localeCompare(String(right.sessionKey))),
     ).toEqual([
       {
-        sessionKey: "agent:main:feishu:group:oc-broadcast-group",
+        sessionKey: "agent:ops:feishu:group:oc-broadcast-group",
         channel: "feishu",
         to: "chat:oc-broadcast-group",
       },
@@ -322,18 +324,21 @@ describe("broadcast dispatch", () => {
       finalizeInboundContextCalls
         .map((call) => ({
           sessionKey: call.SessionKey,
+          routeMatchedBy: call.AgentRouteMatchedBy,
           groupSubject: call.GroupSubject,
           conversationLabel: call.ConversationLabel,
         }))
         .toSorted((left, right) => String(left.sessionKey).localeCompare(String(right.sessionKey))),
     ).toEqual([
       {
-        sessionKey: "agent:main:feishu:group:oc-broadcast-group",
+        sessionKey: "agent:ops:feishu:group:oc-broadcast-group",
+        routeMatchedBy: "config.agent",
         groupSubject: "Broadcast Team",
         conversationLabel: "Broadcast Team",
       },
       {
         sessionKey: "agent:susan:feishu:group:oc-broadcast-group",
+        routeMatchedBy: "binding.channel",
         groupSubject: "Broadcast Team",
         conversationLabel: "Broadcast Team",
       },
@@ -342,7 +347,7 @@ describe("broadcast dispatch", () => {
     const dispatcherParams = mockCreateFeishuReplyDispatcher.mock.calls.at(0)?.[0] as
       | { agentId?: string }
       | undefined;
-    expect(dispatcherParams?.agentId).toBe("main");
+    expect(dispatcherParams?.agentId).toBe("susan");
   });
 
   it("sends no-visible-reply fallback for active broadcast zero-final dispatch", async () => {
@@ -508,6 +513,7 @@ describe("broadcast dispatch", () => {
 
   it("preserves single-agent dispatch when no broadcast config", async () => {
     const cfg: ClawdbotConfig = {
+      agents: { list: [{ id: "main", default: true }, { id: "susan" }] },
       channels: {
         feishu: {
           appId: "cli_test",
@@ -542,7 +548,7 @@ describe("broadcast dispatch", () => {
     expect(mockCreateFeishuReplyDispatcher).toHaveBeenCalledTimes(1);
     expect(finalizeInboundContextCalls).toHaveLength(1);
     expect(finalizeInboundContextCalls[0]?.SessionKey).toBe(
-      "agent:main:feishu:group:oc-broadcast-group",
+      "agent:susan:feishu:group:oc-broadcast-group",
     );
     expect(finalizeInboundContextCalls[0]?.GroupSubject).toBe("Broadcast Team");
     expect(finalizeInboundContextCalls[0]?.ConversationLabel).toBe("Broadcast Team");
@@ -551,8 +557,10 @@ describe("broadcast dispatch", () => {
 
   it("cross-account broadcast dedup: second account skips dispatch", async () => {
     const cfg: ClawdbotConfig = {
-      broadcast: { "oc-broadcast-group": ["susan", "main"] },
-      agents: { list: [{ id: "main" }, { id: "susan" }] },
+      broadcast: { "oc-broadcast-group": ["ops", "susan"] },
+      agents: {
+        list: [{ id: "main", default: true }, { id: "susan" }, { id: "ops" }],
+      },
       channels: {
         feishu: {
           appId: "cli_test",
@@ -599,7 +607,7 @@ describe("broadcast dispatch", () => {
     expect(mockGetChatInfo).not.toHaveBeenCalled();
   });
 
-  it("skips unknown agents not in agents.list", async () => {
+  it("fails closed when a broadcast target is not in agents.list", async () => {
     const cfg: ClawdbotConfig = {
       broadcast: { "oc-broadcast-group": ["susan", "unknown-agent"] },
       agents: { list: [{ id: "main" }, { id: "susan" }] },
@@ -633,11 +641,7 @@ describe("broadcast dispatch", () => {
       runtime: createRuntimeEnv(),
     });
 
-    expect(mockDispatchReplyFromConfig).toHaveBeenCalledTimes(1);
-    const sessionKey =
-      typeof finalizeInboundContextCalls[0]?.SessionKey === "string"
-        ? finalizeInboundContextCalls[0].SessionKey
-        : "";
-    expect(sessionKey).toBe("agent:susan:feishu:group:oc-broadcast-group");
+    expect(mockDispatchReplyFromConfig).not.toHaveBeenCalled();
+    expect(finalizeInboundContextCalls).toHaveLength(0);
   });
 });

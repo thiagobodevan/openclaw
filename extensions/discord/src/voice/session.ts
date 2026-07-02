@@ -29,6 +29,8 @@ export type VoiceOperationResult = {
 
 export type VoiceRealtimeSpeakerContext = {
   extraSystemPrompt?: string;
+  memberRoleIds?: string[];
+  senderId?: string;
   senderIsOwner: boolean;
   speakerLabel: string;
 };

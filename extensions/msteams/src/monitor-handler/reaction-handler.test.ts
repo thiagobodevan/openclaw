@@ -12,8 +12,12 @@ function buildMockRuntime(overrides?: Partial<PluginRuntime>): PluginRuntime {
       routing: {
         resolveAgentRoute: vi.fn(() => ({
           sessionKey: "test-session",
+          mainSessionKey: "agent:agent1:main",
           agentId: "agent1",
           accountId: "default",
+          channel: "msteams",
+          lastRoutePolicy: "session",
+          matchedBy: "binding.account",
         })),
       },
       pairing: {
@@ -208,6 +212,11 @@ describe("createMSTeamsReactionHandler", () => {
       expect(label).toContain("added");
       expect(meta.sessionKey).toBe("test-session");
       expect(meta.contextKey).toContain("added");
+      expect(meta.actor).toEqual({
+        channel: "msteams",
+        accountId: "default",
+        senderId: "allowed-aad",
+      });
     });
 
     it("enqueues system event for reactionsRemoved", async () => {
@@ -321,6 +330,53 @@ describe("createMSTeamsReactionHandler", () => {
       );
 
       expect(enqueue).toHaveBeenCalledOnce();
+    });
+
+    it("does not enqueue an allowlisted shared reaction on the default route", async () => {
+      const mockRuntime = buildMockRuntime({
+        channel: {
+          routing: {
+            resolveAgentRoute: vi.fn(() => ({
+              sessionKey: "agent:main:msteams:channel:team-channel",
+              mainSessionKey: "agent:main:main",
+              agentId: "main",
+              accountId: "default",
+              channel: "msteams",
+              lastRoutePolicy: "session",
+              matchedBy: "default",
+            })),
+          },
+        } as unknown as PluginRuntime["channel"],
+      });
+      setMSTeamsRuntime(mockRuntime);
+      const cfg: OpenClawConfig = {
+        channels: {
+          msteams: {
+            groupPolicy: "allowlist",
+            groupAllowFrom: ["allowed-aad"],
+          },
+        },
+      } as OpenClawConfig;
+      const handler = createMSTeamsReactionHandler(buildDeps(cfg, mockRuntime));
+      const enqueue = mockRuntime.system.enqueueSystemEvent as ReturnType<typeof vi.fn>;
+
+      await invokeReactionEvent(
+        handler,
+        {
+          reactionsAdded: [{ type: "like" }],
+          from: { id: "good-user", aadObjectId: "allowed-aad", name: "Alice" },
+          conversation: {
+            id: "team-channel",
+            conversationType: "channel",
+            isGroup: true,
+          },
+          channelData: { team: { id: "team-1" } },
+          replyToId: "msg-8",
+        },
+        "added",
+      );
+
+      expect(enqueue).not.toHaveBeenCalled();
     });
   });
 });

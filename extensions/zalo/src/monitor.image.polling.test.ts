@@ -24,6 +24,7 @@ describe("Zalo polling image handling", () => {
     readRemoteMediaBufferMock,
     saveRemoteMediaMock,
     saveMediaBufferMock,
+    resolveAgentRouteMock,
   } = createImageLifecycleCore();
 
   beforeEach(async () => {
@@ -110,6 +111,44 @@ describe("Zalo polling image handling", () => {
     expect(saveMediaBufferMock).not.toHaveBeenCalled();
     expect(finalizeInboundContextMock).not.toHaveBeenCalled();
     expect(recordInboundSessionMock).not.toHaveBeenCalled();
+
+    abort.abort();
+    await run;
+  });
+
+  it("denies an unbound direct image before downloading media", async () => {
+    resolveAgentRouteMock.mockReturnValueOnce({
+      agentId: "main",
+      accountId: "default",
+      sessionKey: "agent:main:zalo:direct:chat-123",
+      matchedBy: "default",
+    });
+    getUpdatesMock
+      .mockResolvedValueOnce({
+        ok: true,
+        result: createImageUpdate(),
+      })
+      .mockImplementation(() => new Promise(() => {}));
+
+    const { monitorZaloProvider } = await loadCachedLifecycleMonitorModule(
+      "zalo-image-unbound-polling",
+    );
+    const abort = new AbortController();
+    const { account, config } = createLifecycleMonitorSetup({
+      accountId: "default",
+      dmPolicy: "open",
+    });
+    const run = monitorZaloProvider({
+      token: "zalo-token", // pragma: allowlist secret
+      account,
+      config,
+      runtime: createRuntimeEnv(),
+      abortSignal: abort.signal,
+    });
+
+    await settleAsyncWork();
+    expect(saveRemoteMediaMock).not.toHaveBeenCalled();
+    expect(finalizeInboundContextMock).not.toHaveBeenCalled();
 
     abort.abort();
     await run;

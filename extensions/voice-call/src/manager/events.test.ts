@@ -255,6 +255,71 @@ describe("processEvent (functional)", () => {
     ]);
   });
 
+  it("rejects policy-accepted inbound calls when identity admission fails", () => {
+    const hangupCalls: HangupCallInput[] = [];
+    const admitInbound = vi.fn(() => undefined);
+    const ctx = createContext({
+      config: VoiceCallConfigSchema.parse({
+        enabled: true,
+        provider: "plivo",
+        fromNumber: "+15550000000",
+        inboundPolicy: "open",
+      }),
+      provider: createProvider({
+        hangupCall: async (input) => {
+          hangupCalls.push(input);
+        },
+      }),
+      admitInbound,
+    });
+    const event = createInboundInitiatedEvent({
+      id: "evt-identity-denied",
+      providerCallId: "provider-identity-denied",
+      from: "+15552222222",
+    });
+
+    processEvent(ctx, event);
+
+    expect(admitInbound).toHaveBeenCalledWith({
+      from: "+15552222222",
+      to: "+15550000000",
+    });
+    expect(ctx.activeCalls.size).toBe(0);
+    expect(hangupCalls).toHaveLength(1);
+  });
+
+  it("carries admitted sender and service-agent facts onto the call", () => {
+    const inboundIdentity = {
+      agentId: "team-service",
+      routeMatchedBy: "config.agent" as const,
+      chatType: "direct" as const,
+      senderId: "+15552222222",
+      senderE164: "+15552222222",
+      senderIsOwner: false as const,
+      responsePolicy: { model: null, systemPrompt: null, timeoutMs: 30000 },
+    };
+    const ctx = createContext({
+      config: VoiceCallConfigSchema.parse({
+        enabled: true,
+        provider: "plivo",
+        fromNumber: "+15550000000",
+        inboundPolicy: "open",
+      }),
+      admitInbound: vi.fn(() => inboundIdentity),
+    });
+
+    processEvent(
+      ctx,
+      createInboundInitiatedEvent({
+        id: "evt-identity-admitted",
+        providerCallId: "provider-identity-admitted",
+        from: "+15552222222",
+      }),
+    );
+
+    expect(requireFirstActiveCall(ctx).inboundIdentity).toEqual(inboundIdentity);
+  });
+
   it("updates providerCallId map when provider ID changes", () => {
     const now = Date.now();
     const ctx = createContext();

@@ -500,12 +500,50 @@ export const getOnHandler = (event: string) => {
   return handler as (ctx: Record<string, unknown>) => Promise<void>;
 };
 
+export const TELEGRAM_TEST_OWNER_ALLOW_FROM = [
+  "telegram:1",
+  "telegram:2",
+  "telegram:3",
+  "telegram:5",
+  "telegram:7",
+  "telegram:9",
+  "telegram:42",
+  "telegram:111",
+  "telegram:123",
+  "telegram:124",
+  "telegram:200",
+  "telegram:201",
+  "telegram:202",
+  "telegram:203",
+  "telegram:222",
+  "telegram:456",
+  "telegram:777",
+  "telegram:789",
+  "telegram:999",
+  "telegram:1234",
+  "telegram:12345",
+  "telegram:98765",
+  "telegram:999999",
+  "telegram:77112533",
+  "telegram:111111111",
+  "telegram:123456789",
+  "telegram:987654321",
+  "telegram:987654322",
+  "telegram:999999999",
+];
+
 const DEFAULT_TELEGRAM_TEST_CONFIG: OpenClawConfig = {
   agents: {
     defaults: {
       envelopeTimezone: "utc",
     },
+    list: [{ id: "main" }, { id: "team" }],
   },
+  bindings: [
+    { agentId: "team", match: { channel: "telegram", peer: { kind: "group", id: "*" } } },
+    { agentId: "team", match: { channel: "telegram", peer: { kind: "channel", id: "*" } } },
+  ],
+  commands: { ownerAllowFrom: TELEGRAM_TEST_OWNER_ALLOW_FROM },
   channels: {
     telegram: { dmPolicy: "open", allowFrom: ["*"] },
   },

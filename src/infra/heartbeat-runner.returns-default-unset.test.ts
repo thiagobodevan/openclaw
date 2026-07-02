@@ -20,6 +20,7 @@ import {
   createTestRegistry,
 } from "../test-utils/channel-plugins.js";
 import { typedCases } from "../test-utils/typed-cases.js";
+import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import {
   type HeartbeatDeps,
   isHeartbeatEnabledForAgent,
@@ -33,7 +34,12 @@ import {
   resolveHeartbeatSenderContext,
 } from "./outbound/targets.js";
 import { telegramMessagingForTest } from "./outbound/targets.test-helpers.js";
-import { enqueueSystemEvent, resetSystemEventsForTest } from "./system-events.js";
+import {
+  enqueueSystemEvent,
+  peekSystemEventEntries,
+  resetSystemEventsForTest,
+  type SystemEventActor,
+} from "./system-events.js";
 
 let previousRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
 let testRegistry: ReturnType<typeof getActivePluginRegistry> | null = null;
@@ -226,7 +232,7 @@ function expectReplyCall(
 function replyBody(
   replySpy: ReturnType<typeof vi.fn>,
   index = 0,
-): { Body?: string; Provider?: string } {
+): Record<string, unknown> & { Body?: string; Provider?: string } {
   const call = replySpy.mock.calls[index];
   return requireRecord(call?.[0], `reply call ${index} body`) as {
     Body?: string;
@@ -1514,7 +1520,19 @@ describe("runHeartbeatOnce", () => {
     fileState: HeartbeatFileState;
     reason?: "interval" | "wake";
     queueCronEvent?: boolean;
+    queuedInteractions?: Array<{
+      text: string;
+      contextKey: string;
+      deliveryContext?: DeliveryContext;
+    }>;
+    queuedActorEvents?: Array<{
+      text: string;
+      contextKey: string;
+      actor: SystemEventActor;
+    }>;
     replyText?: string;
+    channelInteraction?: boolean;
+    removeInteractionBinding?: boolean;
   }) {
     const tmpDir = await createCaseDir("openclaw-hb");
     const storePath = path.join(tmpDir, "sessions.json");
@@ -1579,11 +1597,36 @@ describe("runHeartbeatOnce", () => {
           workspace: workspaceDir,
           heartbeat: { every: "5m", target: "whatsapp" },
         },
+        ...(params.channelInteraction
+          ? { list: [{ id: "main", default: true }, { id: "ops" }] }
+          : {}),
       },
+      ...(params.channelInteraction && !params.removeInteractionBinding
+        ? {
+            bindings: [
+              {
+                agentId: "ops",
+                match: {
+                  channel: "slack",
+                  accountId: "default",
+                  peer: { kind: "channel", id: "C_ALERTS" },
+                },
+              },
+            ],
+          }
+        : {}),
       channels: { whatsapp: { allowFrom: ["*"] } },
       session: { store: storePath },
     };
-    const sessionKey = resolveMainSessionKey(cfg);
+    const sessionKey = params.channelInteraction
+      ? buildAgentPeerSessionKey({
+          agentId: "ops",
+          channel: "slack",
+          accountId: "default",
+          peerKind: "channel",
+          peerId: "C_ALERTS",
+        })
+      : resolveMainSessionKey(cfg);
     await fs.writeFile(
       storePath,
       JSON.stringify({
@@ -1601,6 +1644,21 @@ describe("runHeartbeatOnce", () => {
         contextKey: "cron:qmd-maintenance",
       });
     }
+    for (const event of params.queuedInteractions ?? []) {
+      enqueueSystemEvent(event.text, {
+        sessionKey,
+        contextKey: event.contextKey,
+        contextMode: "exact",
+        deliveryContext: event.deliveryContext,
+      });
+    }
+    for (const event of params.queuedActorEvents ?? []) {
+      enqueueSystemEvent(event.text, {
+        sessionKey,
+        contextKey: event.contextKey,
+        actor: event.actor,
+      });
+    }
 
     const replySpy = vi.fn();
     replySpy.mockResolvedValue({ text: params.replyText ?? "Checked logs and PRs" });
@@ -1611,15 +1669,44 @@ describe("runHeartbeatOnce", () => {
       .mockResolvedValue({ messageId: "m1", toJid: "jid" });
     const res = await runHeartbeatOnce({
       cfg,
+      sessionKey,
       ...(params.reason === "wake"
         ? { source: "hook" as const, intent: "immediate" as const }
         : params.reason === "interval"
           ? { source: "interval" as const, intent: "scheduled" as const }
           : {}),
+      ...(params.channelInteraction
+        ? {
+            source: "channel-interaction" as const,
+            intent: "immediate" as const,
+            conversation: {
+              messageChannel: "slack",
+              accountId: "default",
+              systemEventContextKey: "slack:interaction:c_alerts:100:deploy",
+              routeMatchedBy: "binding.channel" as const,
+              chatType: "channel" as const,
+              groupId: "C_ALERTS",
+              groupSpace: "T_WORK",
+              senderId: "U_OWNER",
+              resolveCurrentRoute: (currentCfg: OpenClawConfig) => {
+                const binding = currentCfg.bindings?.find(
+                  (entry) => entry.agentId === "ops" && entry.match.channel === "slack",
+                );
+                return binding
+                  ? {
+                      agentId: "ops",
+                      sessionKey,
+                      matchedBy: "binding.channel" as const,
+                    }
+                  : null;
+              },
+            },
+          }
+        : {}),
       reason: params.reason,
       deps: createHeartbeatDeps(sendWhatsApp, { getReplyFromConfig: replySpy }),
     });
-    return { res, replySpy, sendWhatsApp, workspaceDir };
+    return { res, replySpy, sendWhatsApp, workspaceDir, sessionKey };
   }
 
   it("adds explicit workspace HEARTBEAT.md path guidance to heartbeat prompts", async () => {
@@ -1639,6 +1726,132 @@ describe("runHeartbeatOnce", () => {
     } finally {
       replySpy.mockRestore();
     }
+  });
+
+  it("keeps trusted scheduler provenance separate from channel interaction identity", async () => {
+    const internal = await runHeartbeatFileScenario({
+      fileState: "actionable",
+      reason: "interval",
+    });
+    const interaction = await runHeartbeatFileScenario({
+      fileState: "actionable",
+      reason: "wake",
+      channelInteraction: true,
+    });
+
+    expect(replyBody(internal.replySpy)).toMatchObject({
+      InputProvenance: {
+        kind: "internal_system",
+        sourceTool: "heartbeat:interval",
+      },
+    });
+    expect(replyBody(interaction.replySpy)).toMatchObject({
+      Provider: "heartbeat",
+      Surface: "slack",
+      AgentRouteMatchedBy: "binding.channel",
+      ChatType: "channel",
+      ChatId: "C_ALERTS",
+      GroupSpace: "T_WORK",
+      SenderId: "U_OWNER",
+      SystemEventContextKey: "slack:interaction:c_alerts:100:deploy",
+    });
+    expect(replyBody(interaction.replySpy).InputProvenance).toBeUndefined();
+  });
+
+  it("rejects a deferred interaction when its service binding was removed", async () => {
+    const result = await runHeartbeatFileScenario({
+      fileState: "actionable",
+      reason: "wake",
+      channelInteraction: true,
+      removeInteractionBinding: true,
+      queuedInteractions: [
+        {
+          text: "Slack interaction: approve",
+          contextKey: "slack:interaction:c_alerts:100:deploy",
+        },
+      ],
+    });
+
+    expect(result.res).toEqual({ status: "skipped", reason: "identity-stale_route" });
+    expect(result.replySpy).not.toHaveBeenCalled();
+    expect(result.sendWhatsApp).not.toHaveBeenCalled();
+    expect(peekSystemEventEntries(result.sessionKey)).toHaveLength(1);
+  });
+
+  it("consumes only the system event for the triggering channel interaction", async () => {
+    const result = await runHeartbeatFileScenario({
+      fileState: "actionable",
+      reason: "wake",
+      channelInteraction: true,
+      queuedInteractions: [
+        {
+          text: "Slack interaction: approve",
+          contextKey: "slack:interaction:c_alerts:100:deploy",
+        },
+        {
+          text: "Slack interaction: reject",
+          contextKey: "slack:interaction:c_alerts:100:reject",
+        },
+      ],
+    });
+
+    expect(result.res.status).toBe("ran");
+    expect(peekSystemEventEntries(result.sessionKey)).toMatchObject([
+      {
+        text: "Slack interaction: reject",
+        contextKey: "slack:interaction:c_alerts:100:reject",
+      },
+    ]);
+  });
+
+  it("keeps scheduled polling out of targeted interaction events", async () => {
+    const result = await runHeartbeatFileScenario({
+      fileState: "actionable",
+      reason: "interval",
+      queuedInteractions: [
+        {
+          text: "Slack interaction: approve",
+          contextKey: "slack:interaction:c_alerts:100:deploy",
+          deliveryContext: {
+            channel: "slack",
+            to: "C_ALERTS",
+            threadId: "100",
+          },
+        },
+      ],
+    });
+
+    expect(replyBody(result.replySpy).Body).not.toContain("Slack interaction: approve");
+    expect(result.sendWhatsApp).toHaveBeenCalledTimes(1);
+    expect(peekSystemEventEntries(result.sessionKey)).toMatchObject([
+      {
+        text: "Slack interaction: approve",
+        contextKey: "slack:interaction:c_alerts:100:deploy",
+      },
+    ]);
+  });
+
+  it("keeps contextless hook cleanup out of actor-targeted events", async () => {
+    const result = await runHeartbeatFileScenario({
+      fileState: "actionable",
+      reason: "wake",
+      queuedActorEvents: [
+        {
+          text: "Slack reaction by guest",
+          contextKey: "slack:reaction:guest",
+          actor: { channel: "slack", accountId: "work", senderId: "U_GUEST" },
+        },
+      ],
+    });
+
+    expect(result.res.status).toBe("ran");
+    expect(replyBody(result.replySpy).Body).not.toContain("Slack reaction by guest");
+    expect(peekSystemEventEntries(result.sessionKey)).toMatchObject([
+      {
+        text: "Slack reaction by guest",
+        contextKey: "slack:reaction:guest",
+      },
+    ]);
   });
 
   it("keeps non-task HEARTBEAT.md context while stripping blank-line-separated task blocks", async () => {

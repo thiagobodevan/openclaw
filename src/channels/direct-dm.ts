@@ -3,14 +3,23 @@
  *
  * Routes legacy direct-message ingress through the standard channel reply pipeline.
  */
+import {
+  resolveConversationIdentityAdmission,
+  resolveConversationIdentityContractVersion,
+} from "../auto-reply/reply/conversation-identity-admission.js";
 import type { DispatchReplyWithBufferedBlockDispatcher } from "../auto-reply/reply/provider-dispatcher.types.js";
 import type { FinalizedMsgContext } from "../auto-reply/templating.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveInboundRouteEnvelopeBuilderWithRuntime } from "../plugin-sdk/inbound-envelope.js";
+import {
+  createInboundEnvelopeBuilder,
+  resolveInboundRouteEnvelopeBuilderWithRuntime,
+} from "../plugin-sdk/inbound-envelope.js";
 import {
   normalizeOutboundReplyPayload,
   type OutboundReplyPayload,
 } from "../plugin-sdk/reply-payload.js";
+import { EXTERNAL_CONVERSATION_IDENTITY_DENIAL } from "../routing/conversation-identity.js";
+import type { AgentRouteMatch } from "../routing/resolve-route.js";
 import { createChannelReplyPipeline } from "./message/reply-pipeline.js";
 import { runPreparedInboundReply } from "./turn/kernel.js";
 export {
@@ -35,6 +44,7 @@ type DirectDmRoute = {
   agentId: string;
   sessionKey: string;
   accountId?: string;
+  matchedBy?: AgentRouteMatch;
 };
 
 type DirectDmRuntime = {
@@ -82,6 +92,8 @@ export async function dispatchInboundDirectDmWithRuntime(params: {
   messageId: string;
   timestamp?: number;
   commandAuthorized?: boolean;
+  /** Opt into the current fail-closed conversation identity contract. */
+  identityContractVersion?: 1;
   bodyForAgent?: string;
   commandBody?: string;
   provider?: string;
@@ -97,32 +109,43 @@ export async function dispatchInboundDirectDmWithRuntime(params: {
   storePath: string;
   ctxPayload: FinalizedMsgContext;
 }> {
-  const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
-    cfg: params.cfg,
-    channel: params.channel,
-    accountId: params.accountId,
-    peer: params.peer,
-    runtime: params.runtime.channel,
-    sessionStore: params.cfg.session?.store,
-  });
+  const identityContractVersion = resolveConversationIdentityContractVersion(
+    (params as { identityContractVersion?: unknown }).identityContractVersion,
+  );
+  const legacyResolved =
+    identityContractVersion === undefined
+      ? resolveInboundRouteEnvelopeBuilderWithRuntime({
+          cfg: params.cfg,
+          channel: params.channel,
+          accountId: params.accountId,
+          peer: params.peer,
+          runtime: params.runtime.channel,
+          sessionStore: params.cfg.session?.store,
+        })
+      : undefined;
+  const route =
+    legacyResolved?.route ??
+    params.runtime.channel.routing.resolveAgentRoute({
+      cfg: params.cfg,
+      channel: params.channel,
+      accountId: params.accountId,
+      peer: params.peer,
+    });
+  if (identityContractVersion === 1 && route.matchedBy === undefined) {
+    throw new Error("Identity contract v1 requires route provenance.");
+  }
 
-  const { storePath, body } = buildEnvelope({
-    channel: params.channelLabel,
-    from: params.conversationLabel,
-    body: params.rawBody,
-    timestamp: params.timestamp,
-  });
-
-  const ctxPayload = params.runtime.channel.reply.finalizeInboundContext({
-    Body: body,
+  const contextBase = {
     BodyForAgent: params.bodyForAgent ?? params.rawBody,
     RawBody: params.rawBody,
     CommandBody: params.commandBody ?? params.rawBody,
     From: params.senderAddress,
     To: params.recipientAddress,
     SessionKey: route.sessionKey,
+    AgentId: route.agentId,
+    AgentRouteMatchedBy: route.matchedBy,
     AccountId: route.accountId ?? params.accountId,
-    ChatType: "direct",
+    ChatType: "direct" as const,
     ConversationLabel: params.conversationLabel,
     SenderId: params.senderId,
     Provider: params.provider ?? params.channel,
@@ -133,6 +156,47 @@ export async function dispatchInboundDirectDmWithRuntime(params: {
     CommandAuthorized: params.commandAuthorized,
     OriginatingChannel: params.originatingChannel ?? params.channel,
     OriginatingTo: params.originatingTo ?? params.recipientAddress,
+  };
+  const identityContext = params.runtime.channel.reply.finalizeInboundContext({
+    ...contextBase,
+    Body: params.rawBody,
+    ...params.extraContext,
+  });
+  if (identityContractVersion === 1) {
+    const identityDecision = resolveConversationIdentityAdmission({
+      cfg: params.cfg,
+      ctx: identityContext,
+    });
+    if (!identityDecision.allowed) {
+      const storePath = params.runtime.channel.session.resolveStorePath(params.cfg.session?.store, {
+        agentId: route.agentId,
+      });
+      await params.deliver({ text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL });
+      return { route, storePath, ctxPayload: identityContext };
+    }
+  }
+
+  const buildEnvelope =
+    legacyResolved?.buildEnvelope ??
+    createInboundEnvelopeBuilder({
+      cfg: params.cfg,
+      route,
+      sessionStore: params.cfg.session?.store,
+      resolveStorePath: params.runtime.channel.session.resolveStorePath,
+      readSessionUpdatedAt: params.runtime.channel.session.readSessionUpdatedAt,
+      resolveEnvelopeFormatOptions: params.runtime.channel.reply.resolveEnvelopeFormatOptions,
+      formatAgentEnvelope: params.runtime.channel.reply.formatAgentEnvelope,
+    });
+  const { storePath, body } = buildEnvelope({
+    channel: params.channelLabel,
+    from: params.conversationLabel,
+    body: params.rawBody,
+    timestamp: params.timestamp,
+  });
+
+  const ctxPayload = params.runtime.channel.reply.finalizeInboundContext({
+    ...contextBase,
+    Body: body,
     ...params.extraContext,
   });
 
@@ -152,6 +216,7 @@ export async function dispatchInboundDirectDmWithRuntime(params: {
     record: {
       onRecordError: params.onRecordError,
     },
+    identity: identityContractVersion === 1 ? { cfg: params.cfg, contractVersion: 1 } : undefined,
     runDispatch: async () =>
       await params.runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
         ctx: ctxPayload,
@@ -169,6 +234,7 @@ export async function dispatchInboundDirectDmWithRuntime(params: {
         },
         replyOptions: {
           onModelSelected,
+          ...(identityContractVersion === undefined ? {} : { identityContractVersion }),
         },
       }),
   });

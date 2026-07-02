@@ -91,6 +91,7 @@ describe("msteams monitor handler authz", () => {
       shouldHandleTextCommands?: PluginRuntime["channel"]["commands"]["shouldHandleTextCommands"];
       createInboundDebouncer?: PluginRuntime["channel"]["debounce"]["createInboundDebouncer"];
       resolveInboundDebounceMs?: PluginRuntime["channel"]["debounce"]["resolveInboundDebounceMs"];
+      resolveAgentRoute?: (params: { peer: { kind: string; id: string } }) => unknown;
     } = {},
   ) {
     const readAllowFromStore = vi.fn(async () => ["attacker-aad"]);
@@ -101,11 +102,14 @@ describe("msteams monitor handler authz", () => {
       readAllowFromStore,
       upsertPairingRequest,
       recordInboundSession,
-      resolveAgentRoute: vi.fn(({ peer }: { peer: { kind: string; id: string } }) => ({
-        sessionKey: `msteams:${peer.kind}:${peer.id}`,
-        agentId: "default",
-        accountId: "default",
-      })),
+      resolveAgentRoute:
+        options.resolveAgentRoute ??
+        vi.fn(({ peer }: { peer: { kind: string; id: string } }) => ({
+          sessionKey: `msteams:${peer.kind}:${peer.id}`,
+          agentId: "default",
+          accountId: "default",
+          matchedBy: "binding.channel" as const,
+        })),
       hasControlCommand: options.hasControlCommand,
       isControlCommandMessage: options.isControlCommandMessage,
       shouldComputeCommandAuthorized: options.shouldComputeCommandAuthorized,
@@ -368,15 +372,49 @@ describe("msteams monitor handler authz", () => {
     expect(conversationStore.upsert).not.toHaveBeenCalled();
   });
 
+  it("denies an unbound shared route before provider or session preparation", async () => {
+    resetThreadMocks();
+    const { conversationStore, deps } = createDeps(
+      {
+        channels: { msteams: { groupPolicy: "open" } },
+      } as OpenClawConfig,
+      {
+        resolveAgentRoute: ({ peer }) => ({
+          sessionKey: `agent:main:msteams:${peer.kind}:${peer.id}`,
+          agentId: "main",
+          accountId: "default",
+          matchedBy: "default" as const,
+        }),
+      },
+    );
+
+    await createMSTeamsMessageHandler(deps)(createAttackerGroupActivity());
+
+    expect(conversationStore.upsert).not.toHaveBeenCalled();
+    expect(graphThreadMockState.resolveTeamGroupId).not.toHaveBeenCalled();
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).not.toHaveBeenCalled();
+  });
+
   it("keeps the DM pairing path wired through shared access resolution", async () => {
-    const { conversationStore, deps, upsertPairingRequest, recordInboundSession } = createDeps({
-      channels: {
-        msteams: {
-          dmPolicy: "pairing",
-          allowFrom: [],
+    const { conversationStore, deps, upsertPairingRequest, recordInboundSession } = createDeps(
+      {
+        agents: { list: [{ id: "personal", default: true }, { id: "teams-service" }] },
+        channels: {
+          msteams: {
+            dmPolicy: "pairing",
+            allowFrom: [],
+          },
         },
       },
-    } as OpenClawConfig);
+      {
+        resolveAgentRoute: ({ peer }) => ({
+          sessionKey: `agent:teams-service:msteams:${peer.kind}:${peer.id}`,
+          agentId: "teams-service",
+          accountId: "default",
+          matchedBy: "binding.peer" as const,
+        }),
+      },
+    );
 
     const handler = createMSTeamsMessageHandler(deps);
     await handler({
@@ -446,6 +484,49 @@ describe("msteams monitor handler authz", () => {
       locale: "en-US",
       timezone: "America/New_York",
     });
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).not.toHaveBeenCalled();
+  });
+
+  it("does not pair or persist a personal DM without an explicit service route", async () => {
+    const { conversationStore, deps, upsertPairingRequest, recordInboundSession } = createDeps(
+      {
+        agents: { list: [{ id: "personal", default: true }] },
+        channels: { msteams: { dmPolicy: "pairing", allowFrom: [] } },
+      } as OpenClawConfig,
+      {
+        resolveAgentRoute: ({ peer }) => ({
+          sessionKey: `agent:personal:msteams:${peer.kind}:${peer.id}`,
+          agentId: "personal",
+          accountId: "default",
+          matchedBy: "default" as const,
+        }),
+      },
+    );
+    const handler = createMSTeamsMessageHandler(deps);
+
+    await handler({
+      activity: {
+        id: "msg-personal-pairing",
+        type: "message",
+        text: "hello",
+        from: { id: "guest-id", aadObjectId: "guest-aad", name: "Guest" },
+        recipient: { id: "bot-id", name: "Bot" },
+        conversation: {
+          id: "a:personal-guest",
+          conversationType: "personal",
+          tenantId: "tenant-1",
+        },
+        channelId: "msteams",
+        serviceUrl: "https://smba.trafficmanager.net/amer/",
+        channelData: {},
+        attachments: [],
+      },
+      sendActivity: vi.fn(async () => undefined),
+    } as unknown as Parameters<typeof handler>[0]);
+
+    expect(upsertPairingRequest).not.toHaveBeenCalled();
+    expect(conversationStore.upsert).not.toHaveBeenCalled();
     expect(recordInboundSession).not.toHaveBeenCalled();
     expect(runtimeApiMockState.dispatchReplyFromConfigWithSettledDispatcher).not.toHaveBeenCalled();
   });
@@ -773,7 +854,9 @@ describe("msteams monitor handler authz", () => {
     if (!systemEventCall) {
       throw new Error("expected skipped Teams message system event");
     }
-    expect(systemEventCall[1]).toMatchObject({});
+    expect(systemEventCall[1]).toMatchObject({
+      actor: { channel: "msteams", accountId: "default", senderId: "member-aad" },
+    });
     expect(systemEventCall[0]).not.toContain("please run the deployment");
   });
 

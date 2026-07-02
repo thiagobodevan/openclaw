@@ -503,6 +503,35 @@ describe("whatsapp inbound dispatch", () => {
     expect(ctx.To).toBe("+2000");
   });
 
+  it("carries only explicit stable owner proof into identity admission", async () => {
+    const ownerCtx = await buildWhatsAppInboundContext({
+      combinedBody: "hi",
+      msg: makeMsg({
+        admission: {
+          ...directAdmission("+15550001111"),
+          sender: { id: "+15550001111", isOwner: true },
+        },
+      }),
+      route: makeRoute(),
+      sender: { e164: "+15550001111" },
+    });
+    const guestCtx = await buildWhatsAppInboundContext({
+      combinedBody: "hi",
+      msg: makeMsg({
+        admission: {
+          ...directAdmission("+15550002222"),
+          sender: { id: "+15550002222", isOwner: false },
+          senderAccess: { reasonCode: "dm_policy_allowlisted" },
+        },
+      }),
+      route: makeRoute(),
+      sender: { e164: "+15550002222" },
+    });
+
+    expect(ownerCtx.OwnerAllowFrom).toEqual(["+15550001111"]);
+    expect(guestCtx.OwnerAllowFrom).toBeUndefined();
+  });
+
   it("passes groupSystemPrompt into GroupSystemPrompt for group chats", async () => {
     const ctx = await buildWhatsAppInboundContext({
       combinedBody: "hi",

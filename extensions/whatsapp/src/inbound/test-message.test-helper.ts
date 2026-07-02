@@ -79,6 +79,7 @@ export function createTestWhatsAppInboundAdmission(
     sender: {
       id: overrides.sender?.id ?? conversationId,
       isSamePhone: overrides.sender?.isSamePhone ?? false,
+      isOwner: overrides.sender?.isOwner ?? kind === "direct",
     },
     ingress: {
       admission: "dispatch",

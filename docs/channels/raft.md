@@ -34,10 +34,18 @@ in its own profile.
 
 ## Configure
 
-Set the profile in config:
+Create a dedicated service agent, bind the Raft account to it, and set the CLI
+profile. Raft wakes fail closed when they resolve to the default personal agent.
 
 ```json5
 {
+  agents: {
+    list: [
+      { id: "personal", default: true },
+      { id: "raft-service", workspace: "~/.openclaw/workspace-raft" },
+    ],
+  },
+  bindings: [{ agentId: "raft-service", match: { channel: "raft", accountId: "default" } }],
   channels: {
     raft: {
       enabled: true,
@@ -54,10 +62,18 @@ environment:
 RAFT_PROFILE=openclaw
 ```
 
-Use a named account when one Gateway connects to more than one Raft External Agent:
+Use one dedicated service agent and binding per named account when one Gateway
+connects to more than one Raft External Agent:
 
 ```json5
 {
+  agents: {
+    list: [{ id: "personal", default: true }, { id: "raft-support" }, { id: "raft-engineering" }],
+  },
+  bindings: [
+    { agentId: "raft-support", match: { channel: "raft", accountId: "support" } },
+    { agentId: "raft-engineering", match: { channel: "raft", accountId: "engineering" } },
+  ],
   channels: {
     raft: {
       accounts: {
@@ -109,11 +125,13 @@ Raft CLI after processing a wake.
 
 ## Verify
 
-Check that OpenClaw can find the CLI and has a configured profile:
+Check that OpenClaw can find the CLI, has a configured profile, and reports the
+expected service-agent binding:
 
 ```bash
 openclaw channels status --probe
 openclaw plugins inspect raft --runtime --json
+openclaw agents list --bindings
 ```
 
 Then send a message to the Raft External Agent. The Gateway log should show the
@@ -137,6 +155,11 @@ configured Raft profile to check its pending messages.
     bridge does not carry message bodies or automatic final replies. Check the
     agent's tool policy and ensure it can run `raft --profile <profile> message
     check` and `message send`.
+  </Accordion>
+  <Accordion title="The Gateway rejects the Raft service-agent binding">
+    Add a non-default agent under `agents.list`, then bind the Raft channel
+    account to that agent under `bindings`. Raft intentionally refuses to route
+    wakes to the default personal agent.
   </Accordion>
 </AccordionGroup>
 

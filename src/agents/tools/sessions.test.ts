@@ -10,11 +10,26 @@ import { withEnvAsync } from "../../test-utils/env.js";
 import { extractAssistantText, sanitizeTextContent } from "./chat-history-text.js";
 
 const callGatewayMock = vi.fn();
+const embeddedRunMocks = vi.hoisted(() => ({
+  queue: vi.fn(),
+  resolveActiveSessionId: vi.fn(),
+}));
 vi.mock("../../gateway/call.js", () => ({
   callGateway: (opts: unknown) => callGatewayMock(opts),
 }));
+vi.mock("../embedded-agent-runner/runs.js", async () => {
+  const actual = await vi.importActual<typeof import("../embedded-agent-runner/runs.js")>(
+    "../embedded-agent-runner/runs.js",
+  );
+  return {
+    ...actual,
+    queueEmbeddedAgentMessageWithOutcomeAsync: embeddedRunMocks.queue,
+    resolveActiveEmbeddedRunSessionId: embeddedRunMocks.resolveActiveSessionId,
+  };
+});
 
 type SessionsToolTestConfig = {
+  agents?: { list: Array<{ id: string; default?: boolean }> };
   session: { scope: "per-sender"; mainKey: string; agentToAgent?: { maxPingPongTurns: number } };
   tools: {
     agentToAgent: { enabled: boolean };
@@ -815,6 +830,8 @@ describe("sessions_list channel derivation", () => {
 describe("sessions_send gating", () => {
   beforeEach(() => {
     callGatewayMock.mockReset();
+    embeddedRunMocks.queue.mockReset();
+    embeddedRunMocks.resolveActiveSessionId.mockReset();
   });
 
   it("returns an error when neither sessionKey nor label is provided", async () => {
@@ -831,6 +848,44 @@ describe("sessions_send gating", () => {
     expect(callGatewayMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { name: "an explicit registry", agents: { list: [{ id: "main", default: true }] } },
+    { name: "the implicit default-only registry", agents: undefined },
+  ])(
+    "rejects a removed service-agent target with $name before gateway or A2A work",
+    async ({ agents }) => {
+      const { runSessionsSendA2AFlow } = await import("./sessions-send-tool.a2a.js");
+      vi.mocked(runSessionsSendA2AFlow).mockClear();
+      const tool = createSessionsSendTool({
+        agentSessionKey: MAIN_AGENT_SESSION_KEY,
+        agentChannel: MAIN_AGENT_CHANNEL,
+        callGateway: callGatewayMock,
+        config: {
+          ...(agents ? { agents } : {}),
+          session: { scope: "per-sender", mainKey: "main" },
+          tools: {
+            agentToAgent: { enabled: true, allow: ["*"] },
+            sessions: { visibility: "all" },
+          },
+        } as never,
+      });
+
+      const result = await tool.execute("call-removed-target", {
+        sessionKey: "agent:removed-service:slack:channel:C1",
+        message: "continue",
+        timeoutSeconds: 0,
+      });
+
+      expect(requireDetails(result)).toMatchObject({
+        status: "forbidden",
+        error: "Target agent is no longer configured.",
+        sessionKey: "agent:removed-service:slack:channel:C1",
+      });
+      expect(callGatewayMock).not.toHaveBeenCalled();
+      expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([1.5, -1, "1sec"])("rejects invalid timeoutSeconds value %s", async (timeoutSeconds) => {
     const tool = createMainSessionsSendTool();
 
@@ -842,6 +897,40 @@ describe("sessions_send gating", () => {
       }),
     ).rejects.toThrow("timeoutSeconds must be a non-negative integer");
     expect(callGatewayMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects service-to-personal run-scoped sends before active-run queueing", async () => {
+    embeddedRunMocks.resolveActiveSessionId.mockReturnValue("personal-active-session-id");
+    const tool = createSessionsSendTool({
+      agentSessionKey: "agent:service:slack:channel:ops",
+      agentChannel: "slack",
+      callGateway: callGatewayMock,
+      config: {
+        agents: { list: [{ id: "main", default: true }, { id: "service" }] },
+        session: { scope: "per-sender", mainKey: "main" },
+        tools: {
+          agentToAgent: { enabled: true, allow: ["*"] },
+          sessions: { visibility: "all" },
+        },
+      } as never,
+    });
+
+    const result = await tool.execute("call-denied-active-run", {
+      sessionKey: "agent:main:slack:channel:personal:run:active-1",
+      message: "inject into personal run",
+      timeoutSeconds: 0,
+    });
+
+    expect(requireDetails(result)).toMatchObject({
+      status: "forbidden",
+      error: "Inter-session identity transition denied.",
+      sessionKey: "agent:main:slack:channel:personal:run:active-1",
+    });
+    expect(embeddedRunMocks.resolveActiveSessionId).not.toHaveBeenCalled();
+    expect(embeddedRunMocks.queue).not.toHaveBeenCalled();
+    expect(callGatewayMock.mock.calls).not.toContainEqual([
+      expect.objectContaining({ method: "agent" }),
+    ]);
   });
 
   it("returns an error when label resolution fails", async () => {
@@ -940,6 +1029,11 @@ describe("sessions_send gating", () => {
   });
 
   it("blocks cross-agent sends when tools.agentToAgent.enabled is false", async () => {
+    loadConfigMock.mockReturnValue({
+      agents: { list: [{ id: "main", default: true }, { id: "other" }] },
+      session: { scope: "per-sender", mainKey: "main" },
+      tools: { agentToAgent: { enabled: false } },
+    });
     const tool = createMainSessionsSendTool();
 
     const result = await tool.execute("call1", {
@@ -955,6 +1049,7 @@ describe("sessions_send gating", () => {
 
   it("rejects direct thread session targets before dispatching an agent run", async () => {
     loadConfigMock.mockReturnValue({
+      agents: { list: [{ id: "main", default: true }, { id: "other" }] },
       session: { scope: "per-sender", mainKey: "main" },
       tools: {
         agentToAgent: { enabled: false },
@@ -1009,6 +1104,7 @@ describe("sessions_send gating", () => {
 
   it("does not disclose a resolved thread session key from a sessionId target", async () => {
     loadConfigMock.mockReturnValue({
+      agents: { list: [{ id: "main", default: true }, { id: "other" }] },
       session: { scope: "per-sender", mainKey: "main" },
       tools: {
         agentToAgent: { enabled: false },

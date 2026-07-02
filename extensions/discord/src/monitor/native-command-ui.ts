@@ -13,6 +13,7 @@ export {
 export {
   replyWithDiscordModelPickerProviders,
   resolveDiscordNativeChoiceContext,
+  resolveDiscordNativeChoiceContextForRoute,
   shouldOpenDiscordModelPickerFromCommand,
 } from "./native-command-model-picker-ui.js";
 export type {

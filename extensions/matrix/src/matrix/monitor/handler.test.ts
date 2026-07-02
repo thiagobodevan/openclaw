@@ -1095,6 +1095,67 @@ describe("matrix monitor handler pairing account scope", () => {
     expect(getRoomInfo).not.toHaveBeenCalled();
   });
 
+  it("denies an unbound shared poll before snapshot hydration", async () => {
+    const getEvent = vi.fn(async () => ({
+      event_id: "$poll",
+      sender: "@user:example.org",
+      type: "m.poll.start",
+      origin_server_ts: Date.now(),
+      content: {
+        "m.poll.start": {
+          question: { "m.text": "Lunch?" },
+          kind: "m.poll.disclosed",
+          max_selections: 1,
+          answers: [{ id: "a1", "m.text": "Pizza" }],
+        },
+      },
+    }));
+    const getRelations = vi.fn(async () => ({
+      events: [],
+      nextBatch: null,
+      prevBatch: null,
+    }));
+    const getRoomInfo = vi.fn(async () => ({ altAliases: [] }));
+    const getMemberDisplayName = vi.fn(async () => "sender");
+    const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
+      cfg: { agents: { list: [{ id: "main", default: true }] } },
+      client: { getEvent, getRelations },
+      isDirectMessage: false,
+      historyLimit: 5,
+      needsRoomAliasesForConfig: true,
+      getRoomInfo,
+      getMemberDisplayName,
+      resolveAgentRoute: () => ({
+        agentId: "main",
+        channel: "matrix",
+        accountId: "ops",
+        sessionKey: "agent:main:matrix:channel:!room:example.org",
+        mainSessionKey: "agent:main:main",
+        matchedBy: "default",
+      }),
+    });
+
+    await handler("!room:example.org", {
+      type: "m.poll.response",
+      sender: "@user:example.org",
+      event_id: "$poll-response-unbound",
+      origin_server_ts: Date.now(),
+      content: {
+        "m.poll.response": { answers: ["a1"] },
+        "m.relates_to": {
+          rel_type: "m.reference",
+          event_id: "$poll",
+        },
+      },
+    } as MatrixRawEvent);
+
+    expect(getEvent).not.toHaveBeenCalled();
+    expect(getRelations).not.toHaveBeenCalled();
+    expect(getRoomInfo).not.toHaveBeenCalled();
+    expect(getMemberDisplayName).not.toHaveBeenCalled();
+    expect(recordInboundSession).not.toHaveBeenCalled();
+  });
+
   it("records thread starter context for inbound thread replies", async () => {
     const { handler, finalizeInboundContext, recordInboundSession } =
       createMatrixHandlerTestHarness({
@@ -1863,6 +1924,7 @@ describe("matrix monitor handler pairing account scope", () => {
       {
         sessionKey: "agent:ops:main",
         contextKey: "matrix:reaction:add:!room:example.org:$msg1:@user:example.org:👍",
+        actor: { channel: "matrix", accountId: "ops", senderId: "@user:example.org" },
       },
     );
   });
@@ -1925,6 +1987,7 @@ describe("matrix monitor handler pairing account scope", () => {
       {
         sessionKey: "agent:bound:session-1",
         contextKey: "matrix:reaction:add:!room:example.org:$reply1:@user:example.org:🎯",
+        actor: { channel: "matrix", accountId: "ops", senderId: "@user:example.org" },
       },
     );
   });
@@ -1969,6 +2032,7 @@ describe("matrix monitor handler pairing account scope", () => {
       {
         sessionKey: "agent:ops:main",
         contextKey: "matrix:reaction:add:!dm:example.org:$reply1:@user:example.org:🎯",
+        actor: { channel: "matrix", accountId: "ops", senderId: "@user:example.org" },
       },
     );
   });
@@ -2007,6 +2071,7 @@ describe("matrix monitor handler pairing account scope", () => {
       {
         sessionKey: "agent:ops:main:thread:$root",
         contextKey: "matrix:reaction:add:!room:example.org:$root:@user:example.org:🧵",
+        actor: { channel: "matrix", accountId: "ops", senderId: "@user:example.org" },
       },
     );
   });
@@ -2026,7 +2091,7 @@ describe("matrix monitor handler pairing account scope", () => {
     );
 
     expect(enqueueSystemEvent).not.toHaveBeenCalled();
-    expect(resolveAgentRoute).not.toHaveBeenCalled();
+    expect(resolveAgentRoute).toHaveBeenCalledTimes(1);
   });
 
   it("does not create pairing requests for unauthorized dm reactions", async () => {
@@ -2044,6 +2109,38 @@ describe("matrix monitor handler pairing account scope", () => {
     );
 
     expect(upsertPairingRequest).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+  });
+
+  it("denies unbound shared reactions before sender or target hydration", async () => {
+    const getEvent = vi.fn(async () => ({ sender: "@bot:example.org" }));
+    const getMemberDisplayName = vi.fn(async () => "sender");
+    const { handler, enqueueSystemEvent } = createMatrixHandlerTestHarness({
+      cfg: { agents: { list: [{ id: "main", default: true }] } },
+      client: { getEvent },
+      isDirectMessage: false,
+      getMemberDisplayName,
+      resolveAgentRoute: () => ({
+        agentId: "main",
+        channel: "matrix",
+        accountId: "ops",
+        sessionKey: "agent:main:matrix:channel:!room:example.org",
+        mainSessionKey: "agent:main:main",
+        matchedBy: "default",
+      }),
+    });
+
+    await handler(
+      "!room:example.org",
+      createMatrixReactionEvent({
+        eventId: "$reaction-unbound",
+        targetEventId: "$target-unbound",
+        key: "👀",
+      }),
+    );
+
+    expect(getEvent).not.toHaveBeenCalled();
+    expect(getMemberDisplayName).not.toHaveBeenCalled();
     expect(enqueueSystemEvent).not.toHaveBeenCalled();
   });
 
@@ -2543,6 +2640,78 @@ describe("matrix monitor handler live allowlist reload", () => {
 });
 
 describe("matrix monitor handler durable inbound dedupe", () => {
+  it("does not treat wildcard command ownership as personal DM identity", async () => {
+    const dispatchReplyFromConfig = vi.fn(async () => ({
+      queuedFinal: true,
+      counts: { final: 1, block: 0, tool: 0 },
+    }));
+    const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }] },
+        commands: { ownerAllowFrom: ["*"] },
+        channels: { matrix: { dm: { allowFrom: ["*"] } } },
+      },
+      isDirectMessage: true,
+      dispatchReplyFromConfig,
+      resolveAgentRoute: () => ({
+        agentId: "personal",
+        channel: "matrix",
+        accountId: "ops",
+        sessionKey: "agent:personal:matrix:direct:@guest:example.org",
+        mainSessionKey: "agent:personal:main",
+        matchedBy: "default",
+      }),
+    });
+
+    await handler(
+      "!dm:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$wildcard-command-owner",
+        sender: "@guest:example.org",
+        body: "hello",
+      }),
+    );
+
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(dispatchReplyFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("releases an identity-denied shared event instead of committing dedupe state", async () => {
+    const inboundDeduper = {
+      claimEvent: vi.fn(() => true),
+      commitEvent: vi.fn(async () => undefined),
+      releaseEvent: vi.fn(),
+    };
+    const { handler, recordInboundSession } = createMatrixHandlerTestHarness({
+      cfg: { agents: { list: [{ id: "personal", default: true }] } },
+      inboundDeduper,
+      isDirectMessage: false,
+      resolveAgentRoute: () => ({
+        agentId: "personal",
+        channel: "matrix",
+        accountId: "ops",
+        sessionKey: "agent:personal:matrix:channel:!room:example.org",
+        mainSessionKey: "agent:personal:main",
+        matchedBy: "default",
+      }),
+    });
+
+    await handler(
+      "!room:example.org",
+      createMatrixTextMessageEvent({
+        eventId: "$identity-denied-release",
+        body: "hello",
+      }),
+    );
+
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(inboundDeduper.commitEvent).not.toHaveBeenCalled();
+    expect(inboundDeduper.releaseEvent).toHaveBeenCalledWith({
+      roomId: "!room:example.org",
+      eventId: "$identity-denied-release",
+    });
+  });
+
   it("skips replayed inbound events before session recording", async () => {
     const inboundDeduper = {
       claimEvent: vi.fn(() => false),

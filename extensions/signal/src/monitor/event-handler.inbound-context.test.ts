@@ -25,22 +25,26 @@ type SendReactionSignalMockCall = [string, number, string, unknown];
 
 const {
   sendTypingMock,
+  sendMessageMock,
   sendReadReceiptMock,
   sendReactionSignalMock,
   removeReactionSignalMock,
   dispatchInboundMessageMock,
   enqueueSystemEventMock,
   recordInboundSessionMock,
+  upsertPairingRequestMock,
   capture,
 } = vi.hoisted(() => {
   const captureState: { ctx?: MsgContext } = {};
   return {
     sendTypingMock: vi.fn(),
+    sendMessageMock: vi.fn(),
     sendReadReceiptMock: vi.fn(),
     sendReactionSignalMock: vi.fn(async () => ({ ok: true })),
     removeReactionSignalMock: vi.fn(async () => ({ ok: true })),
     enqueueSystemEventMock: vi.fn(),
     recordInboundSessionMock: vi.fn(),
+    upsertPairingRequestMock: vi.fn(),
     dispatchInboundMessageMock: vi.fn(async (params: DispatchInboundMessageMockParams) => {
       captureState.ctx = params.ctx;
       await Promise.resolve(params.replyOptions?.onReplyStart?.());
@@ -55,7 +59,7 @@ const approvalReactionMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../send.js", () => ({
-  sendMessageSignal: vi.fn(),
+  sendMessageSignal: sendMessageMock,
   sendTypingSignal: sendTypingMock,
   sendReadReceiptSignal: sendReadReceiptMock,
 }));
@@ -85,7 +89,7 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", async () => {
     ...actual,
     recordInboundSession: recordInboundSessionMock,
     readChannelAllowFromStore: vi.fn().mockResolvedValue([]),
-    upsertChannelPairingRequest: vi.fn(),
+    upsertChannelPairingRequest: upsertPairingRequestMock,
   };
 });
 
@@ -126,13 +130,63 @@ describe("signal createSignalEventHandler inbound context", () => {
   beforeEach(() => {
     delete capture.ctx;
     sendTypingMock.mockReset().mockResolvedValue(true);
+    sendMessageMock.mockReset().mockResolvedValue(undefined);
     sendReadReceiptMock.mockReset().mockResolvedValue(true);
     sendReactionSignalMock.mockReset().mockResolvedValue({ ok: true });
     removeReactionSignalMock.mockReset().mockResolvedValue({ ok: true });
     enqueueSystemEventMock.mockReset();
     recordInboundSessionMock.mockReset().mockResolvedValue(undefined);
+    upsertPairingRequestMock.mockReset().mockResolvedValue({ code: "PAIRCODE", created: true });
     dispatchInboundMessageMock.mockClear();
     approvalReactionMocks.maybeResolveSignalApprovalReaction.mockReset().mockResolvedValue(false);
+  });
+
+  it("pairs an unknown direct sender only on an explicit service route", async () => {
+    const handler = createSignalEventHandler(
+      createBaseSignalEventHandlerDeps({
+        cfg: {
+          agents: { list: [{ id: "main", default: true }, { id: "signal-service" }] },
+          bindings: [{ agentId: "signal-service", match: { channel: "signal" } }],
+        } as any,
+        dmPolicy: "pairing",
+        allowFrom: [],
+      }),
+    );
+
+    await handler(
+      createSignalReceiveEvent({
+        sourceNumber: "+15550002222",
+        dataMessage: { message: "hello", attachments: [] },
+      }),
+    );
+
+    expect(upsertPairingRequestMock).toHaveBeenCalledOnce();
+    expect(sendMessageMock).toHaveBeenCalledOnce();
+    expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("does not pair an unknown direct sender onto the default personal route", async () => {
+    const handler = createSignalEventHandler(
+      createBaseSignalEventHandlerDeps({
+        cfg: {
+          agents: { list: [{ id: "main", default: true }] },
+          bindings: [],
+        } as any,
+        dmPolicy: "pairing",
+        allowFrom: [],
+      }),
+    );
+
+    await handler(
+      createSignalReceiveEvent({
+        sourceNumber: "+15550002222",
+        dataMessage: { message: "hello", attachments: [] },
+      }),
+    );
+
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
   });
 
   it("passes a finalized MsgContext to dispatchInboundMessage", async () => {
@@ -212,7 +266,7 @@ describe("signal createSignalEventHandler inbound context", () => {
     );
 
     const context = requireCapturedContext();
-    expect(context.SessionKey).toBe("agent:main:signal:direct:+15550002222");
+    expect(context.SessionKey).toBe("agent:signal-service:signal:direct:+15550002222");
     const recordParams = recordInboundSessionMock.mock.calls.at(-1)?.[0] as
       | {
           sessionKey?: string;
@@ -226,7 +280,7 @@ describe("signal createSignalEventHandler inbound context", () => {
       | undefined;
     expect(recordParams?.sessionKey).toBe(context.SessionKey);
     expect(recordParams?.updateLastRoute?.sessionKey).toBe(context.SessionKey);
-    expect(recordParams?.updateLastRoute?.sessionKey).not.toBe("agent:main:main");
+    expect(recordParams?.updateLastRoute?.sessionKey).not.toBe("agent:signal-service:main");
     expect(recordParams?.updateLastRoute?.channel).toBe("signal");
     expect(recordParams?.updateLastRoute?.to).toBe("+15550002222");
     expect(recordParams?.updateLastRoute?.mainDmOwnerPin).toBeUndefined();
@@ -1398,19 +1452,19 @@ describe("signal createSignalEventHandler inbound context", () => {
     );
 
     expect(sendTypingMock).toHaveBeenCalledWith("+15550001111", {
-      cfg: {
+      cfg: expect.objectContaining({
         messages: { inbound: { debounceMs: 0 } },
         channels: { signal: { dmPolicy: "open", allowFrom: ["*"] } },
-      },
+      }),
       baseUrl: "http://localhost",
       account: "+15550009999",
       accountId: "default",
     });
     expect(sendReadReceiptMock).toHaveBeenCalledWith("signal:+15550001111", 1700000000000, {
-      cfg: {
+      cfg: expect.objectContaining({
         messages: { inbound: { debounceMs: 0 } },
         channels: { signal: { dmPolicy: "open", allowFrom: ["*"] } },
-      },
+      }),
       baseUrl: "http://localhost",
       account: "+15550009999",
       accountId: "default",
@@ -1623,14 +1677,56 @@ describe("signal createSignalEventHandler inbound context", () => {
 
     expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
     expect(enqueueSystemEventMock).toHaveBeenCalledWith("reaction added", {
-      sessionKey: "agent:main:signal:group:g1",
+      sessionKey: "agent:signal-service:signal:group:g1",
       contextKey: "signal:reaction:added:1700000000000:+15550001111:+1:g1",
+      actor: { channel: "signal", accountId: "default", senderId: "+15550001111" },
     });
+  });
+
+  it("does not enqueue an allowlisted shared reaction on the default personal route", async () => {
+    const handler = createSignalEventHandler(
+      createBaseSignalEventHandlerDeps({
+        cfg: {
+          bindings: [],
+          messages: { inbound: { debounceMs: 0 } },
+          channels: {
+            signal: {
+              groupPolicy: "allowlist",
+              groupAllowFrom: ["g1"],
+            },
+          },
+        },
+        groupPolicy: "allowlist",
+        groupAllowFrom: ["g1"],
+        reactionMode: "all",
+        isSignalReactionMessage: (reaction): reaction is SignalReactionMessage => Boolean(reaction),
+        shouldEmitSignalReactionNotification: () => true,
+        resolveSignalReactionTargets: () => [
+          { kind: "phone", id: "+15550001111", display: "+15550001111" },
+        ],
+        buildSignalReactionSystemEventText: () => "reaction added",
+        historyLimit: 0,
+      }),
+    );
+
+    await handler(
+      createSignalReceiveEvent({
+        reactionMessage: {
+          emoji: "+1",
+          targetSentTimestamp: 1700000000000,
+          groupInfo: { groupId: "g1", groupName: "Test Group" },
+        },
+      }),
+    );
+
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(approvalReactionMocks.maybeResolveSignalApprovalReaction).not.toHaveBeenCalled();
   });
 
   it("checks approval reactions before dropping defaultTo-only senders at the generic access gate", async () => {
     approvalReactionMocks.maybeResolveSignalApprovalReaction.mockResolvedValueOnce(true);
     const cfg = {
+      commands: { ownerAllowFrom: ["signal:+15550001111"] },
       messages: { inbound: { debounceMs: 0 } },
       channels: {
         signal: {
@@ -1668,7 +1764,7 @@ describe("signal createSignalEventHandler inbound context", () => {
 
     expect(approvalReactionMocks.maybeResolveSignalApprovalReaction).toHaveBeenCalledWith(
       expect.objectContaining({
-        cfg,
+        cfg: expect.objectContaining(cfg),
         accountId: "default",
         conversationKey: "+15550001111",
         messageId: "1700000000000",
@@ -1783,6 +1879,39 @@ describe("signal createSignalEventHandler inbound context", () => {
     expect(context.MediaPaths).toEqual(["/tmp/a1.dat", "/tmp/a2.dat"]);
     expect(context.MediaUrls).toEqual(["/tmp/a1.dat", "/tmp/a2.dat"]);
     expect(context.MediaTypes).toEqual(["image/jpeg", "application/octet-stream"]);
+  });
+
+  it("denies an unbound shared route before attachment fetch", async () => {
+    const fetchAttachment = vi.fn(async () => ({
+      path: "/tmp/private.dat",
+      contentType: "application/octet-stream",
+    }));
+    const handler = createSignalEventHandler(
+      createBaseSignalEventHandlerDeps({
+        cfg: {
+          bindings: [],
+          messages: { inbound: { debounceMs: 0 } },
+          channels: { signal: { groupPolicy: "open" } },
+        },
+        groupPolicy: "open",
+        ignoreAttachments: false,
+        fetchAttachment,
+        historyLimit: 0,
+      }),
+    );
+
+    await handler(
+      createSignalReceiveEvent({
+        dataMessage: {
+          message: "shared attachment",
+          groupInfo: { groupId: "g-unbound", groupName: "External" },
+          attachments: [{ id: "private", contentType: "application/octet-stream" }],
+        },
+      }),
+    );
+
+    expect(fetchAttachment).not.toHaveBeenCalled();
+    expect(capture.ctx).toBeUndefined();
   });
 
   it("threads resolved audio contentType for Signal voice attachments", async () => {

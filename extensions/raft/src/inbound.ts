@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import type { ChannelGatewayContext } from "openclaw/plugin-sdk/channel-contract";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import type { ResolvedRaftAccount } from "./accounts.js";
 import { RAFT_CHANNEL_ID } from "./accounts.js";
 
@@ -12,23 +13,20 @@ type RaftChannelRuntime = Pick<
   PluginRuntime["channel"],
   "inbound" | "reply" | "routing" | "session"
 >;
+export type RaftServiceRoute = ReturnType<RaftChannelRuntime["routing"]["resolveAgentRoute"]>;
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-export async function dispatchRaftWake(params: {
-  ctx: ChannelGatewayContext<ResolvedRaftAccount>;
-}): Promise<void> {
-  const { ctx } = params;
-  // Gateway supplies the full runtime; the public context type intentionally
-  // exposes only runtime contexts so external plugins cannot assume more.
+export function resolveRaftServiceRoute(
+  ctx: ChannelGatewayContext<ResolvedRaftAccount>,
+): RaftServiceRoute {
   const channelRuntime = ctx.channelRuntime as RaftChannelRuntime | undefined;
   const profile = ctx.account.profile;
   if (!channelRuntime || !profile) {
-    return;
+    throw new Error("Raft requires channel runtime support and a configured CLI profile.");
   }
-
   const route = channelRuntime.routing.resolveAgentRoute({
     cfg: ctx.cfg,
     channel: RAFT_CHANNEL_ID,
@@ -38,6 +36,39 @@ export async function dispatchRaftWake(params: {
       id: profile,
     },
   });
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: ctx.cfg,
+    ctx: {
+      AgentId: route.agentId,
+      SessionKey: route.sessionKey,
+      AgentRouteMatchedBy: route.matchedBy,
+      ChatType: "direct",
+      SenderId: profile,
+      Provider: RAFT_CHANNEL_ID,
+      Surface: RAFT_CHANNEL_ID,
+    },
+  });
+  if (!identityDecision.allowed || identityDecision.mode !== "organization") {
+    throw new Error(
+      "Raft requires an explicit binding to a non-default service agent. Configure a distinct agent and bind the Raft account before starting the Gateway.",
+    );
+  }
+  return route;
+}
+
+export async function dispatchRaftWake(params: {
+  ctx: ChannelGatewayContext<ResolvedRaftAccount>;
+  route: RaftServiceRoute;
+}): Promise<void> {
+  const { ctx } = params;
+  // Gateway supplies the full runtime; the public context type intentionally
+  // exposes only runtime contexts so external plugins cannot assume more.
+  const channelRuntime = ctx.channelRuntime as RaftChannelRuntime | undefined;
+  const profile = ctx.account.profile;
+  if (!channelRuntime || !profile) {
+    return;
+  }
+  const route = params.route;
   const timestamp = Date.now();
   const command = `raft --profile ${shellQuote(profile)}`;
 
@@ -75,6 +106,7 @@ export async function dispatchRaftWake(params: {
           route: {
             agentId: route.agentId,
             accountId: ctx.accountId,
+            matchedBy: route.matchedBy,
             routeSessionKey: route.sessionKey,
             dispatchSessionKey: route.sessionKey,
           },
@@ -101,6 +133,7 @@ export async function dispatchRaftWake(params: {
           recordInboundSession: channelRuntime.session.recordInboundSession,
           dispatchReplyWithBufferedBlockDispatcher:
             channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher,
+          replyOptions: { identityContractVersion: 1 },
           // Raft's bridge only transports wake hints. The agent owns CLI delivery
           // after it reads the pending Raft messages, so OpenClaw must not emit a
           // duplicate synthetic reply through the channel dispatcher.

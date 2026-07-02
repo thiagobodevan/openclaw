@@ -487,6 +487,7 @@ export function buildChannelInboundEventContext(
     To: params.reply.to,
     SessionKey: params.route.dispatchSessionKey ?? params.route.routeSessionKey,
     AgentId: params.route.agentId,
+    AgentRouteMatchedBy: params.route.matchedBy,
     AccountId: params.route.accountId ?? params.accountId,
     ParentSessionKey: params.route.parentSessionKey,
     ModelParentSessionKey: params.route.modelParentSessionKey,

@@ -109,7 +109,10 @@ export function createQaRunnerRuntime(): PluginRuntime {
               },
               onError: params.delivery.onError,
             },
-            replyOptions: params.replyOptions,
+            replyOptions: {
+              ...params.replyOptions,
+              identityContractVersion: 1,
+            },
             replyResolver: params.replyResolver,
           });
           return {

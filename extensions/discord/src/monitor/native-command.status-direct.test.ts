@@ -97,7 +97,9 @@ function setDefaultRouteState() {
     boundSessionKey: undefined,
     configuredRoute: null,
     configuredBinding: null,
+    runtimeBinding: null,
     bindingReadiness: null,
+    identityDecision: { mode: "personal", allowed: true, reason: "owner_direct" },
   }));
 }
 

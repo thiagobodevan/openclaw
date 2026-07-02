@@ -8,11 +8,12 @@ import {
 import { createChannelPairingController } from "openclaw/plugin-sdk/channel-pairing";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-name-runtime";
-import { resolveInboundRouteEnvelopeBuilderWithRuntime } from "openclaw/plugin-sdk/inbound-envelope";
+import { createInboundEnvelopeBuilder } from "openclaw/plugin-sdk/inbound-envelope";
 import {
   deliverFormattedTextWithAttachments,
   type OutboundReplyPayload,
 } from "openclaw/plugin-sdk/reply-payload";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 import {
   GROUP_POLICY_BLOCKED_LABEL,
@@ -313,8 +314,44 @@ export async function handleIrcInbound(params: {
     },
   });
   const commandAuthorized = access.commandAccess.authorized;
-
+  const channelTarget =
+    message.target.startsWith("#") || message.target.startsWith("&")
+      ? message.target
+      : `#${message.target}`;
+  const peerId = message.isGroup ? channelTarget : message.senderNick;
+  const route = core.channel.routing.resolveAgentRoute({
+    cfg: config as OpenClawConfig,
+    channel: CHANNEL_ID,
+    accountId: account.accountId,
+    peer: {
+      kind: message.isGroup ? "group" : "direct",
+      id: peerId,
+    },
+  });
+  const fromAddress = message.isGroup ? `channel:${channelTarget}` : `irc:${senderDisplay}`;
+  const toAddress = message.isGroup ? `channel:${channelTarget}` : `irc:${peerId}`;
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: config as OpenClawConfig,
+    ctx: {
+      AgentId: route.agentId,
+      AgentRouteMatchedBy: route.matchedBy,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: message.isGroup ? "group" : "direct",
+      GroupChannel: message.isGroup ? channelTarget : undefined,
+      SenderId: senderDisplay,
+      From: fromAddress,
+      To: toAddress,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      CommandAuthorized: commandAuthorized,
+    },
+  });
   if (access.ingress.admission === "pairing-required") {
+    if (!identityDecision.allowed) {
+      runtime.log?.(`irc: drop DM sender ${senderDisplay} (identity=${identityDecision.reason})`);
+      return;
+    }
     await pairing.issueChallenge({
       senderId: normalizeLowercaseStringOrEmpty(senderDisplay),
       senderIdLine: `Your IRC id: ${senderDisplay}`,
@@ -368,21 +405,21 @@ export async function handleIrcInbound(params: {
     return;
   }
 
-  const channelTarget =
-    message.target.startsWith("#") || message.target.startsWith("&")
-      ? message.target
-      : `#${message.target}`;
-  const peerId = message.isGroup ? channelTarget : message.senderNick;
-  const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
+  if (!identityDecision.allowed) {
+    runtime.log?.(
+      `irc: drop ${message.isGroup ? "channel" : "DM sender"} ${message.isGroup ? message.target : senderDisplay} (identity=${identityDecision.reason})`,
+    );
+    return;
+  }
+
+  const buildEnvelope = createInboundEnvelopeBuilder({
     cfg: config as OpenClawConfig,
-    channel: CHANNEL_ID,
-    accountId: account.accountId,
-    peer: {
-      kind: message.isGroup ? "group" : "direct",
-      id: peerId,
-    },
-    runtime: core.channel,
+    route,
     sessionStore: config.session?.store,
+    resolveStorePath: core.channel.session.resolveStorePath,
+    readSessionUpdatedAt: core.channel.session.readSessionUpdatedAt,
+    resolveEnvelopeFormatOptions: core.channel.reply.resolveEnvelopeFormatOptions,
+    formatAgentEnvelope: core.channel.reply.formatAgentEnvelope,
   });
 
   const fromLabel = message.isGroup ? message.target : senderDisplay;
@@ -399,9 +436,11 @@ export async function handleIrcInbound(params: {
     Body: body,
     RawBody: rawBody,
     CommandBody: rawBody,
-    From: message.isGroup ? `channel:${channelTarget}` : `irc:${senderDisplay}`,
-    To: message.isGroup ? `channel:${channelTarget}` : `irc:${peerId}`,
+    From: fromAddress,
+    To: toAddress,
     SessionKey: route.sessionKey,
+    AgentId: route.agentId,
+    AgentRouteMatchedBy: route.matchedBy,
     AccountId: route.accountId,
     ChatType: message.isGroup ? "group" : "direct",
     ConversationLabel: fromLabel,
@@ -447,6 +486,7 @@ export async function handleIrcInbound(params: {
     },
     replyPipeline: {},
     replyOptions: {
+      identityContractVersion: 1,
       skillFilter: groupMatch.groupConfig?.skills,
       disableBlockStreaming:
         typeof account.config.blockStreaming === "boolean"

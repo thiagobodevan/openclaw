@@ -1863,6 +1863,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
       history: prepared.turn.history,
       botLoopProtection: resolveSlackBotLoopProtection(prepared),
       replyOptions: {
+        identityContractVersion: 1,
         skillFilter: prepared.channelConfig?.skills,
         sourceReplyDeliveryMode,
         hasRepliedRef,

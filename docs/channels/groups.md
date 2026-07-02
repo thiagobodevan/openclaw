@@ -158,79 +158,32 @@ For reusable sender allowlists, see [Access groups](/channels/access-groups).
 - Direct chats use the main session (or per-sender if configured).
 - Heartbeats are skipped for group sessions.
 
-<a id="pattern-personal-dms-public-groups-single-agent"></a>
+## Pattern: personal DMs + shared groups
 
-## Pattern: personal DMs + public groups (single agent)
+Use separate agents. The default agent serves owner-authenticated personal direct messages; a dedicated service agent serves each team or shared audience through an explicit binding.
 
-Yes — this works well if your "personal" traffic is **DMs** and your "public" traffic is **groups**.
-
-Why: in single-agent mode, DMs typically land in the **main** session key (`agent:main:main`), while groups always use **non-main** session keys (`agent:main:<channel>:group:<id>`). If you enable sandboxing with `mode: "non-main"`, those group sessions run in the configured sandbox backend while your main DM session stays on-host. Docker is the default backend if you do not choose one.
-
-This gives you one agent "brain" (shared workspace + memory), but two execution postures:
-
-- **DMs**: full tools (host)
-- **Groups**: sandbox + restricted tools
-
-<Note>
-If you need truly separate workspaces/personas ("personal" and "public" must never mix), use a second agent + bindings. See [Multi-Agent Routing](/concepts/multi-agent).
-</Note>
-
-<Tabs>
-  <Tab title="DMs on host, groups sandboxed">
-    ```json5
-    {
-      agents: {
-        defaults: {
-          sandbox: {
-            mode: "non-main", // groups/channels are non-main -> sandboxed
-            scope: "session", // strongest isolation (one container per group/channel)
-            workspaceAccess: "none",
-          },
-        },
+```json5
+{
+  agents: {
+    list: [
+      { id: "personal", default: true, workspace: "~/.openclaw/workspace-personal" },
+      {
+        id: "team",
+        workspace: "~/.openclaw/workspace-team",
+        tools: { deny: ["group:runtime", "group:fs", "group:ui", "nodes", "cron", "gateway"] },
       },
-      tools: {
-        sandbox: {
-          tools: {
-            // If allow is non-empty, everything else is blocked (deny still wins).
-            allow: ["group:messaging", "group:sessions"],
-            deny: ["group:runtime", "group:fs", "group:ui", "nodes", "cron", "gateway"],
-          },
-        },
-      },
-    }
-    ```
-  </Tab>
-  <Tab title="Groups see only an allowlisted folder">
-    Want "groups can only see folder X" instead of "no host access"? Keep `workspaceAccess: "none"` and mount only allowlisted paths into the sandbox:
+    ],
+  },
+  bindings: [{ agentId: "team", match: { channel: "slack", teamId: "T012345" } }],
+}
+```
 
-    ```json5
-    {
-      agents: {
-        defaults: {
-          sandbox: {
-            mode: "non-main",
-            scope: "session",
-            workspaceAccess: "none",
-            docker: {
-              binds: [
-                // hostPath:containerPath:mode
-                "/home/user/FriendsShared:/data:ro",
-              ],
-            },
-          },
-        },
-      },
-    }
-    ```
-
-  </Tab>
-</Tabs>
+Group allowlists decide who may trigger the route. They do not make the default personal agent safe for a shared room. An unbound group, or a shared binding back to the default agent, is denied before the agent runs. The bound service agent still receives the normal group, per-sender, sandbox, and agent tool policies.
 
 Related:
 
-- Configuration keys and defaults: [Gateway configuration](/gateway/config-agents#agentsdefaultssandbox)
+- Agent and binding configuration: [Multi-Agent Routing](/concepts/multi-agent)
 - Debugging why a tool is blocked: [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated)
-- Bind mounts details: [Sandboxing](/gateway/sandboxing#custom-bind-mounts)
 
 ## Display labels
 

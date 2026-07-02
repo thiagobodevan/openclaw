@@ -437,6 +437,13 @@ async function runResponsesAgentCommand(params: {
       runId: params.runId,
       deliver: false,
       messageChannel: params.messageChannel,
+      runContext: {
+        messageChannel: params.messageChannel,
+        chatType: "direct",
+        routeMatchedBy: "default",
+      },
+      identityContractVersion: 1,
+      senderIsOwner: true,
       bestEffortDeliver: false,
       allowModelOverride: params.modelOverride !== undefined,
       abortSignal: params.abortSignal,

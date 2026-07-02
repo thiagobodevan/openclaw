@@ -31,6 +31,7 @@ import {
 } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 import { getHeader } from "./http-headers.js";
+import { resolveVoiceCallInboundIdentity } from "./identity.js";
 import type { CallManager } from "./manager.js";
 import type { MediaStreamConfig } from "./media-stream.js";
 import { MediaStreamHandler } from "./media-stream.js";
@@ -955,18 +956,33 @@ export class VoiceCallWebhookServer {
   }
 
   private shouldAcceptRealtimeInboundRequest(params: URLSearchParams): boolean {
-    switch (this.config.inboundPolicy) {
-      case "open":
-        return true;
-      case "allowlist":
-      case "pairing":
-        return isAllowlistedCaller(
-          normalizePhoneNumber(params.get("From") ?? undefined),
-          this.config.allowFrom,
-        );
-      default:
-        return false;
+    const acceptedByPolicy = (() => {
+      switch (this.config.inboundPolicy) {
+        case "open":
+          return true;
+        case "allowlist":
+        case "pairing":
+          return isAllowlistedCaller(
+            normalizePhoneNumber(params.get("From") ?? undefined),
+            this.config.allowFrom,
+          );
+        default:
+          return false;
+      }
+    })();
+    if (!acceptedByPolicy) {
+      return false;
     }
+    const coreConfig = this.fullConfig ?? (this.coreConfig as OpenClawConfig | null);
+    if (!coreConfig) {
+      return false;
+    }
+    return resolveVoiceCallInboundIdentity({
+      config: this.config,
+      coreConfig,
+      from: params.get("From") ?? undefined,
+      to: params.get("To") ?? undefined,
+    }).allowed;
   }
 
   private processParsedEvents(events: NormalizedEvent[]): void {
@@ -1027,6 +1043,10 @@ export class VoiceCallWebhookServer {
       const { generateVoiceResponse } = await loadResponseGeneratorModule();
       const numberRouteKey = resolveVoiceCallNumberRouteKeyForCall(call);
       const effectiveConfig = resolveVoiceCallEffectiveConfig(this.config, numberRouteKey).config;
+      if (call.direction === "inbound" && !call.inboundIdentity) {
+        console.warn(`[voice-call] Call ${callId} has no admitted inbound identity`);
+        return;
+      }
 
       const result = await generateVoiceResponse({
         voiceConfig: effectiveConfig,
@@ -1035,6 +1055,7 @@ export class VoiceCallWebhookServer {
         callId,
         sessionKey: call.sessionKey,
         from: call.from,
+        inboundIdentity: call.inboundIdentity,
         transcript: call.transcript,
         userMessage,
       });

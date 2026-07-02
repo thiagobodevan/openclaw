@@ -252,9 +252,16 @@ function createGroupCfg(): Record<string, unknown> {
 
 function createHandler(warn = vi.fn(), cfg: Record<string, unknown> = createCfg()) {
   const groupHistories = new Map();
+  const echoTracker = {
+    has: vi.fn(() => false),
+    forget: vi.fn(),
+    rememberText: vi.fn(),
+    buildCombinedKey: vi.fn(({ combinedBody }: { combinedBody: string }) => combinedBody),
+  };
   return {
     warn,
     groupHistories,
+    echoTracker,
     handler: createWebOnMessageHandler({
       cfg: cfg as never,
       verbose: false,
@@ -263,12 +270,7 @@ function createHandler(warn = vi.fn(), cfg: Record<string, unknown> = createCfg(
       groupHistoryLimit: 20,
       groupHistories,
       groupMemberNames: new Map(),
-      echoTracker: {
-        has: () => false,
-        forget: () => {},
-        rememberText: () => {},
-        buildCombinedKey: ({ combinedBody }: { combinedBody: string }) => combinedBody,
-      },
+      echoTracker,
       backgroundTasks: new Set(),
       replyResolver: vi.fn() as never,
       replyLogger: {
@@ -419,6 +421,50 @@ describe("createWebOnMessageHandler configured ACP bindings", () => {
     expect(maybeBroadcastMessageMock).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "whatsapp: configured ACP binding unavailable for conversation +15551234567: acpx backend unavailable",
+    );
+  });
+
+  it("denies an untrusted DM before initializing a configured personal ACP route", async () => {
+    resolveConfiguredBindingRouteMock.mockImplementationOnce(({ route }) => ({
+      ...resolvedConfiguredRoute()({ route }),
+      route: {
+        ...route,
+        agentId: "main",
+        mainSessionKey: "agent:main:main",
+        sessionKey: "agent:main:acp:binding:whatsapp:work:abc123",
+        matchedBy: "binding.channel",
+      },
+    }));
+    const { handler, warn, echoTracker } = createHandler();
+    echoTracker.has.mockReturnValue(true);
+
+    await handler(
+      createTestWebInboundMessage({
+        admission: {
+          accountId: "work",
+          conversation: {
+            kind: "direct",
+            id: "15551234567@s.whatsapp.net",
+          },
+          sender: {
+            id: "15551234567@s.whatsapp.net",
+          },
+          senderAccess: {
+            reasonCode: "dm_policy_open",
+          },
+        },
+        platform: {
+          chatJid: "15551234567@s.whatsapp.net",
+          recipientJid: "15559876543@s.whatsapp.net",
+        },
+      }),
+    );
+
+    expect(ensureConfiguredBindingRouteReadyMock).not.toHaveBeenCalled();
+    expect(processMessageMock).not.toHaveBeenCalled();
+    expect(echoTracker.forget).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "whatsapp: conversation identity denied before audio preflight (untrusted_direct)",
     );
   });
 

@@ -118,10 +118,11 @@ vi.mock("openclaw/plugin-sdk/conversation-runtime", () => ({
     bindingResolution: null,
     boundSessionKey: "",
   })),
-  resolveRuntimeConversationBindingRoute: vi.fn(({ route }: { route: unknown }) => ({
+  lookupRuntimeConversationBindingRoute: vi.fn(({ route }: { route: unknown }) => ({
     bindingRecord: null,
     route,
   })),
+  touchRuntimeConversationBindingRoute: vi.fn(),
   getSessionBindingService: vi.fn(() => ({
     resolveByConversation: vi.fn(() => null),
     touch: vi.fn(),

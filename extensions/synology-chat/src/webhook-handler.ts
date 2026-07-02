@@ -549,12 +549,6 @@ async function processAuthorizedSynologyWebhook(params: {
   const authorizedWebhookUserId = params.message.payload.user_id;
   let deliveryUserId = authorizedWebhookUserId;
   try {
-    deliveryUserId = await resolveSynologyReplyDeliveryUserId({
-      account: params.account,
-      payload: params.message.payload,
-      log: params.log,
-    });
-
     const reply = await params.deliver({
       body: params.message.body,
       from: authorizedWebhookUserId,
@@ -563,11 +557,19 @@ async function processAuthorizedSynologyWebhook(params: {
       chatType: "direct",
       accountId: params.account.accountId,
       commandAuthorized: params.message.commandAuthorized,
-      chatUserId: deliveryUserId,
+      chatUserId: authorizedWebhookUserId,
     });
     if (!reply) {
       return;
     }
+
+    // Delivery owns admission. Resolve mutable display-name compatibility only
+    // after the turn was accepted so denied senders cannot trigger directory reads.
+    deliveryUserId = await resolveSynologyReplyDeliveryUserId({
+      account: params.account,
+      payload: params.message.payload,
+      log: params.log,
+    });
 
     await synologyClient.sendMessage(
       params.account.incomingUrl,

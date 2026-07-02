@@ -1,6 +1,7 @@
 // Synology Chat plugin module implements inbound event behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { sendMessage } from "./client.js";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
+import { resolveLegacyWebhookNameToChatUserId, sendMessage } from "./client.js";
 import type { SynologyInboundMessage } from "./inbound-context.js";
 import { getSynologyRuntime } from "./runtime.js";
 import { buildSynologyChatInboundSessionKey } from "./session-key.js";
@@ -10,6 +11,7 @@ const CHANNEL_ID = "synology-chat";
 
 type SynologyChannelLog = {
   info?: (...args: unknown[]) => void;
+  warn?: (...args: unknown[]) => void;
 };
 
 function resolveSynologyChatInboundRoute(params: {
@@ -65,14 +67,50 @@ export async function dispatchSynologyChatInboundEvent(params: {
   const rt = getSynologyRuntime();
   const currentCfg = rt.config.current() as OpenClawConfig;
 
-  // The Chat API user_id (for sending) may differ from the webhook
-  // user_id (used for sessions/pairing). Use chatUserId for API calls.
-  const sendUserId = params.msg.chatUserId ?? params.msg.from;
   const resolved = resolveSynologyChatInboundRoute({
     cfg: currentCfg,
     account: params.account,
     userId: params.msg.from,
   });
+  const chatKind =
+    params.msg.chatType === "group" || params.msg.chatType === "channel"
+      ? params.msg.chatType
+      : "direct";
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: currentCfg,
+    ctx: {
+      AgentId: resolved.route.agentId,
+      SessionKey: resolved.sessionKey,
+      AgentRouteMatchedBy: resolved.route.matchedBy,
+      AccountId: resolved.route.accountId ?? params.account.accountId,
+      ChatType: chatKind,
+      ChatId: chatKind === "direct" ? undefined : params.msg.from,
+      GroupChannel: chatKind === "direct" ? undefined : params.msg.from,
+      SenderId: params.msg.from,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      CommandAuthorized: params.msg.commandAuthorized,
+    },
+  });
+  if (!identityDecision.allowed) {
+    params.log?.info?.(
+      `Blocked Synology Chat inbound identity for ${params.msg.from}: ${identityDecision.reason}`,
+    );
+    return null;
+  }
+  // Resolve mutable legacy names only after identity admission. The stable
+  // webhook id remains the session and fallback delivery identity.
+  const fallbackSendUserId = params.msg.chatUserId ?? params.msg.from;
+  const sendUserId = params.account.dangerouslyAllowNameMatching
+    ? ((
+        await resolveLegacyWebhookNameToChatUserId({
+          incomingUrl: params.account.incomingUrl,
+          mutableWebhookUsername: params.msg.senderName,
+          allowInsecureSsl: params.account.allowInsecureSsl,
+          log: params.log?.warn ? { warn: params.log.warn } : undefined,
+        })
+      )?.toString() ?? fallbackSendUserId)
+    : fallbackSendUserId;
 
   await resolved.rt.channel.inbound.run({
     channel: CHANNEL_ID,
@@ -88,10 +126,6 @@ export async function dispatchSynologyChatInboundEvent(params: {
         raw: msg,
       }),
       resolveTurn: async (input) => {
-        const chatKind =
-          params.msg.chatType === "group" || params.msg.chatType === "channel"
-            ? params.msg.chatType
-            : "direct";
         const msgCtx = resolved.rt.channel.inbound.buildContext({
           channel: CHANNEL_ID,
           accountId: params.account.accountId,
@@ -109,6 +143,7 @@ export async function dispatchSynologyChatInboundEvent(params: {
           route: {
             agentId: resolved.route.agentId,
             accountId: params.account.accountId,
+            matchedBy: resolved.route.matchedBy,
             routeSessionKey: resolved.sessionKey,
             dispatchSessionKey: resolved.sessionKey,
           },
@@ -156,6 +191,7 @@ export async function dispatchSynologyChatInboundEvent(params: {
               params.log?.info?.(`Agent reply started for ${params.msg.from}`);
             },
           },
+          replyOptions: { identityContractVersion: 1 },
           record: {
             onRecordError: (err) => {
               params.log?.info?.(`Session metadata update failed for ${params.msg.from}`, err);

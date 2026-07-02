@@ -861,6 +861,15 @@ export async function runPreparedReply(
         isMainSession,
         isNewSession,
         suppressHeartbeatOwnedEvents: isHeartbeat,
+        contextKey: ctx.SystemEventContextKey,
+        actor:
+          ctx.SenderId && (ctx.Provider ?? ctx.Surface)
+            ? {
+                channel: ctx.Provider ?? ctx.Surface ?? "",
+                accountId: ctx.AccountId,
+                senderId: ctx.SenderId,
+              }
+            : undefined,
       });
       if (eventsBlock) {
         drainedSystemEventBlocks.push(eventsBlock);
@@ -1380,6 +1389,7 @@ export async function runPreparedReply(
     run: {
       agentId,
       agentDir,
+      routeMatchedBy: promptSessionCtx.AgentRouteMatchedBy,
       sessionId: preparedSessionState.sessionId,
       sessionKey,
       runtimePolicySessionKey,

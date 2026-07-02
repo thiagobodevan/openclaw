@@ -11,6 +11,11 @@ import {
   deliverTextOrMediaReply,
   type OutboundReplyPayload,
 } from "openclaw/plugin-sdk/reply-payload";
+import {
+  resolveConversationIdentityAdmission,
+  resolveConversationIdentityMode,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
 import { waitForAbortSignal } from "openclaw/plugin-sdk/runtime-env";
 import {
   resolveDefaultGroupPolicy,
@@ -156,6 +161,7 @@ type ZaloMessagePipelineParams = ZaloProcessingContext & {
   text?: string;
   mediaPath?: string;
   mediaType?: string;
+  mediaUrl?: string;
   authorization?: ZaloMessageAuthorizationResult;
 };
 type ZaloImageMessageParams = ZaloProcessingContext & {
@@ -357,7 +363,7 @@ async function handleTextMessage(
 }
 
 async function handleImageMessage(params: ZaloImageMessageParams): Promise<void> {
-  const { message, mediaMaxMb, account, core, runtime } = params;
+  const { message } = params;
   const { photo_url, caption } = message;
   const authorization = await authorizeZaloMessage({
     ...params,
@@ -370,26 +376,11 @@ async function handleImageMessage(params: ZaloImageMessageParams): Promise<void>
     return;
   }
 
-  let mediaPath: string | undefined;
-  let mediaType: string | undefined;
-
-  if (photo_url) {
-    try {
-      const maxBytes = mediaMaxMb * 1024 * 1024;
-      const saved = await core.channel.media.saveRemoteMedia({ url: photo_url, maxBytes });
-      mediaPath = saved.path;
-      mediaType = saved.contentType;
-    } catch (err) {
-      runtime.error?.(`[${account.accountId}] Failed to download Zalo image: ${String(err)}`);
-    }
-  }
-
   await processMessageWithPipeline({
     ...params,
     authorization,
     text: caption,
-    mediaPath,
-    mediaType,
+    mediaUrl: photo_url,
   });
 }
 
@@ -444,6 +435,36 @@ async function authorizeZaloMessage(
     command: shouldComputeAuth ? {} : undefined,
   });
   const senderAccess = access.senderAccess;
+  const route = core.channel.routing.resolveAgentRoute({
+    cfg: config,
+    channel: "zalo",
+    accountId: account.accountId,
+    peer: { kind: isGroup ? "group" : "direct", id: chatId },
+  });
+  const identity = resolveConversationIdentityMode({
+    config,
+    agentId: route.agentId,
+    routeMatchedBy: route.matchedBy,
+    chatType: isGroup ? "group" : "direct",
+    groupId: isGroup ? chatId : undefined,
+    groupSpace: isGroup ? chatId : undefined,
+    senderIsOwner:
+      !isGroup &&
+      resolveStableSenderIsOwner({
+        senderId,
+        commandOwnerAllowFrom: config.commands?.ownerAllowFrom,
+        providerAllowFrom: account.config.allowFrom,
+        normalizeEntry: normalizeZaloAllowEntry,
+      }),
+  });
+  if (!identity.allowed) {
+    logVerbose(
+      core,
+      runtime,
+      `zalo: drop message before pairing or provider preparation (${identity.reason})`,
+    );
+    return undefined;
+  }
   if (isGroup) {
     warnMissingProviderGroupPolicyFallbackOnce({
       providerMissingFallbackApplied: senderAccess.providerMissingFallbackApplied,
@@ -527,13 +548,12 @@ async function processMessageWithPipeline(params: ZaloMessagePipelineParams): Pr
     config,
     runtime,
     core,
-    mediaPath,
-    mediaType,
     statusSink,
     fetcher,
     authorization: authorizationOverride,
   } = params;
   const { message_id, date } = message;
+  let { mediaPath, mediaType } = params;
   const authorization =
     authorizationOverride ??
     (await authorizeZaloMessage({
@@ -557,6 +577,43 @@ async function processMessageWithPipeline(params: ZaloMessagePipelineParams): Pr
     runtime: core.channel,
     sessionStore: config.session?.store,
   });
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: config,
+    ctx: {
+      AgentId: route.agentId,
+      AgentRouteMatchedBy: route.matchedBy,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: isGroup ? "group" : "direct",
+      ChatId: isGroup ? chatId : undefined,
+      SenderId: senderId,
+      Provider: "zalo",
+      Surface: "zalo",
+      CommandAuthorized: commandAuthorized,
+    },
+  });
+  if (!identityDecision.allowed) {
+    logVerbose(
+      core,
+      runtime,
+      `zalo: drop message before media preparation (${identityDecision.reason})`,
+    );
+    return;
+  }
+
+  if (params.mediaUrl) {
+    try {
+      const maxBytes = params.mediaMaxMb * 1024 * 1024;
+      const saved = await core.channel.media.saveRemoteMedia({
+        url: params.mediaUrl,
+        maxBytes,
+      });
+      mediaPath = saved.path;
+      mediaType = saved.contentType;
+    } catch (err) {
+      runtime.error?.(`[${account.accountId}] Failed to download Zalo image: ${String(err)}`);
+    }
+  }
 
   if (
     isGroup &&
@@ -594,6 +651,7 @@ async function processMessageWithPipeline(params: ZaloMessagePipelineParams): Pr
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
+      matchedBy: route.matchedBy,
       routeSessionKey: route.sessionKey,
     },
     reply: {
@@ -702,6 +760,7 @@ async function processMessageWithPipeline(params: ZaloMessagePipelineParams): Pr
       },
     },
     replyPipeline,
+    replyOptions: { identityContractVersion: 1 },
     record: {
       onRecordError: (err) => {
         runtime.error?.(`zalo: failed updating session meta: ${String(err)}`);

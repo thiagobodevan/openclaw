@@ -257,12 +257,14 @@ describe("discord native /think autocomplete", () => {
   function createConfig() {
     return {
       agents: {
+        list: [{ id: "personal", default: true }, { id: "main" }],
         defaults: {
           model: {
             primary: "anthropic/claude-sonnet-4.5",
           },
         },
       },
+      commands: { ownerAllowFrom: ["*"] },
       session: {
         store: STORE_PATH,
       },
@@ -308,16 +310,20 @@ describe("discord native /think autocomplete", () => {
       threadBindings: createNoopThreadBindingManager("default"),
     });
     expect(context).toEqual({
-      provider: "openai",
-      model: "gpt-5.4",
+      allowed: true,
+      context: {
+        provider: "openai",
+        model: "gpt-5.4",
+      },
     });
+    const modelContext = context.allowed ? context.context : null;
 
     const choices = resolveCommandArgChoices({
       command,
       arg: levelArg,
       cfg,
-      provider: context?.provider,
-      model: context?.model,
+      provider: modelContext?.provider,
+      model: modelContext?.model,
       catalog: [],
     });
     const values = choices.map((choice) => choice.value);
@@ -361,21 +367,22 @@ describe("discord native /think autocomplete", () => {
       accountId: "default",
       threadBindings: createNoopThreadBindingManager("default"),
     });
+    const modelContext = context.allowed ? context.context : null;
     const { command, levelArg } = requireThinkLevelCommand();
 
     const choices = resolveCommandArgChoices({
       command,
       arg: levelArg,
       cfg,
-      provider: context?.provider,
-      model: context?.model,
+      provider: modelContext?.provider,
+      model: modelContext?.model,
       catalog: [],
     });
     const values = choices.map((choice) => choice.value);
     expect(values).toContain("max");
   });
 
-  it("falls back when a configured binding is unavailable", async () => {
+  it("denies choice resolution when a configured binding is unavailable", async () => {
     const cfg = createConfig();
     resolveConfiguredBindingRouteMock.mockImplementation(createConfiguredRouteResult);
     ensureConfiguredBindingRouteReadyMock.mockResolvedValue({
@@ -405,19 +412,7 @@ describe("discord native /think autocomplete", () => {
       threadBindings: createNoopThreadBindingManager("default"),
     });
 
-    expect(context).toBeNull();
+    expect(context).toEqual({ allowed: false, reason: "binding_unavailable" });
     expect(ensureConfiguredBindingRouteReadyMock).toHaveBeenCalledTimes(1);
-
-    const { command, levelArg } = requireThinkLevelCommand();
-    const choices = resolveCommandArgChoices({
-      command,
-      arg: levelArg,
-      cfg,
-      provider: context?.provider,
-      model: context?.model,
-      catalog: [],
-    });
-    const values = choices.map((choice) => choice.value);
-    expect(values).not.toContain("xhigh");
   });
 });

@@ -1,6 +1,7 @@
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import * as conversationRuntime from "openclaw/plugin-sdk/conversation-runtime";
 import {
   clearPluginInteractiveHandlers,
   registerPluginInteractiveHandler,
@@ -14,10 +15,7 @@ import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import { loadSessionStore } from "openclaw/plugin-sdk/session-store-runtime";
 import { mockPinnedHostnameResolution } from "openclaw/plugin-sdk/test-env";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  resolveTelegramConversationBaseSessionKey,
-  resolveTelegramConversationRoute,
-} from "./conversation-route.js";
+import * as conversationRouteRuntime from "./conversation-route.js";
 import type { TelegramInteractiveHandlerContext } from "./interactive-dispatch.js";
 import { buildTelegramOpaqueCallbackData } from "./native-command-callback-data.js";
 import { clearTelegramRuntime, setTelegramRuntime } from "./runtime.js";
@@ -43,6 +41,7 @@ const {
   setMyCommandsSpy,
   telegramBotDepsForTest,
   telegramBotRuntimeForTest,
+  TELEGRAM_TEST_OWNER_ALLOW_FROM,
   wasSentByBot,
 } = await import("./bot.create-telegram-bot.test-harness.js");
 const { recordOutboundMessageForPromptContext } = await import("./outbound-message-context.js");
@@ -64,6 +63,49 @@ const FIRE_EMOJI = "\u{1F525}";
 const PARTY_EMOJI = "\u{1F389}";
 const EYES_EMOJI = "\u{1F440}";
 const HEART_EMOJI = "\u{2764}\u{FE0F}";
+
+function buildIdentityAdmittedTelegramConfig(params: {
+  config: OpenClawConfig;
+  ownerSenderId?: string;
+  ownerAllowFrom?: string[];
+  bindGroups?: boolean;
+}): OpenClawConfig {
+  const config = params.config;
+  const agentList = config.agents?.list ?? [];
+  return {
+    ...config,
+    ...(params.bindGroups
+      ? {
+          agents: {
+            ...config.agents,
+            list:
+              agentList.length === 0
+                ? [{ id: "main" }, { id: "team" }]
+                : [...agentList, { id: "team" }],
+          },
+          bindings: [
+            ...(config.bindings ?? []),
+            {
+              agentId: "team",
+              match: { channel: "telegram", peer: { kind: "group" as const, id: "*" } },
+            },
+          ],
+        }
+      : {}),
+    ...(params.ownerSenderId || params.ownerAllowFrom
+      ? {
+          commands: {
+            ...config.commands,
+            ownerAllowFrom: [
+              ...(config.commands?.ownerAllowFrom ?? []),
+              ...(params.ownerAllowFrom ??
+                (params.ownerSenderId ? [`telegram:${params.ownerSenderId}`] : [])),
+            ],
+          },
+        }
+      : {}),
+  };
+}
 
 function createSignal() {
   let resolve: (() => void) | undefined;
@@ -158,14 +200,14 @@ async function writeDirectTelegramTranscriptContext(params: {
   text: string;
   timestamp: number;
 }) {
-  const route = resolveTelegramConversationRoute({
+  const route = conversationRouteRuntime.resolveTelegramConversationRoute({
     cfg: params.cfg,
     accountId: "default",
     chatId: params.chatId,
     isGroup: false,
     senderId: params.senderId,
   }).route;
-  const sessionKey = resolveTelegramConversationBaseSessionKey({
+  const sessionKey = conversationRouteRuntime.resolveTelegramConversationBaseSessionKey({
     cfg: params.cfg,
     route,
     chatId: params.chatId,
@@ -251,16 +293,22 @@ describe("createTelegramBot", () => {
   beforeEach(() => {
     setMyCommandsSpy.mockClear();
     clearPluginInteractiveHandlers();
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"] },
+          },
         },
-      },
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"] },
-      },
-    });
+        ownerAllowFrom: TELEGRAM_TEST_OWNER_ALLOW_FROM,
+        bindGroups: true,
+      }),
+    );
     setTelegramBotRuntimeForTest(
       telegramBotRuntimeForTest as unknown as Parameters<typeof setTelegramBotRuntimeForTest>[0],
     );
@@ -672,8 +720,48 @@ describe("createTelegramBot", () => {
     });
 
     // The callback should be processed (not silently blocked)
+    const listCall = requireRecord(
+      mockArg(
+        listSkillCommandsForAgents as unknown as MockCallSource,
+        0,
+        0,
+        "group list skill commands call",
+      ),
+      "group list skill commands call",
+    );
+    expect(listCall.agentIds).toEqual(["team"]);
     expect(editMessageTextSpy).toHaveBeenCalledTimes(1);
     expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-group-1");
+  });
+
+  it("rejects command pagination for an agent replaced by the live route", async () => {
+    onSpy.mockClear();
+    editMessageTextSpy.mockClear();
+    listSkillCommandsForAgents.mockClear();
+
+    createTelegramBot({ token: "tok" });
+    const callbackHandler = getOnHandler("callback_query") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+
+    await callbackHandler({
+      callbackQuery: {
+        id: "cbq-group-stale-agent",
+        data: "commands_page_2:main",
+        from: { id: 42, first_name: "Ada", username: "ada_bot" },
+        message: {
+          chat: { id: -100999, type: "supergroup", title: "Test Group" },
+          date: 1736380800,
+          message_id: 21,
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(listSkillCommandsForAgents).not.toHaveBeenCalled();
+    expect(editMessageTextSpy).not.toHaveBeenCalled();
+    expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-group-stale-agent");
   });
 
   it("clears approval buttons without re-editing callback message text", async () => {
@@ -1292,7 +1380,7 @@ describe("createTelegramBot", () => {
     });
   });
 
-  it("falls back to default agent for pagination callbacks without agent suffix", async () => {
+  it("uses the live route for pagination callbacks without agent suffix", async () => {
     onSpy.mockClear();
     listSkillCommandsForAgents.mockClear();
 
@@ -1420,6 +1508,7 @@ describe("createTelegramBot", () => {
           model: `amazon-bedrock/${modelId}`,
         },
       },
+      commands: { ownerAllowFrom: ["telegram:9"] },
       channels: {
         telegram: {
           dmPolicy: "open",
@@ -1502,6 +1591,7 @@ describe("createTelegramBot", () => {
           model: "openai/gpt-5",
         },
       },
+      commands: { ownerAllowFrom: ["telegram:9"] },
       channels: {
         telegram: {
           dmPolicy: "open",
@@ -1579,6 +1669,7 @@ describe("createTelegramBot", () => {
           },
         },
       },
+      commands: { ownerAllowFrom: ["telegram:9"] },
       channels: {
         telegram: {
           dmPolicy: "open",
@@ -1656,6 +1747,7 @@ describe("createTelegramBot", () => {
             },
           },
         },
+        commands: { ownerAllowFrom: ["telegram:9"] },
         channels: {
           telegram: {
             dmPolicy: "open",
@@ -1741,6 +1833,7 @@ describe("createTelegramBot", () => {
             },
           },
         },
+        commands: { ownerAllowFrom: ["telegram:9"] },
         channels: {
           telegram: {
             dmPolicy: "open",
@@ -1863,19 +1956,24 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          channels: {
+            telegram: {
+              groupPolicy: "open",
+              groups: { "*": { requireMention: false } },
+            },
+          },
         },
-      },
-      channels: {
-        telegram: {
-          groupPolicy: "open",
-          groups: { "*": { requireMention: false } },
-        },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -1917,19 +2015,24 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          channels: {
+            telegram: {
+              groupPolicy: "open",
+              groups: { "*": { requireMention: false } },
+            },
+          },
         },
-      },
-      channels: {
-        telegram: {
-          groupPolicy: "open",
-          groups: { "*": { requireMention: false } },
-        },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -2015,20 +2118,25 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          channels: {
+            telegram: {
+              groupPolicy: "allowlist",
+              groupAllowFrom: ["111", "222"],
+              groups: { "*": { requireMention: true } },
+            },
+          },
         },
-      },
-      channels: {
-        telegram: {
-          groupPolicy: "allowlist",
-          groupAllowFrom: ["111", "222"],
-          groups: { "*": { requireMention: true } },
-        },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -2247,19 +2355,24 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          channels: {
+            telegram: {
+              groupPolicy: "open",
+              groups: { "*": { requireMention: false } },
+            },
+          },
         },
-      },
-      channels: {
-        telegram: {
-          groupPolicy: "open",
-          groups: { "*": { requireMention: false } },
-        },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -2346,6 +2459,7 @@ describe("createTelegramBot", () => {
 
     const storePath = `/tmp/openclaw-telegram-dm-media-context-${process.pid}-${Date.now()}.json`;
     const config = {
+      commands: { ownerAllowFrom: ["telegram:202"] },
       channels: {
         telegram: {
           dmPolicy: "open",
@@ -2434,6 +2548,7 @@ describe("createTelegramBot", () => {
 
     const storePath = `/tmp/openclaw-telegram-dm-reset-context-${process.pid}-${Date.now()}.json`;
     const config = {
+      commands: { ownerAllowFrom: ["telegram:202"] },
       channels: {
         telegram: {
           dmPolicy: "open",
@@ -2498,6 +2613,7 @@ describe("createTelegramBot", () => {
     await handler({
       message: {
         chat: { id: 7, type: "private" },
+        from: { id: 7, first_name: "Test" },
         text: "Sure, see below",
         date: 1736380800,
         reply_to_message: {
@@ -2541,6 +2657,7 @@ describe("createTelegramBot", () => {
     await handler({
       message: {
         chat: { id: 7, type: "private" },
+        from: { id: 7, first_name: "Test" },
         text: "Sure, see below",
         date: 1736380800,
         reply_to_message: {
@@ -2593,6 +2710,7 @@ describe("createTelegramBot", () => {
       await handler({
         message: {
           chat: { id: 7, type: "private" },
+          from: { id: 7, first_name: "Test" },
           text: "what is in this image?",
           date: 1736380800,
           reply_to_message: {
@@ -2764,15 +2882,20 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
     getFileSpy.mockClear();
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: {
-          groupPolicy: "open",
-          contextVisibility: "allowlist_quote",
-          allowFrom,
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: {
+              groupPolicy: "open",
+              contextVisibility: "allowlist_quote",
+              allowFrom,
+            },
+          },
         },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     const mediaFetch = vi.fn(
       async () =>
@@ -2913,23 +3036,28 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
     getFileSpy.mockClear();
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: {
-          groupPolicy: "allowlist",
-          contextVisibility: "allowlist",
-          groups: {
-            "-1007": {
-              requireMention: false,
-              allowFrom: ["1", "2"],
-              topics: {
-                "1": { allowFrom: ["1"], requireMention: false },
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: {
+              groupPolicy: "allowlist",
+              contextVisibility: "allowlist",
+              groups: {
+                "-1007": {
+                  requireMention: false,
+                  allowFrom: ["1", "2"],
+                  topics: {
+                    "1": { allowFrom: ["1"], requireMention: false },
+                  },
+                },
               },
             },
           },
         },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     const mediaFetch = vi.fn(
       async () =>
@@ -3053,39 +3181,45 @@ describe("createTelegramBot", () => {
       onSpy.mockClear();
       replySpy.mockClear();
       getFileSpy.mockClear();
-      const runtimeConfig = {
-        ...(useAccessGroup
-          ? {
-              accessGroups: {
-                operators: {
-                  type: "message.senders" as const,
-                  members: { telegram: ["2"] },
+      const runtimeConfig = buildIdentityAdmittedTelegramConfig({
+        config: {
+          ...(useAccessGroup
+            ? {
+                accessGroups: {
+                  operators: {
+                    type: "message.senders" as const,
+                    members: { telegram: ["2"] },
+                  },
                 },
-              },
-            }
-          : {}),
-        channels: {
-          telegram: {
-            groupPolicy: "open",
-            contextVisibility: "allowlist",
-            ...(runtimeGroupAllowFrom ? { groupAllowFrom: runtimeGroupAllowFrom } : {}),
-            groups: {
-              [String(chatId)]: {
-                requireMention: false,
+              }
+            : {}),
+          channels: {
+            telegram: {
+              groupPolicy: "open",
+              contextVisibility: "allowlist",
+              ...(runtimeGroupAllowFrom ? { groupAllowFrom: runtimeGroupAllowFrom } : {}),
+              groups: {
+                [String(chatId)]: {
+                  requireMention: false,
+                },
               },
             },
           },
         },
-      } satisfies NonNullable<Parameters<typeof createTelegramBot>[0]["config"]>;
-      const startupConfig = {
-        channels: {
-          telegram: {
-            groupPolicy: "open",
-            ...(startupGroupAllowFrom ? { groupAllowFrom: startupGroupAllowFrom } : {}),
-            groups: { [String(chatId)]: { requireMention: false } },
+        bindGroups: true,
+      });
+      const startupConfig = buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: {
+              groupPolicy: "open",
+              ...(startupGroupAllowFrom ? { groupAllowFrom: startupGroupAllowFrom } : {}),
+              groups: { [String(chatId)]: { requireMention: false } },
+            },
           },
         },
-      } satisfies NonNullable<Parameters<typeof createTelegramBot>[0]["config"]>;
+        bindGroups: true,
+      });
       loadConfig.mockReturnValue(runtimeConfig);
 
       const mediaFetch = vi.fn(
@@ -3208,7 +3342,7 @@ describe("createTelegramBot", () => {
 
     expect(getFileSpy).not.toHaveBeenCalled();
     expect(replySpy).not.toHaveBeenCalled();
-    expect(sendMessageSpy).toHaveBeenCalledTimes(1);
+    expect(sendMessageSpy).not.toHaveBeenCalled();
   });
 
   it("defers reply media download until debounce flush", async () => {
@@ -3216,24 +3350,29 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
     getFileSpy.mockClear();
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          messages: {
+            inbound: {
+              debounceMs: DEBOUNCE_MS,
+            },
+          },
+          channels: {
+            telegram: {
+              dmPolicy: "open",
+              allowFrom: ["*"],
+            },
+          },
         },
-      },
-      messages: {
-        inbound: {
-          debounceMs: DEBOUNCE_MS,
-        },
-      },
-      channels: {
-        telegram: {
-          dmPolicy: "open",
-          allowFrom: ["*"],
-        },
-      },
-    });
+        ownerSenderId: "42",
+      }),
+    );
 
     const mediaFetch = vi.fn(
       async () =>
@@ -3327,6 +3466,7 @@ describe("createTelegramBot", () => {
     await handler({
       message: {
         chat: { id: 7, type: "private" },
+        from: { id: 7, first_name: "Test" },
         text: "Sure, see below",
         date: 1736380800,
         quote: {
@@ -3358,6 +3498,7 @@ describe("createTelegramBot", () => {
     await handler({
       message: {
         chat: { id: 7, type: "private" },
+        from: { id: 7, first_name: "Test" },
         text: "Sure, see below",
         date: 1736380800,
         quote: {
@@ -3395,6 +3536,7 @@ describe("createTelegramBot", () => {
     await handler({
       message: {
         chat: { id: 7, type: "private" },
+        from: { id: 7, first_name: "Test" },
         text: "Thoughts?",
         date: 1736380800,
         external_reply: {
@@ -3445,6 +3587,7 @@ describe("createTelegramBot", () => {
     await handler({
       message: {
         chat: { id: 7, type: "private" },
+        from: { id: 7, first_name: "Test" },
         text: "Thoughts?",
         date: 1736380800,
         external_reply: {
@@ -3479,20 +3622,25 @@ describe("createTelegramBot", () => {
     onSpy.mockReset();
     sendMessageSpy.mockReset();
     replySpy.mockReset();
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: {
-          groupPolicy: "allowlist",
-          contextVisibility: "allowlist",
-          groups: {
-            "-1007": {
-              requireMention: false,
-              allowFrom: ["1"],
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: {
+              groupPolicy: "allowlist",
+              contextVisibility: "allowlist",
+              groups: {
+                "-1007": {
+                  requireMention: false,
+                  allowFrom: ["1"],
+                },
+              },
             },
           },
         },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -3541,11 +3689,16 @@ describe("createTelegramBot", () => {
   it("accepts group replies to the bot without explicit mention when requireMention is enabled", async () => {
     onSpy.mockClear();
     replySpy.mockClear();
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { groups: { "*": { requireMention: true } } },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { groups: { "*": { requireMention: true } } },
+          },
+        },
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;
@@ -3615,19 +3768,24 @@ describe("createTelegramBot", () => {
   it("allows group messages for per-group groupPolicy open override (global groupPolicy allowlist)", async () => {
     onSpy.mockClear();
     replySpy.mockClear();
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: {
-          groupPolicy: "allowlist",
-          groups: {
-            "-100123456789": {
-              groupPolicy: "open",
-              requireMention: false,
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: {
+              groupPolicy: "allowlist",
+              groups: {
+                "-100123456789": {
+                  groupPolicy: "open",
+                  requireMention: false,
+                },
+              },
             },
           },
         },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
     readChannelAllowFromStore.mockResolvedValueOnce(["123456789"]);
 
     createTelegramBot({ token: "tok" });
@@ -3682,6 +3840,50 @@ describe("createTelegramBot", () => {
     expect(replySpy).not.toHaveBeenCalled();
   });
 
+  it("denies plugin callbacks when only wildcard command ownership is configured", async () => {
+    onSpy.mockClear();
+    editMessageTextSpy.mockClear();
+    const handler = vi.fn(async () => ({ handled: true }));
+    registerPluginInteractiveHandler("guest-plugin", {
+      channel: "telegram",
+      namespace: "guest",
+      handler: handler as never,
+    });
+    const config = {
+      commands: { ownerAllowFrom: ["*"] },
+      channels: {
+        telegram: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+        },
+      },
+    } satisfies OpenClawConfig;
+    loadConfig.mockReturnValue(config);
+
+    createTelegramBot({ token: "tok", config });
+    const callbackHandler = getOnHandler("callback_query") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+    await callbackHandler({
+      callbackQuery: {
+        id: "cbq-wildcard-owner",
+        data: "guest:approve",
+        from: { id: 9, first_name: "Guest", username: "guest" },
+        message: {
+          chat: { id: 1234, type: "private" },
+          date: 1736380800,
+          message_id: 12,
+          text: "Approve",
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(editMessageTextSpy).not.toHaveBeenCalled();
+  });
+
   it("routes plugin-owned callback namespaces before synthetic command fallback", async () => {
     onSpy.mockClear();
     replySpy.mockClear();
@@ -3701,6 +3903,7 @@ describe("createTelegramBot", () => {
     createTelegramBot({
       token: "tok",
       config: {
+        commands: { ownerAllowFrom: ["telegram:9"] },
         channels: {
           telegram: {
             dmPolicy: "open",
@@ -3734,6 +3937,129 @@ describe("createTelegramBot", () => {
       business_connection_id: "biz-1",
     });
     expect(replySpy).not.toHaveBeenCalled();
+  });
+
+  it("denies unbound shared callbacks before forum lookup or plugin handlers", async () => {
+    onSpy.mockClear();
+    editMessageTextSpy.mockClear();
+    getChatSpy.mockClear();
+    getChatSpy.mockResolvedValue({ id: -100999, type: "supergroup", is_forum: true });
+    const handler = vi.fn(async () => ({ handled: true }));
+    registerPluginInteractiveHandler("service-plugin", {
+      channel: "telegram",
+      namespace: "service",
+      handler: handler as never,
+    });
+    const config = {
+      agents: { list: [{ id: "personal", default: true }] },
+      channels: {
+        telegram: {
+          capabilities: { inlineButtons: "group" },
+          groupPolicy: "open",
+          groups: { "*": { requireMention: false } },
+        },
+      },
+    } satisfies NonNullable<Parameters<typeof createTelegramBot>[0]["config"]>;
+    loadConfig.mockReturnValue(config);
+
+    createTelegramBot({ token: "tok", config });
+    const callbackHandler = getOnHandler("callback_query") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+    await callbackHandler({
+      callbackQuery: {
+        id: "cbq-unbound-service",
+        data: "service:approve",
+        from: { id: 9, first_name: "Guest", username: "guest" },
+        message: {
+          chat: { id: -100999, type: "supergroup", title: "Shared" },
+          date: 1736380800,
+          message_id: 12,
+          text: "Approve",
+        },
+      },
+      me: { username: "openclaw_bot" },
+      getFile: async () => ({ download: async () => new Uint8Array() }),
+    });
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(editMessageTextSpy).not.toHaveBeenCalled();
+    expect(getChatSpy).not.toHaveBeenCalled();
+  });
+
+  it("denies configured callbacks before side effects when the service binding is unavailable", async () => {
+    onSpy.mockClear();
+    editMessageTextSpy.mockClear();
+    deleteMessageSpy.mockClear();
+    const handler = vi.fn(async () => ({ handled: true }));
+    registerPluginInteractiveHandler("service-plugin", {
+      channel: "telegram",
+      namespace: "service",
+      handler: handler as never,
+    });
+    const cfg = {
+      agents: { list: [{ id: "main", default: true }, { id: "service" }] },
+      channels: {
+        telegram: {
+          capabilities: { inlineButtons: "dm" },
+          dmPolicy: "open",
+          allowFrom: ["*"],
+        },
+      },
+    } satisfies OpenClawConfig;
+    loadConfig.mockReturnValue(cfg);
+    const binding = { statefulTarget: { sessionKey: "agent:service:acp:callback" } };
+    const routeSpy = vi
+      .spyOn(conversationRouteRuntime, "resolveTelegramConversationRoute")
+      .mockReturnValue({
+        bindingMode: {
+          kind: "configured",
+          binding: binding as never,
+          sessionKey: "agent:service:acp:callback",
+        },
+        route: {
+          accountId: "default",
+          agentId: "service",
+          channel: "telegram",
+          lastRoutePolicy: "session",
+          mainSessionKey: "agent:service:main",
+          matchedBy: "binding.channel",
+          sessionKey: "agent:service:acp:callback",
+        },
+      });
+    const readinessSpy = vi
+      .spyOn(conversationRuntime, "ensureConfiguredBindingRouteReady")
+      .mockResolvedValue({ ok: false, error: "target unavailable" });
+
+    try {
+      createTelegramBot({ token: "tok", config: cfg });
+      const callbackHandler = getOnHandler("callback_query") as (
+        ctx: Record<string, unknown>,
+      ) => Promise<void>;
+      await callbackHandler({
+        callbackQuery: {
+          id: "cbq-unavailable-service",
+          data: "service:approve",
+          from: { id: 9, first_name: "Guest", username: "guest" },
+          message: {
+            chat: { id: 1234, type: "private" },
+            date: 1736380800,
+            message_id: 12,
+            text: "Approve",
+          },
+        },
+        me: { username: "openclaw_bot" },
+        getFile: async () => ({ download: async () => new Uint8Array() }),
+      });
+
+      expect(readinessSpy).toHaveBeenCalledWith({ cfg, bindingResolution: binding });
+      expect(handler).not.toHaveBeenCalled();
+      expect(editMessageTextSpy).not.toHaveBeenCalled();
+      expect(deleteMessageSpy).not.toHaveBeenCalled();
+    } finally {
+      readinessSpy.mockRestore();
+      routeSpy.mockRestore();
+    }
   });
 
   it("deletes plugin-owned callback messages through the bot API", async () => {
@@ -3872,21 +4198,24 @@ describe("createTelegramBot", () => {
       handler: handler as never,
     });
 
-    const config = {
-      commands: {
-        allowFrom: {
-          telegram: ["111111111"],
+    const config = buildIdentityAdmittedTelegramConfig({
+      config: {
+        commands: {
+          allowFrom: {
+            telegram: ["111111111"],
+          },
+        },
+        channels: {
+          telegram: {
+            dmPolicy: "open",
+            capabilities: { inlineButtons: "group" },
+            groupPolicy: "open",
+            groups: { "*": { requireMention: false } },
+          },
         },
       },
-      channels: {
-        telegram: {
-          dmPolicy: "open",
-          capabilities: { inlineButtons: "group" },
-          groupPolicy: "open",
-          groups: { "*": { requireMention: false } },
-        },
-      },
-    } satisfies NonNullable<Parameters<typeof createTelegramBot>[0]["config"]>;
+      bindGroups: true,
+    });
     loadConfig.mockReturnValue(config);
 
     createTelegramBot({ token: "tok", config });
@@ -3927,21 +4256,24 @@ describe("createTelegramBot", () => {
       handler: handler as never,
     });
 
-    const config = {
-      commands: {
-        allowFrom: {
-          telegram: ["111111111"],
+    const config = buildIdentityAdmittedTelegramConfig({
+      config: {
+        commands: {
+          allowFrom: {
+            telegram: ["111111111"],
+          },
+        },
+        channels: {
+          telegram: {
+            dmPolicy: "open",
+            capabilities: { inlineButtons: "group" },
+            groupPolicy: "open",
+            groups: { "*": { requireMention: false } },
+          },
         },
       },
-      channels: {
-        telegram: {
-          dmPolicy: "open",
-          capabilities: { inlineButtons: "group" },
-          groupPolicy: "open",
-          groups: { "*": { requireMention: false } },
-        },
-      },
-    } satisfies NonNullable<Parameters<typeof createTelegramBot>[0]["config"]>;
+      bindGroups: true,
+    });
     loadConfig.mockReturnValue(config);
 
     createTelegramBot({ token: "tok", config });
@@ -3983,6 +4315,19 @@ describe("createTelegramBot", () => {
     });
 
     const config = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "service" }],
+      },
+      bindings: [
+        {
+          agentId: "service",
+          match: {
+            channel: "telegram",
+            accountId: "default",
+            peer: { kind: "direct", id: "123456789" },
+          },
+        },
+      ],
       accessGroups: {
         operators: {
           type: "message.senders",
@@ -4091,7 +4436,7 @@ describe("createTelegramBot", () => {
     replySpy.mockResolvedValue({ text: "response" });
 
     loadConfig.mockReturnValue({
-      commands: { native: true },
+      commands: { native: true, ownerAllowFrom: ["telegram:12345"] },
       channels: {
         telegram: {
           dmPolicy: "pairing",
@@ -4133,7 +4478,7 @@ describe("createTelegramBot", () => {
     replySpy.mockResolvedValue({ text: "response" });
 
     loadConfig.mockReturnValue({
-      commands: { native: true },
+      commands: { native: true, ownerAllowFrom: ["telegram:12345"] },
       channels: {
         telegram: {
           dmPolicy: "pairing",
@@ -4176,7 +4521,7 @@ describe("createTelegramBot", () => {
     replySpy.mockResolvedValue({ text: "response" });
 
     loadConfig.mockReturnValue({
-      commands: { native: true },
+      commands: { native: true, ownerAllowFrom: ["telegram:12345"] },
       channels: {
         telegram: {
           dmPolicy: "pairing",
@@ -4220,7 +4565,7 @@ describe("createTelegramBot", () => {
     replySpy.mockResolvedValue({ text: "response" });
 
     const startupConfig = {
-      commands: { native: true },
+      commands: { native: true, ownerAllowFrom: ["telegram:12345"] },
       channels: {
         telegram: {
           dmPolicy: "pairing" as const,
@@ -4234,7 +4579,7 @@ describe("createTelegramBot", () => {
       config: startupConfig,
     });
     loadConfig.mockReturnValue({
-      commands: { native: true },
+      commands: { native: true, ownerAllowFrom: ["telegram:12345"] },
       channels: {
         telegram: {
           dmPolicy: "pairing",
@@ -4322,11 +4667,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4350,6 +4700,117 @@ describe("createTelegramBot", () => {
       `Telegram reaction added: ${THUMBS_UP_EMOJI} by Ada (@ada_bot) on msg 42`,
     );
     expect(String(systemEventOptions().contextKey)).toContain("telegram:reaction:add:1234:42:9");
+  });
+
+  it.each([
+    { name: "enqueues after readiness succeeds", ready: { ok: true } as const, enqueueCalls: 1 },
+    {
+      name: "drops before enqueue when readiness fails",
+      ready: { ok: false, error: "target unavailable" } as const,
+      enqueueCalls: 0,
+    },
+  ])("uses a configured reaction binding and $name", async ({ ready, enqueueCalls }) => {
+    onSpy.mockClear();
+    enqueueSystemEventSpy.mockClear();
+    const cfg = {
+      agents: { list: [{ id: "main", default: true }, { id: "codex" }] },
+      channels: {
+        telegram: { dmPolicy: "open" as const, allowFrom: ["*"], reactionNotifications: "all" },
+      },
+    } satisfies OpenClawConfig;
+    loadConfig.mockReturnValue(cfg);
+    const binding = { statefulTarget: { sessionKey: "agent:codex:acp:reaction" } };
+    const routeSpy = vi
+      .spyOn(conversationRouteRuntime, "resolveTelegramConversationRoute")
+      .mockReturnValue({
+        bindingMode: {
+          kind: "configured",
+          binding: binding as never,
+          sessionKey: "agent:codex:acp:reaction",
+        },
+        route: {
+          accountId: "default",
+          agentId: "codex",
+          channel: "telegram",
+          lastRoutePolicy: "session",
+          mainSessionKey: "agent:codex:main",
+          matchedBy: "binding.channel",
+          sessionKey: "agent:codex:acp:reaction",
+        },
+      });
+    const readinessSpy = vi
+      .spyOn(conversationRuntime, "ensureConfiguredBindingRouteReady")
+      .mockResolvedValue(ready);
+
+    try {
+      createTelegramBot({ token: "tok" });
+      const handler = getOnHandler("message_reaction") as (
+        ctx: Record<string, unknown>,
+      ) => Promise<void>;
+
+      await handler({
+        update: { update_id: 501 },
+        messageReaction: {
+          chat: { id: 1234, type: "private" },
+          message_id: 42,
+          user: { id: 9, first_name: "Ada" },
+          date: 1736380800,
+          old_reaction: [],
+          new_reaction: [{ type: "emoji", emoji: THUMBS_UP_EMOJI }],
+        },
+      });
+
+      expect(routeSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: "default",
+          chatId: 1234,
+          isGroup: false,
+          senderId: "9",
+        }),
+      );
+      expect(readinessSpy).toHaveBeenCalledWith({ cfg, bindingResolution: binding });
+      expect(enqueueSystemEventSpy).toHaveBeenCalledTimes(enqueueCalls);
+      if (enqueueCalls === 1) {
+        expect(systemEventOptions().sessionKey).toBe("agent:codex:acp:reaction");
+      }
+    } finally {
+      readinessSpy.mockRestore();
+      routeSpy.mockRestore();
+    }
+  });
+
+  it("denies wildcard-authorized direct reactions before personal queue insertion", async () => {
+    onSpy.mockClear();
+    enqueueSystemEventSpy.mockClear();
+    wasSentByBot.mockClear();
+    wasSentByBot.mockReturnValue(true);
+
+    loadConfig.mockReturnValue({
+      commands: { ownerAllowFrom: ["*"] },
+      channels: {
+        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "own" },
+      },
+    });
+
+    createTelegramBot({ token: "tok" });
+    const handler = getOnHandler("message_reaction") as (
+      ctx: Record<string, unknown>,
+    ) => Promise<void>;
+
+    await handler({
+      update: { update_id: 509 },
+      messageReaction: {
+        chat: { id: 1234, type: "private" },
+        message_id: 42,
+        user: { id: 9, first_name: "Ada" },
+        date: 1736380800,
+        old_reaction: [],
+        new_reaction: [{ type: "emoji", emoji: THUMBS_UP_EMOJI }],
+      },
+    });
+
+    expect(enqueueSystemEventSpy).not.toHaveBeenCalled();
+    expect(wasSentByBot).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -4464,11 +4925,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: channelConfig,
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: channelConfig as NonNullable<OpenClawConfig["channels"]>["telegram"],
+          },
+        },
+        ownerSenderId: expectedEnqueueCalls === 1 ? "9" : undefined,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4519,11 +4985,16 @@ describe("createTelegramBot", () => {
     enqueueSystemEventSpy.mockClear();
     wasSentByBot.mockReturnValue(true);
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"] },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"] },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4550,11 +5021,16 @@ describe("createTelegramBot", () => {
     enqueueSystemEventSpy.mockClear();
     wasSentByBot.mockReturnValue(false);
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4583,11 +5059,16 @@ describe("createTelegramBot", () => {
     enqueueSystemEventSpy.mockClear();
     wasSentByBot.mockReturnValue(false);
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "own" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "own" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4614,11 +5095,16 @@ describe("createTelegramBot", () => {
     enqueueSystemEventSpy.mockClear();
     wasSentByBot.mockReturnValue(true);
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "own" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "own" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4645,11 +5131,16 @@ describe("createTelegramBot", () => {
     enqueueSystemEventSpy.mockClear();
     wasSentByBot.mockReturnValue(true);
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4675,11 +5166,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4705,11 +5201,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", allowFrom: ["*"], reactionNotifications: "all" },
+          },
+        },
+        ownerSenderId: "9",
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4743,11 +5244,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", reactionNotifications: "all" },
+          },
+        },
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4780,11 +5286,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", reactionNotifications: "all" },
+          },
+        },
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (
@@ -4814,11 +5325,16 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     enqueueSystemEventSpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      channels: {
-        telegram: { dmPolicy: "open", reactionNotifications: "all" },
-      },
-    });
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          channels: {
+            telegram: { dmPolicy: "open", reactionNotifications: "all" },
+          },
+        },
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message_reaction") as (

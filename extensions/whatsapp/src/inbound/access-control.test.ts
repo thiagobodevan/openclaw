@@ -124,6 +124,105 @@ async function checkCommandAuthorizedForGroup(params: {
 }
 
 describe("checkInboundAccessControl admission contract", () => {
+  it("denies an unbound personal DM before pairing state is written", async () => {
+    const cfg = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "service" }],
+      },
+      channels: {
+        whatsapp: {
+          dmPolicy: "pairing",
+          allowFrom: [],
+        },
+      },
+    };
+    setAccessControlTestConfig(cfg);
+
+    const result = await checkInboundAccessControl({
+      cfg: cfg as never,
+      accountId: "default",
+      from: "+15550001111",
+      selfE164: "+15550009999",
+      senderE164: "+15550001111",
+      group: false,
+      pushName: "Guest",
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550001111@s.whatsapp.net",
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a wildcard DM allowlist as personal owner proof", async () => {
+    const cfg = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "service" }],
+      },
+      channels: {
+        whatsapp: {
+          dmPolicy: "allowlist",
+          allowFrom: ["*"],
+        },
+      },
+    };
+    setAccessControlTestConfig(cfg);
+
+    const result = await checkInboundAccessControl({
+      cfg: cfg as never,
+      accountId: "default",
+      from: "+15550001111",
+      selfE164: "+15550009999",
+      senderE164: "+15550001111",
+      group: false,
+      pushName: "Guest",
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550001111@s.whatsapp.net",
+    });
+
+    expect(result.allowed).toBe(false);
+    expect(readAllowFromStoreMock).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("carries exact stable allowlist approval as personal owner proof", async () => {
+    const cfg = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "service" }],
+      },
+      channels: {
+        whatsapp: {
+          dmPolicy: "allowlist",
+          allowFrom: ["+15550001111"],
+        },
+      },
+    };
+    setAccessControlTestConfig(cfg);
+
+    const result = await checkInboundAccessControl({
+      cfg: cfg as never,
+      accountId: "default",
+      from: "+15550001111",
+      selfE164: "+15550009999",
+      senderE164: "+15550001111",
+      group: false,
+      pushName: "Owner",
+      isFromMe: false,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550001111@s.whatsapp.net",
+    });
+
+    expectAccepted(result);
+    expect(result.admission.sender.isOwner).toBe(true);
+    expect(readAllowFromStoreMock).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
   it("keeps blocked results on the legacy flat access shape", async () => {
     const cfg = {
       channels: {
@@ -206,6 +305,7 @@ describe("checkInboundAccessControl admission contract", () => {
       sender: {
         id: "+15550001111",
         isSamePhone: false,
+        isOwner: true,
       },
       ingress: {
         admission: "dispatch",

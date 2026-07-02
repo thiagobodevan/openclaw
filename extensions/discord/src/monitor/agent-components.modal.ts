@@ -12,7 +12,10 @@ import {
   resolveInteractionCustomId,
   resolveModalFieldValues,
 } from "./agent-components-helpers.js";
-import { dispatchDiscordComponentEvent } from "./agent-components.dispatch.js";
+import {
+  applyMatchingDiscordComponentRouteOverrides,
+  dispatchDiscordComponentEvent,
+} from "./agent-components.dispatch.js";
 import { dispatchPluginDiscordInteractiveEvent } from "./agent-components.plugin-interactive.js";
 
 export class DiscordComponentModal extends Modal {
@@ -42,22 +45,6 @@ export class DiscordComponentModal extends Modal {
       return;
     }
 
-    const modalEntry = await resolveDiscordModalEntryWithPersistence({
-      id: modalId,
-      consume: false,
-    });
-    if (!modalEntry) {
-      try {
-        await interaction.reply({
-          content: "This form has expired.",
-          ephemeral: true,
-        });
-      } catch {
-        // Interaction may have expired
-      }
-      return;
-    }
-
     const unauthorizedReply = "You are not authorized to use this form.";
     const authorized = await resolveAuthorizedComponentInteraction({
       ctx: this.ctx,
@@ -76,9 +63,37 @@ export class DiscordComponentModal extends Modal {
       guildInfo,
       allowNameMatching,
       commandAuthorized,
+      admittedRoute,
       user,
       replyOpts,
     } = authorized;
+
+    const modalEntry = await resolveDiscordModalEntryWithPersistence({
+      id: modalId,
+      consume: false,
+    });
+    if (!modalEntry) {
+      try {
+        await interaction.reply({
+          content: "This form has expired.",
+          ephemeral: true,
+        });
+      } catch {
+        // Interaction may have expired
+      }
+      return;
+    }
+    if (!applyMatchingDiscordComponentRouteOverrides(admittedRoute.route, modalEntry)) {
+      try {
+        await interaction.reply({
+          content: "This form is no longer valid.",
+          ephemeral: true,
+        });
+      } catch {
+        // Interaction may have expired
+      }
+      return;
+    }
 
     const modalAllowed = await ensureComponentUserAllowed({
       entry: {
@@ -151,6 +166,7 @@ export class DiscordComponentModal extends Modal {
       guildInfo,
       eventText,
       replyToId: consumed.messageId,
+      admittedRoute,
       routeOverrides: {
         sessionKey: consumed.sessionKey,
         agentId: consumed.agentId,

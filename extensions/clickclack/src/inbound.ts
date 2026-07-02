@@ -3,6 +3,7 @@
  * routes resulting outbound text back to ClickClack.
  */
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import { resolveClickClackInboundAccess, type ClickClackInboundAccess } from "./access.js";
 import { sendClickClackText } from "./outbound.js";
 import { getClickClackRuntime } from "./runtime.js";
@@ -34,6 +35,7 @@ function resolveAccountAgentRoute(params: {
   return {
     ...route,
     agentId,
+    matchedBy: "config.agent" as const,
     sessionKey: runtime.channel.routing.buildAgentSessionKey({
       agentId,
       channel: CHANNEL_ID,
@@ -115,6 +117,27 @@ export async function handleClickClackInbound(params: {
     target,
     isDirect,
   });
+  const chatType = isDirect ? "direct" : "group";
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: params.config as OpenClawConfig,
+    ctx: {
+      AgentId: route.agentId,
+      AgentRouteMatchedBy: route.matchedBy,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: chatType,
+      GroupChannel: isDirect ? undefined : message.channel_id,
+      SenderId: message.author_id,
+      From: target,
+      To: target,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      CommandAuthorized: access.commandAuthorized,
+    },
+  });
+  if (!identityDecision.allowed) {
+    return;
+  }
   if (params.account.replyMode === "model") {
     await dispatchModelReply({
       account: params.account,
@@ -153,8 +176,10 @@ export async function handleClickClackInbound(params: {
     From: target,
     To: target,
     SessionKey: route.sessionKey,
+    AgentId: route.agentId,
+    AgentRouteMatchedBy: route.matchedBy,
     AccountId: route.accountId ?? params.account.accountId,
-    ChatType: isDirect ? "direct" : "group",
+    ChatType: chatType,
     WasMentioned: isDirect ? undefined : true,
     ConversationLabel: isDirect ? senderName : message.channel_id,
     GroupChannel: message.channel_id,
@@ -210,6 +235,7 @@ export async function handleClickClackInbound(params: {
       },
     },
     replyPipeline: {},
+    replyOptions: { identityContractVersion: 1 },
     record: {
       onRecordError: (error) => {
         throw error instanceof Error

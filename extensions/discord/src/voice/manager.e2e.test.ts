@@ -14,6 +14,10 @@ const {
   createAudioPlayerMock,
   createAudioResourceMock,
   resolveAgentRouteMock,
+  resolveRuntimeConversationBindingRouteMock,
+  touchRuntimeConversationBindingRouteMock,
+  resolveConfiguredBindingRouteMock,
+  ensureConfiguredBindingRouteReadyMock,
   agentCommandMock,
   resolveRealtimeBootstrapContextInstructionsMock,
   transcribeAudioFileMock,
@@ -129,7 +133,25 @@ const {
       play: vi.fn(),
       state: { status: "idle" },
     })),
-    resolveAgentRouteMock: vi.fn(() => ({ agentId: "agent-1", sessionKey: "discord:g1:c1" })),
+    resolveAgentRouteMock: vi.fn(() => ({
+      agentId: "agent-1",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "discord:g1:c1",
+      mainSessionKey: "agent:agent-1:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.guild",
+    })),
+    resolveRuntimeConversationBindingRouteMock: vi.fn((params: { route: unknown }) => ({
+      bindingRecord: null,
+      route: params.route,
+    })),
+    touchRuntimeConversationBindingRouteMock: vi.fn(),
+    resolveConfiguredBindingRouteMock: vi.fn((params: { route: unknown }) => ({
+      bindingResolution: null,
+      route: params.route,
+    })),
+    ensureConfiguredBindingRouteReadyMock: vi.fn(async () => ({ ok: true as const })),
     agentCommandMock: vi.fn(
       async (
         _opts?: unknown,
@@ -199,6 +221,19 @@ vi.mock("openclaw/plugin-sdk/routing", async () => {
   return {
     ...actual,
     resolveAgentRoute: resolveAgentRouteMock,
+  };
+});
+
+vi.mock("openclaw/plugin-sdk/conversation-binding-runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("openclaw/plugin-sdk/conversation-binding-runtime")
+  >("openclaw/plugin-sdk/conversation-binding-runtime");
+  return {
+    ...actual,
+    ensureConfiguredBindingRouteReady: ensureConfiguredBindingRouteReadyMock,
+    resolveConfiguredBindingRoute: resolveConfiguredBindingRouteMock,
+    lookupRuntimeConversationBindingRoute: resolveRuntimeConversationBindingRouteMock,
+    touchRuntimeConversationBindingRoute: touchRuntimeConversationBindingRouteMock,
   };
 });
 
@@ -350,7 +385,29 @@ describe("DiscordVoiceManager", () => {
     entersStateMock.mockResolvedValue(undefined);
     createAudioPlayerMock.mockClear();
     resolveAgentRouteMock.mockReset();
-    resolveAgentRouteMock.mockReturnValue({ agentId: "agent-1", sessionKey: "discord:g1:c1" });
+    resolveAgentRouteMock.mockReturnValue({
+      agentId: "agent-1",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "discord:g1:c1",
+      mainSessionKey: "agent:agent-1:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.guild",
+    });
+    resolveRuntimeConversationBindingRouteMock
+      .mockReset()
+      .mockImplementation((params: { route: unknown }) => ({
+        bindingRecord: null,
+        route: params.route,
+      }));
+    touchRuntimeConversationBindingRouteMock.mockReset();
+    resolveConfiguredBindingRouteMock
+      .mockReset()
+      .mockImplementation((params: { route: unknown }) => ({
+        bindingResolution: null,
+        route: params.route,
+      }));
+    ensureConfiguredBindingRouteReadyMock.mockReset().mockResolvedValue({ ok: true });
     agentCommandMock.mockReset();
     agentCommandMock.mockResolvedValue({ payloads: [] });
     resolveRealtimeBootstrapContextInstructionsMock.mockReset();
@@ -586,6 +643,173 @@ describe("DiscordVoiceManager", () => {
     expect(joinVoiceChannelMock).not.toHaveBeenCalled();
   });
 
+  it("rejects an unbound shared route before opening a voice connection", async () => {
+    resolveAgentRouteMock.mockReturnValue({
+      agentId: "personal",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "discord:g1:c1",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session",
+      matchedBy: "default",
+    });
+    const manager = createManager({ voice: { enabled: true, mode: "agent-proxy" } }, undefined, {
+      agents: { list: [{ id: "personal", default: true }] },
+    });
+
+    const result = await manager.join({ guildId: "g1", channelId: "1001" });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("not bound to a shared service agent");
+    expect(joinVoiceChannelMock).not.toHaveBeenCalled();
+    expect(createRealtimeVoiceBridgeSessionMock).not.toHaveBeenCalled();
+    expect(controlRealtimeVoiceAgentRunMock).not.toHaveBeenCalled();
+  });
+
+  it("readies and persists a configured service route before opening a voice connection", async () => {
+    resolveAgentRouteMock.mockReturnValue({
+      agentId: "personal",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:personal:discord:channel:1001",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session",
+      matchedBy: "default",
+    });
+    const serviceRoute = {
+      agentId: "team-ops",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:team-ops:acp:binding:discord:default:1001",
+      mainSessionKey: "agent:team-ops:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    const bindingResolution = {
+      statefulTarget: {
+        agentId: "team-ops",
+        sessionKey: serviceRoute.sessionKey,
+      },
+    };
+    resolveConfiguredBindingRouteMock.mockReturnValue({
+      bindingResolution,
+      boundAgentId: "team-ops",
+      boundSessionKey: serviceRoute.sessionKey,
+      route: serviceRoute,
+    } as never);
+    const manager = createManager({ voice: { enabled: true, mode: "agent-proxy" } }, undefined, {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-ops" }] },
+    });
+
+    const result = await manager.join({ guildId: "g1", channelId: "1001" });
+
+    expect(result.ok).toBe(true);
+    expect(resolveConfiguredBindingRouteMock).toHaveBeenCalledWith({
+      cfg: expect.any(Object),
+      route: expect.objectContaining({ agentId: "personal" }),
+      conversation: {
+        channel: "discord",
+        accountId: "default",
+        conversationId: "1001",
+      },
+    });
+    expect(ensureConfiguredBindingRouteReadyMock).toHaveBeenCalledWith({
+      cfg: expect.any(Object),
+      bindingResolution,
+    });
+    expect(ensureConfiguredBindingRouteReadyMock.mock.invocationCallOrder[0]).toBeLessThan(
+      joinVoiceChannelMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(getSessionEntry(manager)).toMatchObject({ route: serviceRoute });
+  });
+
+  it("rejects an unavailable configured service route before opening a voice connection", async () => {
+    const serviceRoute = {
+      agentId: "team-ops",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:team-ops:acp:binding:discord:default:1001",
+      mainSessionKey: "agent:team-ops:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    resolveConfiguredBindingRouteMock.mockReturnValue({
+      bindingResolution: {
+        statefulTarget: { agentId: "team-ops", sessionKey: serviceRoute.sessionKey },
+      },
+      route: serviceRoute,
+    } as never);
+    ensureConfiguredBindingRouteReadyMock.mockResolvedValue({
+      ok: false,
+      error: "target unavailable",
+    });
+    const manager = createManager({ voice: { enabled: true, mode: "agent-proxy" } }, undefined, {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-ops" }] },
+    });
+
+    const result = await manager.join({ guildId: "g1", channelId: "1001" });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("not bound to a shared service agent");
+    expect(joinVoiceChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("persists an explicit runtime service route for voice turns", async () => {
+    const serviceRoute = {
+      agentId: "team-ops",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:team-ops:discord:channel:1001",
+      mainSessionKey: "agent:team-ops:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    resolveRuntimeConversationBindingRouteMock.mockReturnValue({
+      bindingRecord: {
+        bindingId: "discord:default:1001",
+        targetSessionKey: serviceRoute.sessionKey,
+        metadata: { boundBy: "operator" },
+      },
+      boundAgentId: "team-ops",
+      boundSessionKey: serviceRoute.sessionKey,
+      route: serviceRoute,
+    } as never);
+    const manager = createManager({ voice: { enabled: true, mode: "agent-proxy" } }, undefined, {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-ops" }] },
+    });
+
+    const result = await manager.join({ guildId: "g1", channelId: "1001" });
+
+    expect(result.ok).toBe(true);
+    expect(resolveConfiguredBindingRouteMock).not.toHaveBeenCalled();
+    expect(ensureConfiguredBindingRouteReadyMock).not.toHaveBeenCalled();
+    expect(getSessionEntry(manager)).toMatchObject({ route: serviceRoute });
+  });
+
+  it("fails closed on a plugin-owned voice binding without touching its lease", async () => {
+    resolveRuntimeConversationBindingRouteMock.mockReturnValue({
+      bindingRecord: {
+        bindingId: "plugin-binding-1",
+        targetSessionKey: "plugin-binding:thread-1",
+        metadata: {
+          pluginBindingOwner: "plugin",
+          pluginId: "team-runtime",
+          pluginRoot: "/tmp/team-runtime",
+        },
+      },
+      route: resolveAgentRouteMock(),
+    } as never);
+    const manager = createManager({ voice: { enabled: true, mode: "agent-proxy" } });
+
+    const result = await manager.join({ guildId: "g1", channelId: "1001" });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("plugin-owned conversation binding");
+    expect(resolveConfiguredBindingRouteMock).not.toHaveBeenCalled();
+    expect(touchRuntimeConversationBindingRouteMock).not.toHaveBeenCalled();
+    expect(joinVoiceChannelMock).not.toHaveBeenCalled();
+  });
+
   type ProcessSegmentInvoker = {
     processSegment: (params: {
       entry: unknown;
@@ -598,14 +822,24 @@ describe("DiscordVoiceManager", () => {
   const processVoiceSegment = async (
     manager: InstanceType<typeof managerModule.DiscordVoiceManager>,
     userId: string,
-  ) =>
+  ) => {
+    const route = {
+      agentId: "agent-1",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "discord:g1:1001",
+      mainSessionKey: "agent:agent-1:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.guild" as const,
+    };
+    resolveAgentRouteMock.mockReturnValue(route);
     await (manager as unknown as ProcessSegmentInvoker).processSegment({
       entry: {
         guildId: "g1",
         channelId: "1001",
         sessionChannelId: "1001",
         voiceSessionKey: "discord:g1:1001",
-        route: { sessionKey: "discord:g1:1001", agentId: "agent-1" },
+        route,
         connection: createConnectionMock(),
         player: createAudioPlayerMock(),
         playbackQueue: Promise.resolve(),
@@ -617,6 +851,7 @@ describe("DiscordVoiceManager", () => {
       userId,
       durationSeconds: 1.2,
     });
+  };
 
   it("keeps the new session when an old disconnected handler fires", async () => {
     const oldConnection = createConnectionMock();
@@ -2973,7 +3208,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -3041,7 +3279,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -3100,7 +3341,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -3172,7 +3416,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -3225,7 +3472,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -3275,7 +3525,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Claw Bot Helper" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Claw Bot Helper" } },
+          ],
         },
       },
     );
@@ -3329,7 +3582,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -3465,7 +3721,10 @@ describe("DiscordVoiceManager", () => {
       undefined,
       {
         agents: {
-          list: [{ id: "agent-1", identity: { name: "Molty" } }],
+          list: [
+            { id: "personal", default: true },
+            { id: "agent-1", identity: { name: "Molty" } },
+          ],
         },
       },
     );
@@ -4599,32 +4858,46 @@ describe("DiscordVoiceManager", () => {
     ]);
   });
 
-  it("adds default bootstrap profile context to realtime voice instructions", async () => {
+  it("adds bound service-agent bootstrap context to realtime voice instructions", async () => {
+    const cfg = {
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "team-ops" }],
+      },
+    };
     resolveAgentRouteMock.mockReturnValue({
-      agentId: "main",
-      sessionKey: "agent:main:discord:channel:1001",
+      agentId: "team-ops",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:team-ops:discord:channel:1001",
+      mainSessionKey: "agent:team-ops:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.guild",
     });
     resolveRealtimeBootstrapContextInstructionsMock.mockResolvedValue(
       "OpenClaw realtime voice profile context:\n\n### IDENTITY.md\nName: Wilfred",
     );
-    const manager = createManager({
-      groupPolicy: "open",
-      voice: {
-        enabled: true,
-        mode: "bidi",
-        realtime: {
-          provider: "openai",
-          consultPolicy: "always",
+    const manager = createManager(
+      {
+        groupPolicy: "open",
+        voice: {
+          enabled: true,
+          mode: "bidi",
+          realtime: {
+            provider: "openai",
+            consultPolicy: "always",
+          },
         },
       },
-    });
+      undefined,
+      cfg,
+    );
 
     await manager.join({ guildId: "g1", channelId: "1001" });
 
     expect(resolveRealtimeBootstrapContextInstructionsMock).toHaveBeenCalledWith({
-      config: {},
-      agentId: "main",
-      sessionKey: "agent:main:discord:channel:1001",
+      config: cfg,
+      agentId: "team-ops",
+      sessionKey: "agent:team-ops:discord:channel:1001",
       files: undefined,
       warn: expect.any(Function),
     });
@@ -4644,30 +4917,44 @@ describe("DiscordVoiceManager", () => {
       if (params?.peer?.id === "maintainers") {
         return {
           agentId: "main",
+          channel: "discord",
+          accountId: "default",
           sessionKey: "agent:main:discord:channel:maintainers",
+          mainSessionKey: "agent:main:main",
+          lastRoutePolicy: "session",
+          matchedBy: "binding.channel",
         };
       }
       return {
         agentId: "main",
+        channel: "discord",
+        accountId: "default",
         sessionKey: "agent:main:discord:channel:1001",
+        mainSessionKey: "agent:main:main",
+        lastRoutePolicy: "session",
+        matchedBy: "binding.channel",
       };
     });
     agentCommandMock.mockResolvedValueOnce({ payloads: [{ text: "maintainer answer" }] });
-    const manager = createManager({
-      groupPolicy: "open",
-      voice: {
-        enabled: true,
-        mode: "bidi",
-        agentSession: {
-          mode: "target",
-          target: "channel:maintainers",
-        },
-        realtime: {
-          provider: "openai",
-          consultPolicy: "always",
+    const manager = createManager(
+      {
+        groupPolicy: "open",
+        voice: {
+          enabled: true,
+          mode: "bidi",
+          agentSession: {
+            mode: "target",
+            target: "channel:maintainers",
+          },
+          realtime: {
+            provider: "openai",
+            consultPolicy: "always",
+          },
         },
       },
-    });
+      undefined,
+      { agents: { list: [{ id: "personal", default: true }, { id: "main" }] } },
+    );
 
     await manager.join({ guildId: "g1", channelId: "1001" });
     const entry = getSessionEntry(manager) as {
@@ -5380,6 +5667,16 @@ describe("DiscordVoiceManager", () => {
         >[0]["speakerContext"];
       }
     ).speakerContext;
+    const route = {
+      agentId: "agent-1",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "discord:g1:1001",
+      mainSessionKey: "agent:agent-1:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.guild" as const,
+    };
+    resolveAgentRouteMock.mockReturnValue(route);
 
     await segmentModule.processDiscordVoiceSegment({
       entry: {
@@ -5387,7 +5684,7 @@ describe("DiscordVoiceManager", () => {
         channelId: "1001",
         sessionChannelId: "1001",
         voiceSessionKey: "discord:g1:1001",
-        route: { sessionKey: "discord:g1:1001", agentId: "agent-1" },
+        route,
         connection: createConnectionMock(),
         player: createAudioPlayerMock(),
         playbackQueue: Promise.resolve(),

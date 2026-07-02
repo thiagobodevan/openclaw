@@ -4,9 +4,9 @@ import type { SignalEventHandlerDeps, SignalReactionMessage } from "./event-hand
 export function createBaseSignalEventHandlerDeps(
   overrides: Partial<SignalEventHandlerDeps> = {},
 ): SignalEventHandlerDeps {
+  const cfg = overrides.cfg ?? {};
   return {
     runtime: { log: () => {}, error: () => {} } as any,
-    cfg: {},
     baseUrl: "http://localhost",
     accountId: "default",
     historyLimit: 5,
@@ -31,6 +31,10 @@ export function createBaseSignalEventHandlerDeps(
     shouldEmitSignalReactionNotification: () => false,
     buildSignalReactionSystemEventText: () => "reaction",
     ...overrides,
+    cfg: {
+      ...cfg,
+      bindings: cfg.bindings ?? [{ agentId: "signal-service", match: { channel: "signal" } }],
+    },
   };
 }
 

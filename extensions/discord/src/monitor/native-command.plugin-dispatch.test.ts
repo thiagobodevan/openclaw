@@ -1,8 +1,16 @@
 // Discord tests cover native command.plugin dispatch plugin behavior.
 import { ChannelType } from "discord-api-types/v10";
-import type { NativeCommandSpec } from "openclaw/plugin-sdk/command-auth-native";
+import {
+  listNativeCommandSpecs,
+  type NativeCommandSpec,
+} from "openclaw/plugin-sdk/command-auth-native";
 import { resolveDirectStatusReplyForSession } from "openclaw/plugin-sdk/command-status-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import {
+  ensureConfiguredBindingRouteReady,
+  touchRuntimeConversationBindingRoute,
+} from "openclaw/plugin-sdk/conversation-binding-runtime";
+import * as nativeCommandRegistryModule from "openclaw/plugin-sdk/native-command-registry";
 import {
   clearPluginCommands,
   executePluginCommand,
@@ -14,6 +22,7 @@ import {
   setActivePluginRegistry,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { dispatchReplyWithDispatcher } from "openclaw/plugin-sdk/reply-dispatch-runtime";
+import { EXTERNAL_CONVERSATION_IDENTITY_DENIAL } from "openclaw/plugin-sdk/routing";
 import {
   clearRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
@@ -21,6 +30,7 @@ import {
 import { getSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineThrowingDiscordChannelGetter } from "../test-support/partial-channel.js";
+import { handleDiscordDmCommandDecision } from "./dm-command-decision.js";
 import { resolveDiscordNativeInteractionRouteState } from "./native-command-route.js";
 import {
   createMockCommandInteraction as createInteraction,
@@ -35,11 +45,15 @@ const runtimeModuleMocks = vi.hoisted(() => ({
   executePluginCommand: vi.fn(),
   dispatchReplyWithDispatcher: vi.fn(),
   resolveDirectStatusReplyForSession: vi.fn(),
+  ensureConfiguredBindingRouteReady: vi.fn(),
+  touchRuntimeConversationBindingRoute: vi.fn(),
+  handleDiscordDmCommandDecision: vi.fn(),
   getSessionEntry: vi.fn(),
 }));
 
 function createConfig(): OpenClawConfig {
   return {
+    agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
     channels: {
       discord: {
         dm: { enabled: true, policy: "open", allowFrom: ["*"] },
@@ -122,9 +136,15 @@ function createConfiguredAcpCase(params: {
 }
 
 async function createNativeCommand(cfg: OpenClawConfig, commandSpec: NativeCommandSpec) {
+  const identityReadyConfig = cfg.agents
+    ? cfg
+    : {
+        ...cfg,
+        agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
+      };
   return createDiscordNativeCommand({
     command: commandSpec,
-    cfg,
+    cfg: identityReadyConfig,
     discordConfig: cfg.channels?.discord ?? {},
     accountId: "default",
     sessionPrefix: "discord:slash",
@@ -137,7 +157,9 @@ function createConfiguredRouteState(params: {
   sessionKey: string;
   agentId?: string;
   accountId?: string;
+  matchedBy?: "binding.channel" | "binding.peer";
 }) {
+  const matchedBy = params.matchedBy ?? "binding.channel";
   return {
     route: {
       agentId: params.agentId ?? "main",
@@ -146,7 +168,7 @@ function createConfiguredRouteState(params: {
       sessionKey: params.sessionKey,
       mainSessionKey: `agent:${params.agentId ?? "main"}:main`,
       lastRoutePolicy: "session",
-      matchedBy: "binding.channel",
+      matchedBy,
     },
     effectiveRoute: {
       agentId: params.agentId ?? "main",
@@ -155,11 +177,17 @@ function createConfiguredRouteState(params: {
       sessionKey: params.sessionKey,
       mainSessionKey: `agent:${params.agentId ?? "main"}:main`,
       lastRoutePolicy: "session",
-      matchedBy: "binding.channel",
+      matchedBy,
     },
     boundSessionKey: params.sessionKey,
     configuredRoute: null,
     configuredBinding: null,
+    runtimeBinding: null,
+    identityDecision: {
+      mode: "organization",
+      allowed: true,
+      reason: "bound_service_agent",
+    } as const,
     bindingReadiness: { ok: true } as const,
   } satisfies Awaited<
     ReturnType<typeof import("./native-command-route.js").resolveDiscordNativeInteractionRouteState>
@@ -193,6 +221,8 @@ function createUnboundRouteState(params: {
     boundSessionKey: undefined,
     configuredRoute: null,
     configuredBinding: null,
+    runtimeBinding: null,
+    identityDecision: { mode: "external", allowed: false, reason: "unbound_shared" } as const,
     bindingReadiness: null,
   } satisfies Awaited<
     ReturnType<typeof import("./native-command-route.js").resolveDiscordNativeInteractionRouteState>
@@ -272,19 +302,11 @@ function expectNoFollowUpContent(interaction: MockCommandInteraction, content: s
 }
 
 async function createPluginCommand(params: { cfg: OpenClawConfig; name: string }) {
-  return createDiscordNativeCommand({
-    command: {
-      name: params.name,
-      description: "Pair",
-      acceptsArgs: true,
-    } satisfies NativeCommandSpec,
-    cfg: params.cfg,
-    discordConfig: params.cfg.channels?.discord ?? {},
-    accountId: "default",
-    sessionPrefix: "discord:slash",
-    ephemeralDefault: true,
-    threadBindings: createNoopThreadBindingManager("default"),
-  });
+  return createNativeCommand(params.cfg, {
+    name: params.name,
+    description: "Pair",
+    acceptsArgs: true,
+  } satisfies NativeCommandSpec);
 }
 
 function registerPairPlugin(params?: { discordNativeName?: string }) {
@@ -415,6 +437,13 @@ describe("Discord native plugin command dispatch", () => {
     discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(
       resolveDiscordNativeInteractionRouteState,
     );
+    discordNativeCommandTesting.setEnsureConfiguredBindingRouteReady(
+      ensureConfiguredBindingRouteReady,
+    );
+    discordNativeCommandTesting.setTouchRuntimeConversationBindingRoute(
+      touchRuntimeConversationBindingRoute,
+    );
+    discordNativeCommandTesting.setHandleDiscordDmCommandDecision(handleDiscordDmCommandDecision);
     discordNativeCommandTesting.setGetSessionEntry(getSessionEntry);
   });
 
@@ -439,6 +468,11 @@ describe("Discord native plugin command dispatch", () => {
     runtimeModuleMocks.resolveDirectStatusReplyForSession.mockResolvedValue({
       text: "status reply",
     });
+    runtimeModuleMocks.ensureConfiguredBindingRouteReady.mockReset();
+    runtimeModuleMocks.ensureConfiguredBindingRouteReady.mockResolvedValue({ ok: true });
+    runtimeModuleMocks.touchRuntimeConversationBindingRoute.mockReset();
+    runtimeModuleMocks.handleDiscordDmCommandDecision.mockReset();
+    runtimeModuleMocks.handleDiscordDmCommandDecision.mockResolvedValue(false);
     runtimeModuleMocks.getSessionEntry.mockReset();
     runtimeModuleMocks.getSessionEntry.mockReturnValue(undefined);
     discordNativeCommandTesting.setMatchPluginCommand(
@@ -453,12 +487,22 @@ describe("Discord native plugin command dispatch", () => {
     discordNativeCommandTesting.setResolveDirectStatusReplyForSession(
       runtimeModuleMocks.resolveDirectStatusReplyForSession as typeof resolveDirectStatusReplyForSession,
     );
+    discordNativeCommandTesting.setEnsureConfiguredBindingRouteReady(
+      runtimeModuleMocks.ensureConfiguredBindingRouteReady as typeof ensureConfiguredBindingRouteReady,
+    );
+    discordNativeCommandTesting.setTouchRuntimeConversationBindingRoute(
+      runtimeModuleMocks.touchRuntimeConversationBindingRoute as typeof touchRuntimeConversationBindingRoute,
+    );
+    discordNativeCommandTesting.setHandleDiscordDmCommandDecision(
+      runtimeModuleMocks.handleDiscordDmCommandDecision as typeof handleDiscordDmCommandDecision,
+    );
     discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async (params) =>
-      createUnboundRouteState({
+      createConfiguredRouteState({
         sessionKey: params.isDirectMessage
           ? `agent:main:discord:dm:${params.directUserId ?? "owner"}`
           : `agent:main:discord:channel:${params.conversationId}`,
         accountId: params.accountId,
+        matchedBy: params.isDirectMessage ? "binding.peer" : "binding.channel",
       }),
     );
     discordNativeCommandTesting.setGetSessionEntry(
@@ -480,7 +524,7 @@ describe("Discord native plugin command dispatch", () => {
       session: { dmScope: "per-channel-peer" },
     } as OpenClawConfig;
     const resolveRouteState = vi.fn(async (params: { cfg: OpenClawConfig }) =>
-      createUnboundRouteState({
+      createConfiguredRouteState({
         sessionKey:
           params.cfg.session?.dmScope === "per-channel-peer"
             ? "agent:main:discord:direct:owner"
@@ -752,6 +796,250 @@ describe("Discord native plugin command dispatch", () => {
       ephemeral: true,
     });
     expect(interaction.reply).not.toHaveBeenCalled();
+  });
+
+  it("blocks plugin commands in an unbound shared room before execution", async () => {
+    const cfg = {
+      commands: { useAccessGroups: false },
+      agents: { list: [{ id: "main", default: true }, { id: "team-service" }] },
+      channels: {
+        discord: {
+          guilds: {
+            "345678901234567890": {
+              channels: {
+                "234567890123456789": { enabled: true, requireMention: false },
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const interaction = createInteraction({
+      channelType: ChannelType.GuildText,
+      channelId: "234567890123456789",
+      guildId: "345678901234567890",
+      guildName: "Test Guild",
+    });
+    interaction.options.getString.mockReturnValue("now");
+    registerPairPlugin();
+    const command = await createPluginCommand({ cfg, name: "pair" });
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async (params) =>
+      createUnboundRouteState({
+        sessionKey: `agent:main:discord:channel:${params.conversationId}`,
+        accountId: params.accountId,
+      }),
+    );
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(runtimeModuleMocks.executePluginCommand).not.toHaveBeenCalled();
+    expectFollowUpFields(interaction, {
+      content: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+      ephemeral: true,
+    });
+  });
+
+  it("blocks plugin commands before session access when a configured binding is unavailable", async () => {
+    const channelId = "234567890123456789";
+    const { cfg, interaction } = createConfiguredAcpCase({
+      channelType: ChannelType.GuildText,
+      channelId,
+      peerKind: "channel",
+      guildId: "345678901234567890",
+      guildName: "Test Guild",
+    });
+    registerPairPlugin();
+    const command = await createPluginCommand({ cfg, name: "pair" });
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async () => ({
+      ...createConfiguredRouteState({
+        sessionKey: "agent:codex:acp:binding:discord:default:unavailable",
+        agentId: "codex",
+      }),
+      configuredBinding: {
+        record: {
+          conversation: {
+            channel: "discord",
+            accountId: "default",
+            conversationId: channelId,
+          },
+        },
+      } as never,
+      runtimeBinding: null,
+      bindingReadiness: { ok: false, error: "acpx exited" },
+    }));
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(runtimeModuleMocks.getSessionEntry).not.toHaveBeenCalled();
+    expect(runtimeModuleMocks.executePluginCommand).not.toHaveBeenCalled();
+    expectFollowUpFields(interaction, {
+      content: "Configured ACP binding is unavailable right now. Please try again.",
+    });
+  });
+
+  it("stops dynamic command menus before choice resolution when identity is denied", async () => {
+    const channelId = "234567890123456789";
+    const guildId = "345678901234567890";
+    const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      commands: {
+        allowFrom: { discord: ["user:owner"] },
+      },
+      channels: {
+        discord: {
+          groupPolicy: "allowlist",
+          guilds: {
+            [guildId]: {
+              channels: { [channelId]: { enabled: true, requireMention: false } },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const thinkCommand = listNativeCommandSpecs({ provider: "discord" }).find(
+      (command) => command.name === "think",
+    );
+    if (!thinkCommand) {
+      throw new Error("missing native think command");
+    }
+    const interaction = createInteraction({
+      channelType: ChannelType.GuildText,
+      channelId,
+      guildId,
+      guildName: "Test Guild",
+    });
+    const menuSpy = vi.spyOn(nativeCommandRegistryModule, "resolveCommandArgMenu");
+    const command = await createNativeCommand(cfg, thinkCommand);
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async () =>
+      createUnboundRouteState({
+        sessionKey: `agent:personal:discord:channel:${channelId}`,
+        agentId: "personal",
+      }),
+    );
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(menuSpy).not.toHaveBeenCalled();
+    expect(runtimeModuleMocks.dispatchReplyWithDispatcher).not.toHaveBeenCalled();
+    expectFollowUpFields(interaction, {
+      content: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+      ephemeral: true,
+    });
+  });
+
+  it("denies status before reading personal session state in an unbound shared room", async () => {
+    const channelId = "234567890123456789";
+    const guildId = "345678901234567890";
+    const cfg = {
+      commands: { useAccessGroups: false },
+      agents: { list: [{ id: "main", default: true }] },
+      channels: {
+        discord: {
+          guilds: {
+            [guildId]: {
+              channels: { [channelId]: { enabled: true, requireMention: false } },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const interaction = createInteraction({
+      channelType: ChannelType.GuildText,
+      channelId,
+      guildId,
+      guildName: "Test Guild",
+    });
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async () => ({
+      ...createUnboundRouteState({
+        sessionKey: `agent:main:discord:channel:${channelId}`,
+      }),
+      runtimeBinding: { bindingId: "denied-binding" } as never,
+    }));
+    runtimeModuleMocks.matchPluginCommand.mockReturnValue(null);
+    const command = await createStatusCommand(cfg);
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(runtimeModuleMocks.resolveDirectStatusReplyForSession).not.toHaveBeenCalled();
+    expect(runtimeModuleMocks.touchRuntimeConversationBindingRoute).not.toHaveBeenCalled();
+    expectFollowUpFields(interaction, {
+      content: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+      ephemeral: true,
+    });
+  });
+
+  it("denies an untrusted personal DM before creating pairing state", async () => {
+    const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      channels: {
+        discord: { dm: { enabled: true, policy: "pairing", allowFrom: [] } },
+      },
+    } as OpenClawConfig;
+    const interaction = createInteraction({ channelType: ChannelType.DM, channelId: "dm-1" });
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async () => ({
+      ...createUnboundRouteState({
+        sessionKey: "agent:personal:discord:direct:owner",
+        agentId: "personal",
+      }),
+      identityDecision: {
+        mode: "external",
+        allowed: false,
+        reason: "untrusted_direct",
+      },
+    }));
+    const command = await createStatusCommand(cfg);
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(runtimeModuleMocks.handleDiscordDmCommandDecision).not.toHaveBeenCalled();
+    expectFollowUpFields(interaction, {
+      content: EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+      ephemeral: true,
+    });
+  });
+
+  it("keeps pairing available for a DM explicitly routed to a service agent", async () => {
+    const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      channels: {
+        discord: { dm: { enabled: true, policy: "pairing", allowFrom: [] } },
+      },
+    } as OpenClawConfig;
+    const interaction = createInteraction({ channelType: ChannelType.DM, channelId: "dm-1" });
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async () =>
+      createConfiguredRouteState({
+        sessionKey: "agent:team-service:discord:direct:owner",
+        agentId: "team-service",
+        matchedBy: "binding.peer",
+      }),
+    );
+    const command = await createStatusCommand(cfg);
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(runtimeModuleMocks.handleDiscordDmCommandDecision).toHaveBeenCalledOnce();
+    expect(runtimeModuleMocks.resolveDirectStatusReplyForSession).not.toHaveBeenCalled();
+  });
+
+  it("touches an admitted runtime binding exactly once after sender authorization", async () => {
+    const runtimeBinding = { bindingId: "service-binding" } as never;
+    const interaction = createInteraction({ channelType: ChannelType.DM, channelId: "dm-1" });
+    discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(async () => ({
+      ...createConfiguredRouteState({
+        sessionKey: "agent:main:discord:direct:owner",
+        agentId: "main",
+        matchedBy: "binding.peer",
+      }),
+      runtimeBinding,
+    }));
+    const command = await createStatusCommand(createConfig());
+
+    await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
+
+    expect(runtimeModuleMocks.touchRuntimeConversationBindingRoute).toHaveBeenCalledOnce();
+    expect(runtimeModuleMocks.touchRuntimeConversationBindingRoute).toHaveBeenCalledWith({
+      bindingRecord: runtimeBinding,
+    });
   });
 
   it("ignores non-Discord generic command owners when authorizing guild plugin commands", async () => {
@@ -1293,7 +1581,13 @@ describe("Discord native plugin command dispatch", () => {
       boundSessionKey: undefined,
       configuredRoute: null,
       configuredBinding: null,
+      runtimeBinding: null,
       bindingReadiness: null,
+      identityDecision: {
+        mode: "organization",
+        allowed: true,
+        reason: "bound_service_agent",
+      },
     }));
 
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
@@ -1334,12 +1628,22 @@ describe("Discord native plugin command dispatch", () => {
       guildId: "1459246755253325866",
       guildName: "Ops",
     });
-    const resolveRouteState = vi.fn(async () =>
-      createConfiguredRouteState({
+    const resolveRouteState = vi.fn(async () => ({
+      ...createConfiguredRouteState({
         sessionKey: "agent:claude:acp:binding:discord:default:9373ab192b2317f4",
         agentId: "claude",
       }),
-    );
+      configuredBinding: {
+        record: {
+          conversation: {
+            channel: "discord",
+            accountId: "default",
+            conversationId: "1478844424791396446",
+          },
+        },
+      } as never,
+      bindingReadiness: null,
+    }));
     discordNativeCommandTesting.setResolveDiscordNativeInteractionRouteState(resolveRouteState);
     runtimeModuleMocks.matchPluginCommand.mockReturnValue(null);
     const dispatchSpy = createDispatchSpy();
@@ -1352,8 +1656,9 @@ describe("Discord native plugin command dispatch", () => {
     await (command as { run: (interaction: unknown) => Promise<void> }).run(interaction as unknown);
 
     expectSingleCallFirstArg(resolveRouteState, {
-      enforceConfiguredBindingReadiness: true,
+      enforceConfiguredBindingReadiness: false,
     });
+    expect(runtimeModuleMocks.ensureConfiguredBindingRouteReady).toHaveBeenCalledOnce();
     expect(dispatchSpy).toHaveBeenCalledTimes(1);
   });
 

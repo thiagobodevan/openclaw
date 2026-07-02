@@ -32,12 +32,12 @@ export function createMessageHandlerDeps(
   const resolveAgentRoute =
     options.resolveAgentRoute ??
     vi.fn(({ peer }: { peer: { kind: string; id: string } }) => ({
-      sessionKey: `agent:main:msteams:${peer.kind}:${peer.id}`,
-      agentId: "main",
+      sessionKey: `agent:teams-service:msteams:${peer.kind}:${peer.id}`,
+      agentId: "teams-service",
       accountId: "default",
-      mainSessionKey: "agent:main:main",
+      mainSessionKey: "agent:teams-service:main",
       lastRoutePolicy: "session" as const,
-      matchedBy: "default" as const,
+      matchedBy: "binding.channel" as const,
     }));
 
   installMSTeamsTestRuntime({

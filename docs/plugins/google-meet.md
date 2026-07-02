@@ -1075,8 +1075,9 @@ Defaults:
   `openclaw_agent_consult` for deeper answers
 - `realtime.introMessage`: short spoken readiness check when the realtime bridge
   connects; set it to `""` to join silently
-- `realtime.agentId`: optional OpenClaw agent id for
-  `openclaw_agent_consult`; defaults to `main`
+- `realtime.agentId`: dedicated non-default service agent used by `agent` mode
+  and `openclaw_agent_consult`. Required before a meeting participant can start
+  an agent consult; OpenClaw does not fall back to the personal default agent.
 
 Optional overrides:
 
@@ -1286,9 +1287,11 @@ OpenClaw sends that answer directly to the TTS runtime; in `bidi` mode, the
 realtime voice model can speak the consult result back into the meeting. It uses
 the same shared consult machinery as Voice Call.
 
-By default, consults run against the `main` agent. Set `realtime.agentId` when a
-Meet lane should consult a dedicated OpenClaw agent workspace, model defaults,
-tool policy, memory, and session history.
+Set `realtime.agentId` to a dedicated non-default service agent before enabling
+agent talk-back or `openclaw_agent_consult`. Meeting participants are a shared
+audience, so OpenClaw fails closed instead of consulting the personal default
+agent. The selected agent supplies the workspace, model defaults, tool policy,
+memory, and session history for that Meet lane.
 
 Agent-mode consults use a per-meeting `agent:<id>:subagent:google-meet:<session>`
 session key so follow-up questions keep meeting context while inheriting normal

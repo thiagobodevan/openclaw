@@ -59,6 +59,7 @@ describe("runAgentStep", () => {
           sourceReplyDeliveryMode?: string;
           lane?: string;
           inputProvenance?: { kind?: string; sourceTool?: string };
+          runContext?: { isInternal?: boolean };
         }
       | undefined;
     expect(params?.message).toContain("[Inter-session message");
@@ -68,6 +69,7 @@ describe("runAgentStep", () => {
     expect(params?.lane).toBe("nested:agent:main:subagent:child");
     expect(params?.inputProvenance?.kind).toBe("inter_session");
     expect(params?.inputProvenance?.sourceTool).toBe("sessions_send");
+    expect(params?.runContext?.isInternal).toBeUndefined();
     expect(params?.message).toContain("isUser=false");
     expect(params?.message).toContain("hello");
     expect(bundleMcpRuntimeMocks.retireSessionMcpRuntimeForSessionKey).toHaveBeenCalledWith({

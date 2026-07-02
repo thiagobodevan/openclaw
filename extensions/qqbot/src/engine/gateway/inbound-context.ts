@@ -33,7 +33,7 @@ export interface InboundGroupInfo {
 
 export interface InboundContext {
   event: QueuedMessage;
-  route: { sessionKey: string; accountId: string; agentId?: string };
+  route: ReturnType<GatewayPluginRuntime["channel"]["routing"]["resolveAgentRoute"]>;
   isGroupChat: boolean;
   peerId: string;
   qualifiedTarget: string;

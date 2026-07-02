@@ -29,6 +29,11 @@ vi.mock("./preflight-audio.runtime.js", () => ({
 function createAudioPreflightHarness(
   overrides: Parameters<typeof createMatrixHandlerTestHarness>[0] = {},
 ) {
+  const cfg = {
+    agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
+    channels: { matrix: { dm: { allowFrom: ["*"] } } },
+    ...(overrides.cfg && typeof overrides.cfg === "object" ? overrides.cfg : {}),
+  };
   return createMatrixHandlerTestHarness({
     isDirectMessage: true,
     shouldHandleTextCommands: () => true,
@@ -55,6 +60,7 @@ function createAudioPreflightHarness(
     mediaMaxBytes: 5 * 1024 * 1024,
     replyToMode: "first",
     ...overrides,
+    cfg,
   });
 }
 
@@ -84,6 +90,33 @@ describe("createMatrixRoomMessageHandler audio preflight", () => {
     sendDurableMessageBatchMock.mockReset();
     transcribeFirstAudioMock.mockReset();
     installMatrixMonitorTestRuntime();
+  });
+
+  it("denies an unbound shared personal route before media preparation", async () => {
+    const { handler, recordInboundSession } = createAudioPreflightHarness({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }] },
+        channels: { matrix: { dm: { allowFrom: ["*"] } } },
+      },
+      isDirectMessage: false,
+      roomsConfig: {
+        "!room:example.org": { requireMention: false } as never,
+      },
+    });
+
+    await handler(
+      "!room:example.org",
+      createAudioEvent({
+        msgtype: "m.audio",
+        body: "voice.ogg",
+        url: "mxc://example/voice",
+        info: { mimetype: "audio/ogg", size: 12345 },
+      }),
+    );
+
+    expect(downloadMatrixMediaMock).not.toHaveBeenCalled();
+    expect(transcribeFirstAudioMock).not.toHaveBeenCalled();
+    expect(recordInboundSession).not.toHaveBeenCalled();
   });
 
   it("transcribes inbound voice notes in DMs and surfaces the transcript as the agent body", async () => {

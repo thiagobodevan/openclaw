@@ -22,6 +22,10 @@ vi.mock("./conversation-route.js", async () => {
     ...actual,
     resolveTelegramConversationRoute: (...args: unknown[]) =>
       resolveTelegramConversationRouteMock(...args),
+    resolveTelegramConversationIdentityRoute: (...args: unknown[]) => ({
+      ...resolveTelegramConversationRouteMock(...args),
+      identity: { allowed: true, mode: "organization", reason: "test service route" },
+    }),
   };
 });
 
@@ -29,6 +33,12 @@ const threadBindingSessionRuntime = {
   ...telegramRouteTestSessionRuntime,
   recordInboundSession: recordInboundSessionForThreadBindingTest,
 } satisfies TelegramTestSessionRuntime;
+
+const serviceIdentityCfg = {
+  agents: {
+    list: [{ id: "personal", default: true }, { id: "main" }, { id: "codex-acp" }],
+  },
+};
 
 function createBoundRoute(params: {
   accountId: string;
@@ -67,6 +77,7 @@ function createForumTopicMessage() {
 async function buildForumTopicMessageContext(accountId?: string) {
   return await buildTelegramMessageContextForTest({
     ...(accountId ? { accountId } : {}),
+    cfg: serviceIdentityCfg,
     sessionRuntime: threadBindingSessionRuntime,
     message: createForumTopicMessage(),
     options: { forceWasMentioned: true },
@@ -75,9 +86,9 @@ async function buildForumTopicMessageContext(accountId?: string) {
 }
 
 function expectRouteArgs(): Record<string, unknown> {
-  expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(1);
+  expect(resolveTelegramConversationRouteMock).toHaveBeenCalled();
   return (
-    resolveTelegramConversationRouteMock.mock.calls.at(0) as unknown as [Record<string, unknown>]
+    resolveTelegramConversationRouteMock.mock.calls.at(-1) as unknown as [Record<string, unknown>]
   )[0];
 }
 
@@ -120,6 +131,7 @@ describe("buildTelegramMessageContext thread binding override", () => {
     );
 
     const ctx = await buildTelegramMessageContextForTest({
+      cfg: serviceIdentityCfg,
       sessionRuntime: threadBindingSessionRuntime,
       message: createForumTopicMessage(),
       resolveGroupActivation: () => undefined,
@@ -144,6 +156,7 @@ describe("buildTelegramMessageContext thread binding override", () => {
     );
 
     const ctx = await buildTelegramMessageContextForTest({
+      cfg: serviceIdentityCfg,
       sessionRuntime: threadBindingSessionRuntime,
       message: createForumTopicMessage(),
       resolveGroupActivation: () => undefined,
@@ -190,6 +203,7 @@ describe("buildTelegramMessageContext thread binding override", () => {
     );
 
     const ctx = await buildTelegramMessageContextForTest({
+      cfg: serviceIdentityCfg,
       sessionRuntime: threadBindingSessionRuntime,
       message: {
         message_id: 1,
@@ -220,6 +234,7 @@ describe("buildTelegramMessageContext thread binding override", () => {
     );
 
     const ctx = await buildTelegramMessageContextForTest({
+      cfg: serviceIdentityCfg,
       sessionRuntime: threadBindingSessionRuntime,
       message: {
         message_id: 1,

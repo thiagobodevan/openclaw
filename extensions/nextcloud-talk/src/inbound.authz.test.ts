@@ -25,6 +25,14 @@ function installInboundAuthzRuntime(params: {
         buildMentionRegexes: params.buildMentionRegexes,
         matchesMentionPatterns: () => false,
       },
+      routing: {
+        resolveAgentRoute: ({ accountId, peer }: { accountId: string; peer: { id: string } }) => ({
+          agentId: "nextcloud-service",
+          accountId,
+          sessionKey: `agent:nextcloud-service:nextcloud-talk:group:${peer.id}`,
+          matchedBy: "binding.peer",
+        }),
+      },
     },
   } as unknown as PluginRuntime);
 }

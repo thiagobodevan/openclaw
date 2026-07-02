@@ -60,6 +60,8 @@ export async function buildRealtimeVoiceInstructions(params: {
   config: VoiceCallConfig;
   coreConfig: CoreConfig;
   agentRuntime: CoreAgentDeps;
+  /** False when one process-wide capsule cannot represent every routed service agent. */
+  allowAgentContext?: boolean;
 }): Promise<string> {
   const { config } = params;
   const sections: string[] = [params.baseInstructions];
@@ -69,7 +71,7 @@ export async function buildRealtimeVoiceInstructions(params: {
   }
 
   const contextConfig = config.realtime.agentContext;
-  if (!contextConfig.enabled) {
+  if (!contextConfig.enabled || params.allowAgentContext === false) {
     return sections.filter(Boolean).join("\n\n");
   }
 

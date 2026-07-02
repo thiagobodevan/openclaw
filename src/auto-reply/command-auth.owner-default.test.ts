@@ -145,6 +145,27 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
     });
 
     expect(auth.senderIsOwner).toBe(true);
+    expect(auth.stableSenderIsOwner).toBe(true);
+  });
+
+  it("matches a provider-prefixed owner against the stable sender id", () => {
+    const cfg = {
+      commands: { ownerAllowFrom: ["telegram:456"] },
+    } as OpenClawConfig;
+    const ctx = {
+      Provider: "telegram",
+      Surface: "telegram",
+      From: "telegram:123",
+      SenderId: "456",
+    } as MsgContext;
+
+    const auth = resolveCommandAuthorization({
+      ctx,
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(auth.stableSenderIsOwner).toBe(true);
   });
 
   it("senderIsOwner is true when ownerAllowFrom is wildcard (*)", () => {
@@ -167,6 +188,7 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
     });
 
     expect(auth.senderIsOwner).toBe(true);
+    expect(auth.stableSenderIsOwner).toBe(false);
   });
 
   it("senderIsOwner is true for internal operator.admin sessions", () => {

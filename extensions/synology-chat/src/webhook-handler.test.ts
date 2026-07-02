@@ -602,8 +602,25 @@ describe("createWebhookHandler", () => {
     });
     const message = deliveredMessage(deliver);
     expect(message.from).toBe("123");
-    expect(message.chatUserId).toBe("456");
+    expect(message.chatUserId).toBe("123");
     expectBotReplySentTo("456");
+  });
+
+  it("does not resolve a mutable reply recipient for a turn without a reply", async () => {
+    const deliver = vi.fn().mockResolvedValue(null);
+    const handler = createWebhookHandler({
+      account: makeAccount({
+        accountId: `dangerous-denied-${Date.now()}`,
+        dangerouslyAllowNameMatching: true,
+      }),
+      deliver,
+      log,
+    });
+
+    await handler(makeReq("POST", validBody), makeRes());
+
+    expect(deliver).toHaveBeenCalledTimes(1);
+    expect(resolveLegacyWebhookNameToChatUserId).not.toHaveBeenCalled();
   });
 
   it("falls back to payload.user_id when break-glass resolution does not find a match", async () => {

@@ -2,6 +2,11 @@
 import { ChannelType } from "discord-api-types/v10";
 import { expectPairingReplyText } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { DiscordAccountConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import * as conversationBindingRuntime from "openclaw/plugin-sdk/conversation-binding-runtime";
+import {
+  registerSessionBindingAdapter,
+  testing as sessionBindingTesting,
+} from "openclaw/plugin-sdk/conversation-runtime";
 import { buildAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { peekSystemEvents, resetSystemEventsForTest } from "openclaw/plugin-sdk/test-fixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +21,12 @@ import {
   resetDiscordComponentRuntimeMocks,
   upsertPairingRequestMock,
 } from "../test-support/component-runtime.js";
-import { resolveComponentInteractionContext } from "./agent-components-helpers.js";
+import {
+  resolveAgentComponentRoute,
+  resolveAgentComponentRouteReady,
+  resolveComponentInteractionContext,
+} from "./agent-components-helpers.js";
+import { testing as componentDispatchTesting } from "./agent-components.dispatch.js";
 import {
   createAgentComponentButton,
   createAgentSelectMenu,
@@ -119,7 +129,7 @@ describe("agent components", () => {
     };
   };
 
-  async function expectSuccessfulDmButtonInteraction(params: {
+  async function expectRejectedDmButtonInteraction(params: {
     dmPolicy: "pairing" | "open";
     expectPairingStoreRead: boolean;
     allowFrom?: string[];
@@ -135,14 +145,11 @@ describe("agent components", () => {
     await button.run(interaction, { componentId: "hello" } as ComponentData);
 
     expect(defer).not.toHaveBeenCalled();
-    expect(reply).toHaveBeenCalledWith({ content: "✓", ephemeral: true });
-    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
-      "[Discord component: hello clicked by Alice#1234 (123456789)]",
-      {
-        sessionKey: defaultDmSessionKey,
-        contextKey: "discord:agent-button:dm-channel:hello:123456789",
-      },
-    );
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this button.",
+      ephemeral: true,
+    });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
     if (params.expectPairingStoreRead) {
       expect(readAllowFromStoreMock).toHaveBeenCalledWith("discord", "default");
     } else {
@@ -153,9 +160,195 @@ describe("agent components", () => {
   beforeEach(() => {
     resetDiscordComponentRuntimeMocks();
     resetSystemEventsForTest();
+    sessionBindingTesting.resetSessionBindingAdaptersForTests();
+    vi.restoreAllMocks();
   });
 
-  it("sends pairing reply when DM sender is not allowlisted", async () => {
+  it("uses the live runtime binding for shared component callbacks", () => {
+    registerSessionBindingAdapter({
+      channel: "discord",
+      accountId: "default",
+      listBySession: () => [],
+      resolveByConversation: (conversation) =>
+        conversation.conversationId === "thread-1"
+          ? {
+              bindingId: "discord:default:thread-1",
+              targetSessionKey: "agent:service:subagent:bound",
+              targetKind: "subagent",
+              conversation,
+              status: "active",
+              boundAt: 1,
+              metadata: { boundBy: "owner" },
+            }
+          : null,
+    });
+
+    const route = resolveAgentComponentRoute({
+      ctx: {
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+        },
+        accountId: "default",
+      },
+      rawGuildId: "guild-1",
+      memberRoleIds: [],
+      isDirectMessage: false,
+      isGroupDm: false,
+      userId: "user-1",
+      channelId: "thread-1",
+      parentId: "channel-1",
+    });
+
+    expect(route).toMatchObject({
+      agentId: "service",
+      sessionKey: "agent:service:subagent:bound",
+      matchedBy: "binding.channel",
+    });
+  });
+
+  it("ignores persisted component routing that no longer matches the live binding", () => {
+    const route = {
+      agentId: "personal",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:personal:discord:channel:thread-1",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "default" as const,
+    };
+
+    expect(
+      componentDispatchTesting.applyMatchingDiscordComponentRouteOverrides(route, {
+        agentId: "service",
+        sessionKey: "agent:service:subagent:stale",
+      }),
+    ).toBeNull();
+  });
+
+  it("resolves and readies configured service bindings for component callbacks", async () => {
+    const serviceRoute = {
+      agentId: "service",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:service:acp:binding:discord:default:thread-1",
+      mainSessionKey: "agent:service:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    const bindingResolution = {
+      statefulTarget: {
+        agentId: "service",
+        sessionKey: serviceRoute.sessionKey,
+      },
+    };
+    vi.spyOn(conversationBindingRuntime, "resolveConfiguredBindingRoute").mockReturnValue({
+      route: serviceRoute,
+      boundAgentId: "service",
+      boundSessionKey: serviceRoute.sessionKey,
+      bindingResolution,
+    } as never);
+    const ensureReady = vi
+      .spyOn(conversationBindingRuntime, "ensureConfiguredBindingRouteReady")
+      .mockResolvedValue({ ok: true });
+
+    const route = await resolveAgentComponentRouteReady({
+      ctx: {
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+        },
+        accountId: "default",
+      },
+      rawGuildId: "guild-1",
+      memberRoleIds: [],
+      isDirectMessage: false,
+      isGroupDm: false,
+      userId: "user-1",
+      channelId: "thread-1",
+      parentId: "channel-1",
+    });
+
+    expect(route).toEqual(serviceRoute);
+    expect(ensureReady).toHaveBeenCalledOnce();
+  });
+
+  it("rejects shared personal component bindings before preparing their runtime", async () => {
+    const personalRoute = {
+      agentId: "personal",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:personal:acp:binding:discord:default:thread-1",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    vi.spyOn(conversationBindingRuntime, "resolveConfiguredBindingRoute").mockReturnValue({
+      route: personalRoute,
+      boundAgentId: "personal",
+      boundSessionKey: personalRoute.sessionKey,
+      bindingResolution: {
+        statefulTarget: {
+          agentId: "personal",
+          sessionKey: personalRoute.sessionKey,
+        },
+      },
+    } as never);
+    const ensureReady = vi.spyOn(conversationBindingRuntime, "ensureConfiguredBindingRouteReady");
+
+    await expect(
+      resolveAgentComponentRouteReady({
+        ctx: {
+          cfg: { agents: { list: [{ id: "personal", default: true }] } },
+          accountId: "default",
+        },
+        rawGuildId: "guild-1",
+        memberRoleIds: [],
+        isDirectMessage: false,
+        isGroupDm: false,
+        userId: "user-1",
+        channelId: "thread-1",
+        parentId: "channel-1",
+      }),
+    ).resolves.toBeNull();
+    expect(ensureReady).not.toHaveBeenCalled();
+  });
+
+  it("rejects unbound shared component routes before preparing their runtime", async () => {
+    const personalRoute = {
+      agentId: "personal",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:personal:discord:channel:thread-1",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "default" as const,
+    };
+    vi.spyOn(conversationBindingRuntime, "resolveConfiguredBindingRoute").mockReturnValue({
+      route: personalRoute,
+      boundAgentId: null,
+      boundSessionKey: null,
+      bindingResolution: null,
+    } as never);
+    const ensureReady = vi.spyOn(conversationBindingRuntime, "ensureConfiguredBindingRouteReady");
+
+    await expect(
+      resolveAgentComponentRouteReady({
+        ctx: {
+          cfg: { agents: { list: [{ id: "personal", default: true }] } },
+          accountId: "default",
+        },
+        rawGuildId: "guild-1",
+        memberRoleIds: [],
+        isDirectMessage: false,
+        isGroupDm: false,
+        userId: "user-1",
+        channelId: "thread-1",
+        parentId: "channel-1",
+      }),
+    ).resolves.toBeNull();
+    expect(ensureReady).not.toHaveBeenCalled();
+  });
+
+  it("denies an unbound personal DM before reading or writing pairing state", async () => {
     const button = createAgentComponentButton({
       cfg: createCfg(),
       accountId: "default",
@@ -166,15 +359,47 @@ describe("agent components", () => {
     await button.run(interaction, { componentId: "hello" } as ComponentData);
 
     expect(defer).not.toHaveBeenCalled();
-    expect(reply).toHaveBeenCalledTimes(1);
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this button.",
+      ephemeral: true,
+    });
+    expect(peekSystemEvents(defaultDmSessionKey)).toStrictEqual([]);
+    expect(readAllowFromStoreMock).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps pairing available on an explicitly bound service DM", async () => {
+    const serviceRoute = {
+      agentId: "service",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:service:discord:direct:123456789",
+      mainSessionKey: "agent:service:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.peer" as const,
+    };
+    vi.spyOn(conversationBindingRuntime, "resolveConfiguredBindingRoute").mockReturnValue({
+      route: serviceRoute,
+      boundAgentId: "service",
+      boundSessionKey: serviceRoute.sessionKey,
+      bindingResolution: null,
+    } as never);
+    const button = createAgentComponentButton({
+      cfg: { agents: { list: [{ id: "personal", default: true }, { id: "service" }] } },
+      accountId: "default",
+      dmPolicy: "pairing",
+    });
+    const { interaction, reply } = createDmButtonInteraction();
+
+    await button.run(interaction, { componentId: "hello" } as ComponentData);
+
     const pairingText = firstReplyContent(reply);
     const code = expectPairingReplyText(pairingText, {
       channel: "discord",
       idLine: "Your Discord user id: 123456789",
     });
     expect(pairingText).toContain(`openclaw pairing approve discord ${code}`);
-    expect(peekSystemEvents(defaultDmSessionKey)).toStrictEqual([]);
-    expect(readAllowFromStoreMock).toHaveBeenCalledWith("discord", "default");
+    expect(upsertPairingRequestMock).toHaveBeenCalledTimes(1);
   });
 
   it("blocks DM interactions in allowlist mode when sender is not in configured allowFrom", async () => {
@@ -245,7 +470,7 @@ describe("agent components", () => {
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
   });
 
-  it("routes allowlisted Group DM interactions to the group session without applying DM policy", async () => {
+  it("does not route an allowlisted Group DM interaction to the personal session", async () => {
     const button = createAgentComponentButton({
       cfg: createCfg(),
       accountId: "default",
@@ -262,30 +487,27 @@ describe("agent components", () => {
     await button.run(interaction, { componentId: "hello" } as ComponentData);
 
     expect(defer).not.toHaveBeenCalled();
-    expect(reply).toHaveBeenCalledWith({ content: "✓", ephemeral: true });
-    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
-      "[Discord component: hello clicked by Alice#1234 (123456789)]",
-      {
-        sessionKey: defaultGroupDmSessionKey,
-        contextKey: "discord:agent-button:group-dm-channel:hello:123456789",
-      },
-    );
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this button.",
+      ephemeral: true,
+    });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
     expect(peekSystemEvents(defaultDmSessionKey)).toStrictEqual([]);
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
   });
 
-  it("authorizes DM interactions from pairing-store entries in pairing mode", async () => {
+  it("does not treat pairing-store entries as personal owners", async () => {
     readAllowFromStoreMock.mockResolvedValue(["123456789"]);
-    await expectSuccessfulDmButtonInteraction({
+    await expectRejectedDmButtonInteraction({
       dmPolicy: "pairing",
-      expectPairingStoreRead: true,
+      expectPairingStoreRead: false,
     });
     expect(upsertPairingRequestMock).not.toHaveBeenCalled();
   });
 
-  it("allows DM component interactions in open mode without reading pairing store", async () => {
+  it("does not treat open-mode wildcard access as personal ownership", async () => {
     readAllowFromStoreMock.mockResolvedValue(["123456789"]);
-    await expectSuccessfulDmButtonInteraction({
+    await expectRejectedDmButtonInteraction({
       dmPolicy: "open",
       expectPairingStoreRead: false,
       allowFrom: ["*"],
@@ -322,14 +544,14 @@ describe("agent components", () => {
 
     expect(defer).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledWith({
-      content: "DM interactions are disabled.",
+      content: "You are not authorized to use this button.",
       ephemeral: true,
     });
     expect(peekSystemEvents(defaultDmSessionKey)).toStrictEqual([]);
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
   });
 
-  it("matches tag-based allowlist entries for DM select menus", async () => {
+  it("does not use display-name allowlist matches as personal ownership", async () => {
     const select = createAgentSelectMenu({
       cfg: createCfg(),
       accountId: "default",
@@ -342,14 +564,11 @@ describe("agent components", () => {
     await select.run(interaction, { componentId: "hello" } as ComponentData);
 
     expect(defer).not.toHaveBeenCalled();
-    expect(reply).toHaveBeenCalledWith({ content: "✓", ephemeral: true });
-    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
-      "[Discord select menu: hello interacted by Alice#1234 (123456789) (selected: alpha)]",
-      {
-        sessionKey: defaultDmSessionKey,
-        contextKey: "discord:agent-select:dm-channel:hello:123456789",
-      },
-    );
+    expect(reply).toHaveBeenCalledWith({
+      content: "You are not authorized to use this select menu.",
+      ephemeral: true,
+    });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
   });
 
@@ -371,6 +590,7 @@ describe("agent components", () => {
       {
         sessionKey: defaultDmSessionKey,
         contextKey: "discord:agent-button:dm-channel:hello_cid:123456789",
+        actor: { channel: "discord", accountId: "default", senderId: "123456789" },
       },
     );
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
@@ -394,6 +614,7 @@ describe("agent components", () => {
       {
         sessionKey: defaultDmSessionKey,
         contextKey: "discord:agent-button:dm-channel:hello%2G:123456789",
+        actor: { channel: "discord", accountId: "default", senderId: "123456789" },
       },
     );
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();

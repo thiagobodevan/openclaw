@@ -684,6 +684,7 @@ export async function dispatchOutbound(
               },
             },
             replyOptions: {
+              identityContractVersion: 1,
               disableBlockStreaming: useOfficialC2cStream
                 ? true
                 : (() => {
@@ -797,6 +798,7 @@ async function buildCtxPayload(
       agentId: inbound.route.agentId ?? resolveDefaultAgentId(cfg as OpenClawConfig),
       routeSessionKey: inbound.route.sessionKey,
       accountId: inbound.route.accountId,
+      matchedBy: inbound.route.matchedBy,
     },
     reply: {
       to: inbound.fromAddress,

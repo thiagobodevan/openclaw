@@ -26,6 +26,8 @@ export type CommandAuthorization = {
   ownerList: string[];
   senderId?: string;
   senderIsOwner: boolean;
+  /** Stable provider-native sender id matched against an explicit owner entry. */
+  stableSenderIsOwner: boolean;
   isAuthorizedSender: boolean;
   from?: string;
   to?: string;
@@ -667,6 +669,23 @@ export function resolveCommandAuthorization(params: {
       )
     : undefined;
   const senderId = matchedSender ?? senderCandidates[0];
+  const stableSenderCandidates = ctx.SenderId
+    ? [ctx.SenderId, providerId ? `${providerId}:${ctx.SenderId}` : undefined].flatMap((value) =>
+        value
+          ? normalizeAllowFromEntry({
+              plugin,
+              cfg,
+              accountId: ctx.AccountId,
+              value,
+            })
+          : [],
+      )
+    : [];
+  // Identity ownership is narrower than command ownership: wildcards and
+  // mutable From/name aliases must never unlock the personal agent boundary.
+  const stableSenderIsOwner = stableSenderCandidates.some((candidate) =>
+    ownerState.ownerList.includes(candidate),
+  );
 
   const enforceOwner = Boolean(plugin?.commands?.enforceOwnerForCommands);
   const senderIsOwnerByIdentity = Boolean(matchedSender);
@@ -702,6 +721,7 @@ export function resolveCommandAuthorization(params: {
     ownerList: ownerState.ownerList,
     senderId: senderId || undefined,
     senderIsOwner,
+    stableSenderIsOwner,
     isAuthorizedSender,
     from: from || undefined,
     to: to || undefined,

@@ -4,6 +4,7 @@
  */
 
 import crypto from "node:crypto";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { applyModelOverrideToSessionEntry } from "openclaw/plugin-sdk/model-session-runtime";
 import {
   isRecord,
@@ -12,7 +13,12 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveVoiceCallSessionKey, type VoiceCallConfig } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
+import {
+  applyVoiceCallInboundResponsePolicy,
+  isVoiceCallInboundIdentityCurrent,
+} from "./identity.js";
 import { resolveVoiceResponseModel } from "./response-model.js";
+import type { VoiceCallInboundIdentity } from "./types.js";
 
 export type VoiceResponseParams = {
   /** Voice call config */
@@ -27,6 +33,8 @@ export type VoiceResponseParams = {
   sessionKey?: string;
   /** Caller's phone number */
   from: string;
+  /** Trusted inbound identity captured at admission. */
+  inboundIdentity?: VoiceCallInboundIdentity;
   /** Conversation transcript */
   transcript: Array<{ speaker: "user" | "bot"; text: string }>;
   /** Latest user message */
@@ -218,6 +226,7 @@ export async function generateVoiceResponse(
     callId,
     sessionKey,
     from,
+    inboundIdentity,
     transcript,
     userMessage,
     coreConfig,
@@ -229,14 +238,26 @@ export async function generateVoiceResponse(
   }
   const cfg = coreConfig;
 
+  const agentId = inboundIdentity?.agentId ?? voiceConfig.agentId ?? "main";
+  if (
+    inboundIdentity &&
+    !isVoiceCallInboundIdentityCurrent({
+      coreConfig: cfg as OpenClawConfig,
+      identity: inboundIdentity,
+    })
+  ) {
+    return { text: null, error: "Inbound call agent is no longer configured" };
+  }
+  const responseConfig = inboundIdentity
+    ? applyVoiceCallInboundResponsePolicy({ config: voiceConfig, identity: inboundIdentity })
+    : voiceConfig;
   const resolvedSessionKey = resolveVoiceCallSessionKey({
-    config: voiceConfig,
+    config: responseConfig,
     callId,
     phone: from,
     explicitSessionKey: sessionKey,
     coreSession: coreConfig.session,
   });
-  const agentId = voiceConfig.agentId ?? "main";
   const toolsAllow = resolveVoiceAgentToolsAllow(cfg, agentId);
 
   // Resolve paths
@@ -255,7 +276,10 @@ export async function generateVoiceResponse(
   });
 
   // Resolve model from config
-  const { provider, model } = resolveVoiceResponseModel({ voiceConfig, agentRuntime });
+  const { provider, model } = resolveVoiceResponseModel({
+    voiceConfig: responseConfig,
+    agentRuntime,
+  });
 
   let sessionEntry = existingSessionEntry;
   if (!sessionEntry?.sessionId || voiceConfig.responseModel) {
@@ -301,7 +325,7 @@ export async function generateVoiceResponse(
 
   // Build system prompt with conversation history
   const basePrompt =
-    voiceConfig.responseSystemPrompt ??
+    responseConfig.responseSystemPrompt ??
     `You are ${agentName}, a helpful voice assistant on a phone call. Keep responses brief and conversational (1-2 sentences max). Be natural and friendly. The caller's phone number is ${from}. You have access to tools - use them when helpful.`;
 
   let extraSystemPrompt = basePrompt;
@@ -314,7 +338,7 @@ export async function generateVoiceResponse(
   extraSystemPrompt = `${extraSystemPrompt}\n\n${VOICE_SPOKEN_OUTPUT_CONTRACT}`;
 
   // Resolve timeout
-  const timeoutMs = voiceConfig.responseTimeoutMs ?? agentRuntime.resolveAgentTimeoutMs({ cfg });
+  const timeoutMs = responseConfig.responseTimeoutMs ?? agentRuntime.resolveAgentTimeoutMs({ cfg });
   const runId = `voice:${callId}:${Date.now()}`;
 
   try {
@@ -329,6 +353,11 @@ export async function generateVoiceResponse(
       },
       sandboxSessionKey: resolveVoiceSandboxSessionKey(agentId, resolvedSessionKey),
       agentId,
+      routeMatchedBy: inboundIdentity?.routeMatchedBy,
+      chatType: inboundIdentity?.chatType,
+      senderId: inboundIdentity?.senderId,
+      senderE164: inboundIdentity?.senderE164,
+      senderIsOwner: inboundIdentity?.senderIsOwner,
       messageProvider: "voice",
       workspaceDir,
       config: cfg,

@@ -33,6 +33,11 @@ type EmbeddedAgentArgs = {
   workspaceDir?: string;
   sessionFile?: string;
   toolsAllow?: string[];
+  routeMatchedBy?: string;
+  chatType?: string;
+  senderId?: string;
+  senderE164?: string;
+  senderIsOwner?: boolean;
 };
 
 function createAgentRuntime(payloads: Array<Record<string, unknown>>) {
@@ -193,6 +198,146 @@ describe("generateVoiceResponse", () => {
     expect(args.extraSystemPrompt).toContain('{"spoken":"..."}');
     expect(args.provider).toBe("together");
     expect(args.model).toBe("Qwen/Qwen2.5-7B-Instruct-Turbo");
+  });
+
+  it("passes admitted inbound identity into sender-aware tool policy", async () => {
+    const { runtime, runEmbeddedAgent } = createAgentRuntime([
+      { text: '{"spoken":"Service response."}' },
+    ]);
+
+    await generateVoiceResponse({
+      voiceConfig: VoiceCallConfigSchema.parse({
+        agentId: "team-service",
+        responseTimeoutMs: 5000,
+      }),
+      coreConfig: {
+        agents: { list: [{ id: "team-service", default: true }] },
+      } as CoreConfig,
+      agentRuntime: runtime,
+      callId: "call-service",
+      from: "+15550001111",
+      inboundIdentity: {
+        agentId: "team-service",
+        routeMatchedBy: "config.agent",
+        chatType: "direct",
+        senderId: "+15550001111",
+        senderE164: "+15550001111",
+        senderIsOwner: false,
+        responsePolicy: { model: null, systemPrompt: null, timeoutMs: 5000 },
+      },
+      transcript: [],
+      userMessage: "check status",
+    });
+
+    expect(requireEmbeddedAgentArgs(runEmbeddedAgent)).toMatchObject({
+      agentId: "team-service",
+      routeMatchedBy: "config.agent",
+      chatType: "direct",
+      senderId: "+15550001111",
+      senderE164: "+15550001111",
+      senderIsOwner: false,
+    });
+  });
+
+  it("keeps restored classic calls in the admitted agent session after route reassignment", async () => {
+    const { runtime, runEmbeddedAgent, resolveStorePath, sessionStore } = createAgentRuntime([
+      { text: '{"spoken":"Restored service response."}' },
+    ]);
+
+    await generateVoiceResponse({
+      voiceConfig: VoiceCallConfigSchema.parse({
+        agentId: "reassigned-service",
+        sessionScope: "per-call",
+        responseTimeoutMs: 5000,
+      }),
+      coreConfig: {
+        agents: {
+          list: [{ id: "team-service" }, { id: "reassigned-service", default: true }],
+        },
+      } as CoreConfig,
+      agentRuntime: runtime,
+      callId: "call-restored",
+      sessionKey: "agent:team-service:voice:call:call-restored",
+      from: "+15550001111",
+      inboundIdentity: {
+        agentId: "team-service",
+        routeMatchedBy: "config.agent",
+        chatType: "direct",
+        senderId: "+15550001111",
+        senderE164: "+15550001111",
+        senderIsOwner: false,
+        responsePolicy: {
+          model: "openai/admission-model",
+          systemPrompt: "Admission-time service prompt.",
+          timeoutMs: 7000,
+        },
+      },
+      transcript: [],
+      userMessage: "continue",
+    });
+
+    expect(resolveStorePath).toHaveBeenCalledWith(undefined, { agentId: "team-service" });
+    expect(sessionStore["agent:team-service:voice:call:call-restored"]?.sessionId).toBeTypeOf(
+      "string",
+    );
+    expect(sessionStore["agent:reassigned-service:voice:call:call-restored"]).toBeUndefined();
+    expect(requireEmbeddedAgentArgs(runEmbeddedAgent)).toMatchObject({
+      agentId: "team-service",
+      sessionKey: "agent:team-service:voice:call:call-restored",
+      sandboxSessionKey: "agent:team-service:voice:call:call-restored",
+      workspaceDir: "/tmp/openclaw/workspace/team-service",
+      provider: "openai",
+      model: "admission-model",
+      timeoutMs: 7000,
+      extraSystemPrompt: expect.stringContaining("Admission-time service prompt."),
+    });
+  });
+
+  it("rejects restored classic calls after their admitted agent is removed", async () => {
+    const {
+      runtime,
+      runEmbeddedAgent,
+      updateSessionStore,
+      resolveAgentDir,
+      resolveAgentWorkspaceDir,
+      resolveStorePath,
+    } = createAgentRuntime([{ text: '{"spoken":"should not run"}' }]);
+
+    await expect(
+      generateVoiceResponse({
+        voiceConfig: VoiceCallConfigSchema.parse({
+          agentId: "reassigned-service",
+          sessionScope: "per-call",
+          responseTimeoutMs: 5000,
+        }),
+        coreConfig: {
+          agents: { list: [{ id: "reassigned-service", default: true }] },
+        } as CoreConfig,
+        agentRuntime: runtime,
+        callId: "call-removed",
+        sessionKey: "agent:removed-service:voice:call:call-removed",
+        from: "+15550001111",
+        inboundIdentity: {
+          agentId: "removed-service",
+          routeMatchedBy: "config.agent",
+          chatType: "direct",
+          senderId: "+15550001111",
+          senderE164: "+15550001111",
+          senderIsOwner: false,
+          responsePolicy: { model: null, systemPrompt: null, timeoutMs: 5000 },
+        },
+        transcript: [],
+        userMessage: "continue",
+      }),
+    ).resolves.toEqual({
+      text: null,
+      error: "Inbound call agent is no longer configured",
+    });
+    expect(runEmbeddedAgent).not.toHaveBeenCalled();
+    expect(updateSessionStore).not.toHaveBeenCalled();
+    expect(resolveAgentDir).not.toHaveBeenCalled();
+    expect(resolveAgentWorkspaceDir).not.toHaveBeenCalled();
+    expect(resolveStorePath).not.toHaveBeenCalled();
   });
 
   it("extracts spoken text from fenced JSON", async () => {

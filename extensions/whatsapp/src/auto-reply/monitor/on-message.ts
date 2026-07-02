@@ -7,8 +7,11 @@ import {
 } from "openclaw/plugin-sdk/conversation-binding-runtime";
 import type { getReplyFromConfig } from "openclaw/plugin-sdk/reply-runtime";
 import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
-import { buildGroupHistoryKey } from "openclaw/plugin-sdk/routing";
+import {
+  buildGroupHistoryKey,
+  resolveAgentRoute,
+  resolveConversationIdentityMode,
+} from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveWhatsAppAccount } from "../../accounts.js";
 import { resolveWhatsAppGroupSessionRoute } from "../../group-session-key.js";
@@ -174,13 +177,6 @@ export function createWebOnMessageHandler(params: {
       logVerbose(`📱 Same-phone mode detected (from === to: ${conversationId})`);
     }
 
-    // Skip if this is a message we just sent (echo detection)
-    if (params.echoTracker.has(msg.payload.body)) {
-      logVerbose("Skipping auto-reply: detected echo (message matches recently sent text)");
-      params.echoTracker.forget(msg.payload.body);
-      return;
-    }
-
     const configuredRoute = resolveConfiguredBindingRoute({
       cfg,
       route: baseConversationRoute,
@@ -200,6 +196,42 @@ export function createWebOnMessageHandler(params: {
             peerId,
           })
         : route.sessionKey;
+    const rawBroadcastAgents = configuredRoute.bindingResolution
+      ? undefined
+      : cfg.broadcast?.[peerId];
+    const broadcastAgents = Array.isArray(rawBroadcastAgents) ? rawBroadcastAgents : [];
+    const hasBroadcastTargets = broadcastAgents.length > 0;
+    const senderIsOwner = admission.isSelfChat || admission.sender.isOwner;
+    const identityTargets = hasBroadcastTargets
+      ? broadcastAgents.map((agentId) => ({ agentId, matchedBy: "config.agent" as const }))
+      : [{ agentId: route.agentId, matchedBy: route.matchedBy }];
+    const deniedIdentity = identityTargets
+      .map((target) =>
+        resolveConversationIdentityMode({
+          config: cfg,
+          agentId: target.agentId,
+          routeMatchedBy: target.matchedBy,
+          chatType: conversationKind,
+          groupId: conversationKind === "group" ? conversationId : undefined,
+          groupChannel: conversationKind === "group" ? msg.group?.subject : undefined,
+          senderIsOwner: conversationKind === "direct" && senderIsOwner,
+        }),
+      )
+      .find((decision) => !decision.allowed);
+    if (deniedIdentity) {
+      params.replyLogger.warn(
+        `whatsapp: conversation identity denied before audio preflight (${deniedIdentity.reason})`,
+      );
+      return;
+    }
+
+    // Echo tracking is shared mutable state. Only admitted traffic may consume
+    // an entry that suppresses the corresponding provider echo.
+    if (params.echoTracker.has(msg.payload.body)) {
+      logVerbose("Skipping auto-reply: detected echo (message matches recently sent text)");
+      params.echoTracker.forget(msg.payload.body);
+      return;
+    }
 
     // Preflight audio transcription: run once before broadcast fan-out so all
     // agents share the same transcript instead of each making a separate STT call.
@@ -306,6 +338,7 @@ export function createWebOnMessageHandler(params: {
         From: conversationId,
         To: msg.platform.recipientJid,
         SessionKey: route.sessionKey,
+        AgentRouteMatchedBy: route.matchedBy,
         AccountId: route.accountId,
         ChatType: conversationKind,
         ConversationLabel: conversationId,
@@ -403,10 +436,6 @@ export function createWebOnMessageHandler(params: {
 
     await runAudioPreflightOnce();
 
-    const hasBroadcastTargets =
-      !configuredRoute.bindingResolution &&
-      Array.isArray(cfg.broadcast?.[peerId]) &&
-      cfg.broadcast[peerId].length > 0;
     if (hasBroadcastTargets && statusReactionController) {
       await clearPreDispatchReaction();
     }

@@ -26,7 +26,7 @@ describe("Zalo reply-once lifecycle", () => {
     accountId: "acct-zalo-lifecycle",
     sessionKey: "agent:main:zalo:direct:dm-chat-1",
     mainSessionKey: "agent:main:main",
-    matchedBy: "default",
+    matchedBy: "binding.account",
   }));
   const dispatchReplyWithBufferedBlockDispatcherMock = vi.fn();
 

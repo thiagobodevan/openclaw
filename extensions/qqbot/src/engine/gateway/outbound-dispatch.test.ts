@@ -83,7 +83,11 @@ function makeInbound(overrides: Partial<InboundContext> = {}): InboundContext {
       content: "voice",
       timestamp: "2026-04-25T00:00:00.000Z",
     },
-    route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main" },
+    route: {
+      sessionKey: "qqbot:c2c:user-openid",
+      accountId: "qq-main",
+      matchedBy: "default",
+    },
     isGroupChat: false,
     peerId: "user-openid",
     qualifiedTarget: "qqbot:c2c:user-openid",
@@ -161,6 +165,7 @@ function makeRuntime(params: {
         resolveAgentRoute: vi.fn(() => ({
           sessionKey: "qqbot:c2c:user-openid",
           accountId: "qq-main",
+          matchedBy: "default" as const,
         })),
       },
       reply: {
@@ -1075,7 +1080,11 @@ describe("dispatchOutbound", () => {
           timestamp: "2026-04-25T00:00:00.000Z",
           groupOpenid: "group-openid",
         },
-        route: { sessionKey: "qqbot:group:group-openid", accountId: "qq-main" },
+        route: {
+          sessionKey: "qqbot:group:group-openid",
+          accountId: "qq-main",
+          matchedBy: "default",
+        },
         isGroupChat: true,
         peerId: "group-openid",
         qualifiedTarget: "qqbot:group:group-openid",
@@ -1354,6 +1363,7 @@ describe("dispatchOutbound", () => {
     expect(finalized?.Provider).toBe("qqbot");
     expect(finalized?.Surface).toBe("qqbot");
     expect(finalized?.ChatType).toBe("direct");
+    expect(finalized?.AgentRouteMatchedBy).toBe("default");
   });
 
   it("keeps markdown table chunks self-contained across block deliveries", async () => {

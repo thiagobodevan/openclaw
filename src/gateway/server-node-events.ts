@@ -5,6 +5,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
+import type { AgentCommandIdentityIngressOpts } from "../agents/command/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { updatePairedDeviceMetadata } from "../infra/device-pairing.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -37,6 +38,7 @@ import {
   parseMessageWithAttachments,
   registerApnsRegistration,
   requestHeartbeat,
+  resolveConversationIdentityMode,
   resolveChatAttachmentMaxBytes,
   resolveGatewayModelSupportsImages,
   resolveOutboundTarget,
@@ -67,7 +69,7 @@ export type NodeEventHandleResult = {
   reason?: string;
 };
 
-type NodeAgentCommandInput = Parameters<typeof agentCommandFromIngress>[0];
+type NodeAgentCommandInput = AgentCommandIdentityIngressOpts;
 
 function normalizeFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
@@ -399,6 +401,17 @@ export const handleNodeEvent = async (
       const cfg = getRuntimeConfig();
       const rawMainKey = normalizeMainKey(cfg.session?.mainKey);
       const sessionKey = sessionKeyRaw.length > 0 ? sessionKeyRaw : rawMainKey;
+      const agentId = resolveSessionAgentId({ sessionKey, config: cfg });
+      const identity = resolveConversationIdentityMode({
+        config: cfg,
+        agentId,
+        routeMatchedBy: "default",
+        chatType: "direct",
+        senderIsOwner: true,
+      });
+      if (!identity.allowed) {
+        return undefined;
+      }
       const { storePath, entry, canonicalKey, storeKeys } = loadSessionEntry(sessionKey);
       const now = Date.now();
       const fingerprint = resolveVoiceTranscriptFingerprint(obj, text);
@@ -432,6 +445,13 @@ export const handleNodeEvent = async (
         thinking: "low",
         deliver: false,
         messageChannel: "node",
+        runContext: {
+          messageChannel: "node",
+          chatType: "direct",
+          routeMatchedBy: "default",
+        },
+        identityContractVersion: 1,
+        senderIsOwner: true,
         inputProvenance: {
           kind: "external_user",
           sourceChannel: "voice",
@@ -474,6 +494,11 @@ export const handleNodeEvent = async (
       const sessionKeyRaw = (link?.sessionKey ?? "").trim();
       const sessionKey = sessionKeyRaw.length > 0 ? sessionKeyRaw : `node-${nodeId}`;
       const cfg = getRuntimeConfig();
+      const agentId = resolveSessionAgentId({ sessionKey, config: cfg });
+      const identity = resolveConversationIdentityMode({ config: cfg, agentId, isInternal: true });
+      if (!identity.allowed) {
+        return undefined;
+      }
       const { storePath, entry, canonicalKey, storeKeys } = loadSessionEntry(sessionKey);
 
       let message = (link?.message ?? "").trim();
@@ -609,6 +634,8 @@ export const handleNodeEvent = async (
         timeout:
           typeof link?.timeoutSeconds === "number" ? link.timeoutSeconds.toString() : undefined,
         messageChannel: "node",
+        runContext: { isInternal: true, messageChannel: "node" },
+        identityContractVersion: 1,
         allowModelOverride: false,
       });
       return undefined;

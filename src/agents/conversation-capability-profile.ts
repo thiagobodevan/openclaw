@@ -6,6 +6,13 @@
 import type { ChatType } from "../channels/chat-type.js";
 import { normalizeChatType } from "../channels/chat-type.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import {
+  resolveConversationIdentityMode,
+  resolveConversationScope,
+  type ConversationCapabilityScope,
+  type ConversationIdentityDecision,
+} from "../routing/conversation-identity.js";
+import type { AgentRouteMatch } from "../routing/resolve-route.js";
 import type { SkillSnapshot } from "../skills/types.js";
 import {
   resolveEffectiveToolPolicy,
@@ -29,8 +36,6 @@ import {
 } from "./tool-policy.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
-export type ConversationCapabilityScope = "direct" | "shared" | "unknown";
-
 export type ConversationCapabilityProfileParams = {
   config?: OpenClawConfig;
   sessionKey?: string;
@@ -41,6 +46,7 @@ export type ConversationCapabilityProfileParams = {
   sessionId?: string;
   runId?: string;
   agentId?: string;
+  routeMatchedBy?: AgentRouteMatch;
   agentDir?: string;
   agentAccountId?: string | null;
   messageProvider?: string | null;
@@ -62,6 +68,7 @@ export type ConversationCapabilityProfileParams = {
   senderUsername?: string | null;
   senderE164?: string | null;
   senderIsOwner?: boolean;
+  isInternal?: boolean;
   modelProvider?: string;
   modelId?: string;
   modelApi?: string;
@@ -94,7 +101,9 @@ export type ResolvedConversationCapabilityProfile = {
     hasVision?: boolean;
   };
   conversation: {
+    identity: ConversationIdentityDecision;
     scope: ConversationCapabilityScope;
+    routeMatchedBy?: AgentRouteMatch;
     chatType?: ChatType;
     sessionKey?: string;
     policySessionKey?: string;
@@ -173,6 +182,9 @@ export function resolveConversationCapabilityProfile(
   params: ConversationCapabilityProfileParams,
 ): ResolvedConversationCapabilityProfile {
   const messageProvider = params.messageProvider;
+  // Provider sub-surfaces can narrow tools, but channel-level group/sender policy
+  // continues to use the canonical transport identity.
+  const accessPolicyMessageProvider = params.messageChannel ?? messageProvider;
   const effective = resolveEffectiveToolPolicy({
     config: params.config,
     sessionKey: params.sessionKey,
@@ -189,7 +201,7 @@ export function resolveConversationCapabilityProfile(
     config: params.config,
     sessionKey: params.sessionKey,
     spawnedBy: params.spawnedBy,
-    messageProvider: messageProvider ?? undefined,
+    messageProvider: accessPolicyMessageProvider ?? undefined,
     groupId: trustedGroup.groupId,
     groupChannel: trustedGroup.dropped ? null : params.groupChannel,
     groupSpace: trustedGroup.dropped ? null : params.groupSpace,
@@ -202,7 +214,7 @@ export function resolveConversationCapabilityProfile(
   const senderPolicy = resolveSenderToolPolicy({
     config: params.config,
     agentId: effective.agentId,
-    messageProvider,
+    messageProvider: accessPolicyMessageProvider,
     senderId: params.senderId,
     senderName: params.senderName,
     senderUsername: params.senderUsername,
@@ -245,6 +257,17 @@ export function resolveConversationCapabilityProfile(
     inheritedToolPolicy,
     params.runtimeToolAllowlist ? { allow: params.runtimeToolAllowlist } : undefined,
   ];
+  const identity = resolveConversationIdentityMode({
+    config: params.config,
+    agentId: effective.agentId,
+    routeMatchedBy: params.routeMatchedBy,
+    chatType: params.chatType,
+    groupId: params.groupId,
+    groupChannel: params.groupChannel,
+    groupSpace: params.groupSpace,
+    senderIsOwner: params.senderIsOwner,
+    isInternal: params.isInternal,
+  });
 
   return {
     agentId: effective.agentId,
@@ -263,7 +286,9 @@ export function resolveConversationCapabilityProfile(
       hasVision: params.modelHasVision,
     },
     conversation: {
+      identity,
       scope: resolveConversationScope(params),
+      routeMatchedBy: params.routeMatchedBy,
       chatType: normalizeChatType(params.chatType),
       sessionKey: params.runSessionKey ?? params.sessionKey,
       policySessionKey: params.sessionKey,
@@ -336,22 +361,4 @@ export function resolveConversationCapabilityProfile(
       explicitToolDenylist: collectExplicitDenylist(inheritancePolicies),
     },
   };
-}
-
-function resolveConversationScope(
-  params: Pick<
-    ConversationCapabilityProfileParams,
-    "chatType" | "groupId" | "groupChannel" | "groupSpace"
-  >,
-): ConversationCapabilityScope {
-  const chatType = normalizeChatType(params.chatType);
-  if (chatType === "direct") {
-    return "direct";
-  }
-  if (chatType === "group" || chatType === "channel") {
-    return "shared";
-  }
-  return params.groupId?.trim() || params.groupChannel?.trim() || params.groupSpace?.trim()
-    ? "shared"
-    : "unknown";
 }

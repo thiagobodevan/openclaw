@@ -21,22 +21,23 @@ installWebAutoReplyTestHomeHooks();
 describe("broadcast groups", () => {
   installWebAutoReplyUnitTestHooks();
 
-  it("skips unknown broadcast agent ids when agents.list is present", async () => {
+  it("fails closed when a broadcast target is absent from agents.list", async () => {
     setLoadConfigMock({
       channels: { whatsapp: { allowFrom: ["*"] } },
       agents: {
         defaults: { maxConcurrent: 10 },
-        list: [{ id: "alfred" }],
+        list: [{ id: "personal", default: true }, { id: "alfred" }],
       },
       broadcast: {
         "+1000": ["alfred", "missing"],
       },
     } satisfies OpenClawConfig);
 
-    const { seen, resolver } = await sendWebDirectInboundAndCollectSessionKeys();
+    const { seen, routeMatches, resolver } = await sendWebDirectInboundAndCollectSessionKeys();
 
-    expect(resolver).toHaveBeenCalledTimes(1);
-    expect(seen[0]).toContain("agent:alfred:");
+    expect(resolver).not.toHaveBeenCalled();
+    expect(seen).toEqual([]);
+    expect(routeMatches).toEqual([]);
     resetLoadConfigMock();
   });
 
@@ -45,7 +46,7 @@ describe("broadcast groups", () => {
       channels: { whatsapp: { allowFrom: ["*"] } },
       agents: {
         defaults: { maxConcurrent: 10 },
-        list: [{ id: "alfred" }, { id: "baerbel" }],
+        list: [{ id: "personal", default: true }, { id: "alfred" }, { id: "baerbel" }],
       },
       broadcast: {
         strategy: "sequential",
@@ -66,7 +67,7 @@ describe("broadcast groups", () => {
       channels: { whatsapp: { allowFrom: ["*"] } },
       agents: {
         defaults: { maxConcurrent: 10 },
-        list: [{ id: "alfred" }, { id: "baerbel" }],
+        list: [{ id: "personal", default: true }, { id: "alfred" }, { id: "baerbel" }],
       },
       broadcast: {
         strategy: "sequential",
@@ -155,7 +156,7 @@ describe("broadcast groups", () => {
       },
       agents: {
         defaults: { maxConcurrent: 10 },
-        list: [{ id: "alfred" }, { id: "baerbel" }],
+        list: [{ id: "personal", default: true }, { id: "alfred" }, { id: "baerbel" }],
       },
       broadcast: {
         strategy: "sequential",
@@ -197,7 +198,7 @@ describe("broadcast groups", () => {
       channels: { whatsapp: { allowFrom: ["*"] } },
       agents: {
         defaults: { maxConcurrent: 10 },
-        list: [{ id: "alfred" }, { id: "baerbel" }],
+        list: [{ id: "personal", default: true }, { id: "alfred" }, { id: "baerbel" }],
       },
       broadcast: {
         strategy: "parallel",

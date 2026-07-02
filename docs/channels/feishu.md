@@ -71,6 +71,36 @@ Default: `allowlist`
 - Per-group override: `channels.feishu.groups.<chat_id>.requireMention`
 - Broadcast-only `@all` and `@_all` are not treated as bot mentions. A message that mentions both `@all` and the bot directly still counts as a bot mention.
 
+### Document comments
+
+Document comment events are shared audiences. Each document uses the binding peer id
+`comment-doc:<file_type>:<file_token>` and requires an explicit binding to a non-default service
+agent:
+
+```json5
+{
+  agents: {
+    list: [
+      { id: "personal", default: true },
+      { id: "docs-team", workspace: "~/.openclaw/workspace-docs-team" },
+    ],
+  },
+  bindings: [
+    {
+      agentId: "docs-team",
+      match: {
+        channel: "feishu",
+        accountId: "default",
+        peer: { kind: "channel", id: "comment-doc:docx:<file_token>" },
+      },
+    },
+  ],
+}
+```
+
+`dmPolicy` and `allowFrom` still authorize the sender. They do not authorize the default personal
+agent for a document. An unbound document is denied before OpenClaw reads its comment content.
+
 ---
 
 ## Group configuration examples

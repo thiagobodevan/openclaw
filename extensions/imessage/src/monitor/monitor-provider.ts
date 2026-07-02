@@ -20,6 +20,7 @@ import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel
 import { registerChannelRuntimeContext } from "openclaw/plugin-sdk/channel-runtime-context";
 import {
   readChannelAllowFromStore,
+  touchRuntimeConversationBindingRoute,
   upsertChannelPairingRequest,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
@@ -1019,6 +1020,8 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
       return;
     }
 
+    touchRuntimeConversationBindingRoute({ bindingRecord: decision.runtimeBinding });
+
     if (decision.kind === "pairing") {
       const sender = (message.sender ?? "").trim();
       if (!sender) {
@@ -1432,6 +1435,7 @@ export async function monitorIMessageProvider(opts: MonitorIMessageOpts = {}): P
                 dispatcher,
                 replyOptions: {
                   ...typingReplyOptions,
+                  identityContractVersion: 1,
                   disableBlockStreaming:
                     typeof configuredBlockStreaming === "boolean"
                       ? !configuredBlockStreaming

@@ -7,6 +7,7 @@ import * as pluginCommandsModule from "openclaw/plugin-sdk/plugin-runtime";
 import * as dispatcherModule from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineThrowingDiscordChannelGetter } from "../test-support/partial-channel.js";
+import { resolveDiscordStableSenderIsOwner } from "./native-command-auth.js";
 import { testing as nativeCommandTesting, createDiscordNativeCommand } from "./native-command.js";
 import {
   createMockCommandInteraction,
@@ -29,6 +30,19 @@ function createInteraction(params?: { userId?: string }): MockCommandInteraction
 
 function createConfig(): OpenClawConfig {
   return {
+    agents: {
+      list: [{ id: "personal", default: true }, { id: "team-service" }],
+    },
+    bindings: [
+      {
+        agentId: "team-service",
+        match: {
+          channel: "discord",
+          accountId: "default",
+          peer: { kind: "channel", id: "234567890123456789" },
+        },
+      },
+    ],
     commands: {
       allowFrom: {
         discord: ["user:123456789012345678"],
@@ -51,6 +65,16 @@ function createConfig(): OpenClawConfig {
     },
   } as OpenClawConfig;
 }
+
+it("does not treat a command-owner wildcard as personal identity ownership", () => {
+  expect(
+    resolveDiscordStableSenderIsOwner({
+      cfg: { commands: { ownerAllowFrom: ["*"] } } as OpenClawConfig,
+      providerAllowFrom: ["123456789012345678"],
+      sender: { id: "123456789012345678", name: "Discord User" },
+    }),
+  ).toBe(false);
+});
 
 function createCommand(cfg: OpenClawConfig, discordConfig?: DiscordAccountConfig) {
   const commandSpec: NativeCommandSpec = {

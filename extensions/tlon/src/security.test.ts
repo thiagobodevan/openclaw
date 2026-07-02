@@ -11,12 +11,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   extractCites,
-  resolveTlonCommandAuthorizationWithIngress,
+  extractMessageText,
+  isBotMentioned,
   isDmAllowedWithIngress,
   isGroupInviteAllowed,
-  isBotMentioned,
-  extractMessageText,
   resolveAuthorizedMessageText,
+  resolveTlonCommandAuthorizationWithIngress,
+  resolveTlonOwnerAllowFrom,
 } from "./monitor/utils.js";
 import { normalizeShip } from "./targets.js";
 
@@ -144,6 +145,30 @@ describe("Security: DM Allowlist", () => {
       expect(unauthorized.commandAccess.requested).toBe(true);
       expect(unauthorized.commandAccess.authorized).toBe(false);
       expect(unauthorized.commandAccess.shouldBlockControlCommand).toBe(false);
+    });
+
+    it("keeps DM access allowlists separate from personal owner identity", () => {
+      expect(
+        resolveTlonOwnerAllowFrom({
+          senderShip: "~nec",
+          ownerShip: "~zod",
+          isGroup: false,
+        }),
+      ).toEqual([]);
+      expect(
+        resolveTlonOwnerAllowFrom({
+          senderShip: "zod",
+          ownerShip: "~zod",
+          isGroup: false,
+        }),
+      ).toEqual(["~zod"]);
+      expect(
+        resolveTlonOwnerAllowFrom({
+          senderShip: "~zod",
+          ownerShip: "~zod",
+          isGroup: true,
+        }),
+      ).toEqual([]);
     });
   });
 });

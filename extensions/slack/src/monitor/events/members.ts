@@ -25,13 +25,11 @@ export function registerSlackMemberEvents(params: {
       trackEvent?.();
       const payload = paramsLocal.event;
       const channelId = payload.channel;
-      const channelInfo = channelId ? await ctx.resolveChannelName(channelId) : {};
-      const channelType = payload.channel_type ?? channelInfo?.type;
       const ingressContext = await authorizeAndResolveSlackSystemEventContext({
         ctx,
         senderId: payload.user,
         channelId,
-        channelType,
+        channelType: payload.channel_type,
         eventKind: `member-${paramsLocal.verb}`,
       });
       if (!ingressContext) {
@@ -44,6 +42,7 @@ export function registerSlackMemberEvents(params: {
         {
           sessionKey: ingressContext.sessionKey,
           contextKey: `slack:member:${paramsLocal.verb}:${channelId ?? "unknown"}:${payload.user ?? "unknown"}`,
+          actor: { channel: "slack", accountId: ctx.accountId, senderId: payload.user ?? "" },
         },
       );
     } catch (err) {

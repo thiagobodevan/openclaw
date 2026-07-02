@@ -4,8 +4,13 @@ import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-na
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveOpenProviderRuntimeGroupPolicy } from "openclaw/plugin-sdk/runtime-group-policy";
 import type { DiscordComponentEntry } from "../components.js";
-import { resolveDiscordChannelContext } from "./agent-components-context.js";
-import { resolveInteractionContextWithDmAuth } from "./agent-components-dm-auth.js";
+import {
+  ensureAgentComponentRouteAdmissionReady,
+  resolveAgentComponentRouteAdmission,
+  resolveComponentInteractionContext,
+  resolveDiscordChannelContext,
+} from "./agent-components-context.js";
+import { ensureResolvedComponentInteractionAuthorized } from "./agent-components-dm-auth.js";
 import { replySilently } from "./agent-components-reply.js";
 import type {
   AgentComponentContext,
@@ -24,6 +29,7 @@ import {
   resolveDiscordOwnerAccess,
 } from "./allow-list.js";
 import { formatDiscordUserTag } from "./format.js";
+import { resolveDiscordStableSenderIsOwner } from "./native-command-auth.js";
 
 function resolveComponentRuntimeGroupPolicy(ctx: AgentComponentContext) {
   return resolveOpenProviderRuntimeGroupPolicy({
@@ -207,12 +213,12 @@ export async function resolveAuthorizedComponentInteraction(params: {
   unauthorizedReply: string;
   defer?: boolean;
 }) {
-  const interactionCtx = await resolveInteractionContextWithDmAuth({
-    ctx: params.ctx,
+  const interactionCtx = await resolveComponentInteractionContext({
     interaction: params.interaction,
     label: params.label,
-    componentLabel: params.componentLabel,
-    defer: params.defer,
+    // Identity admission owns the first mutation boundary. Current component
+    // callers reply directly, so no early defer is needed before admission.
+    defer: false,
   });
   if (!interactionCtx) {
     return null;
@@ -225,6 +231,43 @@ export async function resolveAuthorizedComponentInteraction(params: {
     guildEntries: params.ctx.guildEntries,
   });
   const channelCtx = resolveDiscordChannelContext(params.interaction);
+  const senderIsOwner = resolveDiscordStableSenderIsOwner({
+    cfg: params.ctx.cfg,
+    providerAllowFrom: params.ctx.allowFrom,
+    sender: {
+      id: interactionCtx.user.id,
+      name: interactionCtx.user.username,
+      tag: formatDiscordUserTag(interactionCtx.user),
+    },
+  });
+  const routeAdmission = resolveAgentComponentRouteAdmission({
+    ctx: params.ctx,
+    rawGuildId: interactionCtx.rawGuildId,
+    memberRoleIds: interactionCtx.memberRoleIds,
+    isDirectMessage: interactionCtx.isDirectMessage,
+    isGroupDm: interactionCtx.isGroupDm,
+    userId: interactionCtx.userId,
+    channelId: interactionCtx.channelId,
+    parentId: channelCtx.parentId,
+    senderIsOwner,
+  });
+  if (!routeAdmission) {
+    await replySilently(params.interaction, {
+      content: params.unauthorizedReply,
+      ...replyOpts,
+    });
+    return null;
+  }
+  if (
+    !(await ensureResolvedComponentInteractionAuthorized({
+      ctx: params.ctx,
+      interaction: params.interaction,
+      interactionCtx,
+      componentLabel: params.componentLabel,
+    }))
+  ) {
+    return null;
+  }
   const allowNameMatching = isDangerousNameMatchingEnabled(params.ctx.discordConfig);
   const channelConfig = resolveDiscordChannelConfigWithFallback({
     guildInfo,
@@ -254,6 +297,18 @@ export async function resolveAuthorizedComponentInteraction(params: {
     return null;
   }
 
+  const route = await ensureAgentComponentRouteAdmissionReady({
+    ctx: params.ctx,
+    admission: routeAdmission,
+  });
+  if (!route) {
+    await replySilently(params.interaction, {
+      content: params.unauthorizedReply,
+      ...replyOpts,
+    });
+    return null;
+  }
+
   const commandAuthorized = await resolveComponentCommandAuthorized({
     ctx: params.ctx,
     interactionCtx,
@@ -269,6 +324,7 @@ export async function resolveAuthorizedComponentInteraction(params: {
     channelConfig,
     allowNameMatching,
     commandAuthorized,
+    admittedRoute: { route, senderIsOwner },
     user,
     replyOpts,
   };

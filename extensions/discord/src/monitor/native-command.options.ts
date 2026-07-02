@@ -63,7 +63,10 @@ export function buildDiscordCommandOptions(params: {
   authorizeChoiceContext?: (interaction: AutocompleteInteraction) => Promise<boolean>;
   resolveChoiceContext?: (
     interaction: AutocompleteInteraction,
-  ) => Promise<{ provider?: string; model?: string } | null>;
+  ) => Promise<
+    | { allowed: true; context: { provider?: string; model?: string } | null }
+    | { allowed: false; reason: string }
+  >;
 }): CommandOptions | undefined {
   const { command, cfg, resolveConfig, authorizeChoiceContext, resolveChoiceContext } = params;
   const commandLabel = resolveDiscordCommandLogLabel(command);
@@ -113,10 +116,15 @@ export function buildDiscordCommandOptions(params: {
           }
           const focused = interaction.options.getFocused();
           const focusValue = normalizeLowercaseStringOrEmpty(focused?.value);
-          const context =
+          const contextResolution =
             typeof arg.choices === "function" && resolveChoiceContext
               ? await resolveChoiceContext(interaction)
               : null;
+          if (contextResolution && !contextResolution.allowed) {
+            await interaction.respond([]);
+            return;
+          }
+          const context = contextResolution?.allowed ? contextResolution.context : null;
           const currentCfg = resolveConfig?.() ?? cfg;
           // Autocomplete cannot defer beyond Discord's three-second deadline.
           // Cache-only catalog reads never start discovery or filesystem work.

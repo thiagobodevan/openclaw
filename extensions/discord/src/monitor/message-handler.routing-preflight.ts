@@ -44,7 +44,7 @@ export async function resolveDiscordPreflightRoute(params: {
         userId: params.author.id,
       }) ?? `user:${params.author.id}`)
     : params.messageChannelId;
-  let runtimeRoute = conversationRuntime.resolveRuntimeConversationBindingRoute({
+  let runtimeRoute = conversationRuntime.lookupRuntimeConversationBindingRoute({
     route,
     conversation: {
       channel: "discord",
@@ -99,6 +99,7 @@ export async function resolveDiscordPreflightRoute(params: {
 
   return {
     conversationRuntime,
+    runtimeBinding: runtimeRoute.bindingRecord,
     threadBinding,
     configuredBinding,
     boundSessionKey,

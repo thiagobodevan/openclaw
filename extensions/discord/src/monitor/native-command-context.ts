@@ -1,6 +1,7 @@
 // Discord plugin module implements native command context behavior.
 import type { CommandArgs } from "openclaw/plugin-sdk/command-auth-native";
 import { finalizeInboundContext } from "openclaw/plugin-sdk/reply-dispatch-runtime";
+import type { AgentRouteMatch } from "openclaw/plugin-sdk/routing";
 import { resolveDiscordConversationIdentity } from "../conversation-identity.js";
 import type { DiscordChannelConfigResolved, DiscordGuildEntryResolved } from "./allow-list.js";
 import { buildDiscordInboundAccessContext } from "./inbound-context.js";
@@ -10,6 +11,7 @@ type BuildDiscordNativeCommandContextParams = {
   commandArgs: CommandArgs;
   sessionKey: string;
   commandTargetSessionKey: string;
+  routeMatchedBy: AgentRouteMatch;
   accountId?: string | null;
   interactionId: string;
   channelId: string;
@@ -65,6 +67,7 @@ export function buildDiscordNativeCommandContext(params: BuildDiscordNativeComma
         : `discord:channel:${params.channelId}`,
     To: `slash:${params.user.id}`,
     SessionKey: params.sessionKey,
+    AgentRouteMatchedBy: params.routeMatchedBy,
     CommandTargetSessionKey: params.commandTargetSessionKey,
     AccountId: params.accountId ?? undefined,
     ChatType: params.isDirectMessage ? "direct" : params.isGroupDm ? "group" : "channel",

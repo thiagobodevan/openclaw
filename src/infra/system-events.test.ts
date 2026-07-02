@@ -67,6 +67,90 @@ describe("system events (session routing)", () => {
     expect(peekSystemEvents("discord:group:123")).toStrictEqual([]);
   });
 
+  it("drains only the exact channel-interaction context", async () => {
+    const key = "agent:ops:slack:channel:C1";
+    enqueueSystemEvent("Slack interaction: approve", {
+      sessionKey: key,
+      contextKey: "slack:interaction:c1:100:approve:u1:trigger-1",
+      contextMode: "exact",
+    });
+    enqueueSystemEvent("Slack interaction: reject", {
+      sessionKey: key,
+      contextKey: "slack:interaction:c1:100:reject:u2:trigger-2",
+      contextMode: "exact",
+    });
+
+    const drained = await drainFormattedEvents(key, {
+      contextKey: "SLACK:INTERACTION:C1:100:APPROVE:U1:TRIGGER-1",
+    });
+
+    expect(drained).toContain("Slack interaction: approve");
+    expect(drained).not.toContain("Slack interaction: reject");
+    expect(peekSystemEvents(key)).toEqual(["Slack interaction: reject"]);
+  });
+
+  it("keeps exact-context events out of contextless turns", async () => {
+    const key = "agent:main:main";
+    enqueueSystemEvent("Slack interaction: shared action", {
+      sessionKey: key,
+      contextKey: "slack:interaction:c1:100:deploy:u1:trigger-1",
+      contextMode: "exact",
+    });
+    enqueueSystemEvent("Background task completed", {
+      sessionKey: key,
+      contextKey: "task:worker-1",
+    });
+
+    const drained = await drainFormattedEvents(key);
+
+    expect(drained).toContain("Background task completed");
+    expect(drained).not.toContain("Slack interaction: shared action");
+    expect(peekSystemEvents(key)).toEqual(["Slack interaction: shared action"]);
+  });
+
+  it("keeps actor events out of another sender's turn in a collapsed session", async () => {
+    const key = "agent:main:main";
+    enqueueSystemEvent("Slack reaction by guest", {
+      sessionKey: key,
+      contextKey: "slack:reaction:guest",
+      actor: { channel: "slack", accountId: "work", senderId: "U_GUEST" },
+    });
+    enqueueSystemEvent("Slack reaction by owner", {
+      sessionKey: key,
+      contextKey: "slack:reaction:owner",
+      actor: { channel: "slack", accountId: "work", senderId: "U_OWNER" },
+    });
+
+    const drained = await drainFormattedEvents(key, {
+      actor: { channel: "SLACK", accountId: "work", senderId: "U_OWNER" },
+    });
+
+    expect(drained).toContain("Slack reaction by owner");
+    expect(drained).not.toContain("Slack reaction by guest");
+    expect(peekSystemEvents(key)).toEqual(["Slack reaction by guest"]);
+  });
+
+  it("keeps actor events out of contextless heartbeat turns", async () => {
+    const key = "agent:main:main";
+    enqueueSystemEvent("Discord reaction by guest", {
+      sessionKey: key,
+      contextKey: "discord:reaction:guest",
+      actor: { channel: "discord", senderId: "guest" },
+    });
+
+    expect(await drainFormattedEvents(key)).toBeUndefined();
+    expect(peekSystemEvents(key)).toEqual(["Discord reaction by guest"]);
+  });
+
+  it("requires a context key for exact-context events", () => {
+    expect(() =>
+      enqueueSystemEvent("Slack interaction: shared action", {
+        sessionKey: "agent:main:main",
+        contextMode: "exact",
+      }),
+    ).toThrow("require a contextKey");
+  });
+
   it("requires an explicit session key", () => {
     expect(() => enqueueSystemEvent("Node: Mac Studio", { sessionKey: " " })).toThrow("sessionKey");
   });
@@ -194,6 +278,38 @@ describe("system events (session routing)", () => {
     expect(peekSystemEvents(key)).toEqual(
       Array.from({ length: 20 }, (_, index) => `event ${index + 3}`),
     );
+  });
+
+  it("does not let one actor scope evict generic or other-actor events", () => {
+    const key = "agent:main:test-actor-capacity";
+    enqueueSystemEvent("Owner reminder", { sessionKey: key });
+    enqueueSystemEvent("Owner reaction", {
+      sessionKey: key,
+      actor: { channel: "slack", accountId: "work", senderId: "U_OWNER" },
+    });
+    for (let index = 0; index < 18; index += 1) {
+      enqueueSystemEvent(`Guest ${index}`, {
+        sessionKey: key,
+        actor: { channel: "slack", accountId: "work", senderId: `U_GUEST_${index}` },
+      });
+    }
+
+    expect(
+      enqueueSystemEvent("Another guest", {
+        sessionKey: key,
+        actor: { channel: "slack", accountId: "work", senderId: "U_GUEST_NEW" },
+      }),
+    ).toBe(false);
+    expect(
+      enqueueSystemEvent("Guest 0 updated", {
+        sessionKey: key,
+        actor: { channel: "slack", accountId: "work", senderId: "U_GUEST_0" },
+      }),
+    ).toBe(true);
+    expect(peekSystemEvents(key)).toContain("Owner reminder");
+    expect(peekSystemEvents(key)).toContain("Owner reaction");
+    expect(peekSystemEvents(key)).not.toContain("Guest 0");
+    expect(peekSystemEvents(key)).toContain("Guest 0 updated");
   });
 
   it("shares queued events across duplicate module instances", async () => {

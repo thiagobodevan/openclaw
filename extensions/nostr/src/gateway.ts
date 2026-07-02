@@ -7,6 +7,10 @@ import { createChannelPairingController } from "openclaw/plugin-sdk/channel-pair
 import { attachChannelToResult } from "openclaw/plugin-sdk/channel-send-result";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { runStoppablePassiveMonitor } from "openclaw/plugin-sdk/extension-shared";
+import {
+  resolveConversationIdentityMode,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
 import type { ChannelOutboundAdapter, ChannelPlugin } from "./channel-api.js";
 import type { MetricEvent, MetricsSnapshot } from "./metrics.js";
 import { startNostrBus, type NostrBusHandle } from "./nostr-bus.js";
@@ -118,6 +122,30 @@ export const startNostrGatewayAccount: NostrGatewayStart = async (ctx) => {
     reply: (text: string) => Promise<void>;
   }): Promise<"allow" | "block" | "pairing"> => {
     const resolved = await resolveInboundAccess(input.senderId, "");
+    const route = runtime.channel.routing.resolveAgentRoute({
+      cfg: ctx.cfg,
+      channel: "nostr",
+      accountId: account.accountId,
+      peer: { kind: "direct", id: input.senderId },
+    });
+    const identity = resolveConversationIdentityMode({
+      config: ctx.cfg,
+      agentId: route.agentId,
+      routeMatchedBy: route.matchedBy,
+      chatType: "direct",
+      senderIsOwner: resolveStableSenderIsOwner({
+        senderId: input.senderId,
+        commandOwnerAllowFrom: ctx.cfg.commands?.ownerAllowFrom,
+        providerAllowFrom: account.config.allowFrom,
+        normalizeEntry: normalizeNostrAllowEntry,
+      }),
+    });
+    if (!identity.allowed) {
+      ctx.log?.debug?.(
+        `[${account.accountId}] blocked Nostr sender ${input.senderId} before pairing (${identity.reason})`,
+      );
+      return "block";
+    }
     if (resolved.senderAccess.decision === "allow") {
       return "allow";
     }
@@ -185,6 +213,7 @@ export const startNostrGatewayAccount: NostrGatewayStart = async (ctx) => {
             commandAuthorized: resolvedAccess.commandAccess.requested
               ? resolvedAccess.commandAccess.authorized
               : undefined,
+            identityContractVersion: 1,
             deliver: async (payload) => {
               const outboundText =
                 payload && typeof payload === "object" && "text" in payload

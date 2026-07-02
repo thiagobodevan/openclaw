@@ -22,6 +22,7 @@ import type {
   DurableFinalDeliveryRequirements,
   OutboundDeliveryQueuePolicy,
 } from "../../infra/outbound/deliver.js";
+import type { AgentRouteMatch } from "../../routing/resolve-route.js";
 import type { InboundEventKind } from "../inbound-event/kind.js";
 import type { CreateChannelReplyPipelineParams } from "../message/reply-pipeline.js";
 import type { MessageReceipt } from "../message/types.js";
@@ -86,6 +87,8 @@ export type ConversationFacts = {
 export type RouteFacts = {
   agentId: string;
   accountId?: string;
+  /** Trusted binding provenance used to distinguish explicit service routing from fallback. */
+  matchedBy?: AgentRouteMatch;
   routeSessionKey: string;
   dispatchSessionKey?: string;
   persistedSessionKey?: string;
@@ -316,6 +319,12 @@ export type ChannelTurnRecordOptions = {
   trackSessionMetaTask?: (task: Promise<unknown>) => void;
 };
 
+/** Identity contract evaluated before an admitted turn mutates session state. */
+export type ChannelTurnIdentityOptions = {
+  cfg: OpenClawConfig;
+  contractVersion: 1;
+};
+
 /** Options for finalizing visible conversation history after dispatch. */
 export type ChannelTurnHistoryFinalizeOptions = {
   isGroup?: boolean;
@@ -382,6 +391,7 @@ export type PreparedChannelTurn<TDispatchResult = DispatchFromConfigResult> = {
   recordInboundSession: RecordInboundSession;
   afterRecord?: () => void | Promise<void>;
   record?: ChannelTurnRecordOptions;
+  identity?: ChannelTurnIdentityOptions;
   history?: ChannelTurnHistoryFinalizeOptions;
   onPreDispatchFailure?: (err: unknown) => void | Promise<void>;
   runDispatch: () => Promise<TDispatchResult>;

@@ -12,6 +12,10 @@ vi.mock("./conversation-route.js", async () => {
     ...actual,
     resolveTelegramConversationRoute: (...args: unknown[]) =>
       resolveTelegramConversationRouteMock(...args),
+    resolveTelegramConversationIdentityRoute: (...args: unknown[]) => ({
+      ...resolveTelegramConversationRouteMock(...args),
+      identity: { allowed: true, mode: "organization", reason: "test service route" },
+    }),
   };
 });
 
@@ -143,6 +147,12 @@ function createConfiguredTelegramRoute() {
   } as const;
 }
 
+const serviceIdentityCfg = {
+  agents: {
+    list: [{ id: "personal", default: true }, { id: "main" }, { id: "codex" }],
+  },
+};
+
 describe("buildTelegramMessageContext ACP configured bindings", () => {
   beforeAll(async () => {
     ({ buildTelegramMessageContextForTest } =
@@ -160,6 +170,7 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
   it("treats configured topic bindings as explicit route matches on non-default accounts", async () => {
     const ctx = await buildTelegramMessageContextForTest({
       accountId: "work",
+      cfg: serviceIdentityCfg,
       runtime: configuredBindingRuntime,
       sessionRuntime: configuredBindingSessionRuntime,
       message: {
@@ -179,6 +190,7 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
   it("skips ACP session initialization when topic access is denied", async () => {
     const ctx = await buildTelegramMessageContextForTest({
       accountId: "work",
+      cfg: serviceIdentityCfg,
       runtime: configuredBindingRuntime,
       sessionRuntime: configuredBindingSessionRuntime,
       message: {
@@ -193,7 +205,7 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
     });
 
     expect(ctx).toBeNull();
-    expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(1);
+    expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(2);
     expect(ensureConfiguredBindingRouteReadyMock).not.toHaveBeenCalled();
   });
 
@@ -208,6 +220,7 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
         text: "/new",
       },
       cfg: {
+        ...serviceIdentityCfg,
         channels: {
           telegram: {},
         },
@@ -218,7 +231,7 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
     });
 
     expect(ctx).toBeNull();
-    expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(1);
+    expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(2);
     expect(ensureConfiguredBindingRouteReadyMock).not.toHaveBeenCalled();
   });
 
@@ -230,6 +243,7 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
 
     const ctx = await buildTelegramMessageContextForTest({
       accountId: "work",
+      cfg: serviceIdentityCfg,
       runtime: configuredBindingRuntime,
       sessionRuntime: configuredBindingSessionRuntime,
       message: {
@@ -240,7 +254,40 @@ describe("buildTelegramMessageContext ACP configured bindings", () => {
     });
 
     expect(ctx).toBeNull();
-    expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(1);
+    expect(resolveTelegramConversationRouteMock).toHaveBeenCalledTimes(2);
     expect(ensureConfiguredBindingRouteReadyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies a shared personal route before configured ACP initialization", async () => {
+    const configuredRoute = createConfiguredTelegramRoute();
+    resolveTelegramConversationRouteMock.mockReturnValue({
+      ...configuredRoute,
+      route: {
+        ...configuredRoute.route,
+        agentId: "main",
+        mainSessionKey: "agent:main:main",
+      },
+    });
+
+    const resolveStorePath = vi.fn(() => "/tmp/openclaw/denied-forum-sessions.json");
+    const ctx = await buildTelegramMessageContextForTest({
+      accountId: "work",
+      cfg: { agents: { list: [{ id: "main", default: true }] } },
+      runtime: configuredBindingRuntime,
+      sessionRuntime: {
+        ...configuredBindingSessionRuntime,
+        resolveStorePath,
+      },
+      message: {
+        chat: { id: -1001234567890, type: "supergroup", title: "Shared", is_forum: true },
+        message_thread_id: 42,
+        text: "hello",
+        forum_topic_created: { name: "Private state must not be written", icon_color: 1 },
+      },
+    });
+
+    expect(ctx).toBeNull();
+    expect(ensureConfiguredBindingRouteReadyMock).not.toHaveBeenCalled();
+    expect(resolveStorePath).not.toHaveBeenCalled();
   });
 });

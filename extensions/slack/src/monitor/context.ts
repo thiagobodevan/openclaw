@@ -9,10 +9,21 @@ import type {
 } from "openclaw/plugin-sdk/config-contracts";
 import type { SessionScope } from "openclaw/plugin-sdk/config-contracts";
 import type { DmPolicy, GroupPolicy } from "openclaw/plugin-sdk/config-contracts";
-import { resolveRuntimeConversationBindingRoute } from "openclaw/plugin-sdk/conversation-runtime";
+import {
+  ensureConfiguredBindingRouteReady,
+  lookupRuntimeConversationBindingRoute,
+  resolveConfiguredBindingRoute,
+  touchRuntimeConversationBindingRoute,
+  type ConfiguredBindingRouteResult,
+  type RuntimeConversationBindingRouteResult,
+} from "openclaw/plugin-sdk/conversation-runtime";
 import { createDedupeCache } from "openclaw/plugin-sdk/dedupe-runtime";
 import type { HistoryEntry } from "openclaw/plugin-sdk/reply-history";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
+import {
+  resolveAgentRoute,
+  resolveConversationIdentityMode,
+  type AgentRouteMatch,
+} from "openclaw/plugin-sdk/routing";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { getChildLogger } from "openclaw/plugin-sdk/runtime-env";
@@ -29,6 +40,7 @@ import { resolveSlackChannelConfig } from "./channel-config.js";
 import { normalizeSlackChannelType } from "./channel-type.js";
 import { resolveSessionKey } from "./config.runtime.js";
 import { isSlackChannelAllowedByPolicy } from "./policy.js";
+import { normalizeSlackRouteBindingConfig } from "./routing-config.js";
 
 export { normalizeSlackChannelType, resolveSlackChatType } from "./channel-type.js";
 
@@ -36,6 +48,26 @@ export type SlackAssistantSuggestedPrompt = {
   title: string;
   message: string;
 };
+
+export type SlackSystemEventRoute = {
+  sessionKey: string;
+  agentId: string;
+  matchedBy: AgentRouteMatch;
+  chatType: "direct" | "group" | "channel";
+};
+
+type SlackSystemEventRouteState =
+  | {
+      kind: "resolved";
+      route: SlackSystemEventRoute;
+      configuredBinding: ConfiguredBindingRouteResult["bindingResolution"];
+      runtimeBinding: RuntimeConversationBindingRouteResult["bindingRecord"];
+    }
+  | {
+      kind: "legacy-fallback";
+      route: SlackSystemEventRoute;
+      configuredBinding: null;
+    };
 
 export type SlackAssistantThreadContext = {
   assistantChannelId: string;
@@ -145,6 +177,33 @@ export type SlackMonitorContext = {
     senderId?: string | null;
     threadTs?: string | null;
   }) => string;
+  resolveSlackSystemEventRoute: (params: {
+    channelId?: string | null;
+    channelType?: string | null;
+    senderId?: string | null;
+    threadTs?: string | null;
+  }) => SlackSystemEventRoute;
+  resolveSlackSystemEventCurrentRoute?: (params: {
+    cfg: OpenClawConfig;
+    channelId?: string | null;
+    channelType?: string | null;
+    senderId?: string | null;
+    threadTs?: string | null;
+  }) => SlackSystemEventRoute | null;
+  resolveSlackSystemEventIdentityRoute: (params: {
+    channelId?: string | null;
+    channelType?: string | null;
+    senderId?: string | null;
+    senderIsOwner?: boolean;
+    threadTs?: string | null;
+  }) => SlackSystemEventRoute | null;
+  resolveSlackSystemEventRouteReady: (params: {
+    channelId?: string | null;
+    channelType?: string | null;
+    senderId?: string | null;
+    senderIsOwner?: boolean;
+    threadTs?: string | null;
+  }) => Promise<SlackSystemEventRoute | null>;
   isChannelAllowed: (params: {
     channelId?: string;
     channelName?: string;
@@ -304,18 +363,30 @@ export function createSlackMonitorContext(params: {
     });
   };
 
-  const resolveSlackSystemEventSessionKey = (p: {
-    channelId?: string | null;
-    channelType?: string | null;
-    senderId?: string | null;
-    threadTs?: string | null;
-  }) => {
+  const resolveSlackSystemEventRouteState = (
+    p: {
+      channelId?: string | null;
+      channelType?: string | null;
+      senderId?: string | null;
+      threadTs?: string | null;
+    },
+    routeCfg: OpenClawConfig = params.cfg,
+  ): SlackSystemEventRouteState => {
     const channelId = normalizeOptionalString(p.channelId) ?? "";
     const senderId = normalizeOptionalString(p.senderId) ?? "";
     const channelType = normalizeSlackChannelType(p.channelType, channelId);
     const isDirectMessage = channelType === "im";
     if (!channelId && (!isDirectMessage || !senderId)) {
-      return params.mainKey;
+      return {
+        kind: "legacy-fallback",
+        route: {
+          sessionKey: params.mainKey,
+          agentId: resolveDefaultAgentId(routeCfg),
+          matchedBy: "default",
+          chatType: "direct",
+        },
+        configuredBinding: null,
+      };
     }
     const isGroup = channelType === "mpim";
     const from = isDirectMessage
@@ -331,7 +402,7 @@ export function createSlackMonitorContext(params: {
       const peerId = isDirectMessage ? senderId : channelId;
       if (peerId) {
         const route = resolveAgentRoute({
-          cfg: params.cfg,
+          cfg: normalizeSlackRouteBindingConfig(routeCfg),
           channel: "slack",
           accountId: params.accountId,
           teamId: params.teamId,
@@ -340,7 +411,7 @@ export function createSlackMonitorContext(params: {
         const threadTs = normalizeOptionalString(p.threadTs);
         const baseConversationId = isDirectMessage ? `user:${senderId}` : channelId;
         const threadBindingRoute = threadTs
-          ? resolveRuntimeConversationBindingRoute({
+          ? lookupRuntimeConversationBindingRoute({
               route,
               conversation: {
                 channel: "slack",
@@ -353,7 +424,7 @@ export function createSlackMonitorContext(params: {
         const runtimeRoute =
           threadBindingRoute?.boundSessionKey || threadBindingRoute?.bindingRecord
             ? threadBindingRoute
-            : resolveRuntimeConversationBindingRoute({
+            : lookupRuntimeConversationBindingRoute({
                 route,
                 conversation: {
                   channel: "slack",
@@ -361,15 +432,57 @@ export function createSlackMonitorContext(params: {
                   conversationId: baseConversationId,
                 },
               });
-        if (runtimeRoute.boundSessionKey) {
-          return runtimeRoute.route.sessionKey;
+        if (runtimeRoute.boundSessionKey || runtimeRoute.bindingRecord) {
+          return {
+            kind: "resolved",
+            route: {
+              sessionKey: runtimeRoute.boundSessionKey
+                ? runtimeRoute.route.sessionKey
+                : resolveThreadSessionKeys({
+                    baseSessionKey: runtimeRoute.route.sessionKey,
+                    threadId: threadTs,
+                    parentSessionKey:
+                      threadTs && params.threadInheritParent
+                        ? runtimeRoute.route.sessionKey
+                        : undefined,
+                  }).sessionKey,
+              agentId: runtimeRoute.route.agentId,
+              matchedBy: runtimeRoute.route.matchedBy,
+              chatType,
+            },
+            configuredBinding: null,
+            runtimeBinding: runtimeRoute.bindingRecord,
+          };
         }
-        return resolveThreadSessionKeys({
-          baseSessionKey: runtimeRoute.route.sessionKey,
-          threadId: threadTs,
-          parentSessionKey:
-            threadTs && params.threadInheritParent ? runtimeRoute.route.sessionKey : undefined,
-        }).sessionKey;
+        const configuredRoute = resolveConfiguredBindingRoute({
+          cfg: routeCfg,
+          route: runtimeRoute.route,
+          conversation: {
+            channel: "slack",
+            accountId: params.accountId,
+            conversationId: baseConversationId,
+          },
+        });
+        return {
+          kind: "resolved",
+          route: {
+            sessionKey: configuredRoute.boundSessionKey
+              ? configuredRoute.route.sessionKey
+              : resolveThreadSessionKeys({
+                  baseSessionKey: configuredRoute.route.sessionKey,
+                  threadId: threadTs,
+                  parentSessionKey:
+                    threadTs && params.threadInheritParent
+                      ? configuredRoute.route.sessionKey
+                      : undefined,
+                }).sessionKey,
+            agentId: configuredRoute.route.agentId,
+            matchedBy: configuredRoute.route.matchedBy,
+            chatType,
+          },
+          configuredBinding: configuredRoute.bindingResolution,
+          runtimeBinding: null,
+        };
       }
     } catch {
       // Fall through to legacy key derivation.
@@ -379,17 +492,85 @@ export function createSlackMonitorContext(params: {
       params.sessionScope,
       { From: from, ChatType: chatType, Provider: "slack" },
       params.mainKey,
-      resolveDefaultAgentId(params.cfg),
+      resolveDefaultAgentId(routeCfg),
     );
-    return resolveThreadSessionKeys({
-      baseSessionKey: legacySessionKey,
-      threadId: normalizeOptionalString(p.threadTs),
-      parentSessionKey:
-        normalizeOptionalString(p.threadTs) && params.threadInheritParent
-          ? legacySessionKey
-          : undefined,
-    }).sessionKey;
+    return {
+      kind: "legacy-fallback",
+      route: {
+        sessionKey: resolveThreadSessionKeys({
+          baseSessionKey: legacySessionKey,
+          threadId: normalizeOptionalString(p.threadTs),
+          parentSessionKey:
+            normalizeOptionalString(p.threadTs) && params.threadInheritParent
+              ? legacySessionKey
+              : undefined,
+        }).sessionKey,
+        agentId: resolveDefaultAgentId(routeCfg),
+        matchedBy: "default",
+        chatType,
+      },
+      configuredBinding: null,
+    };
   };
+  const resolveSlackSystemEventRoute = (
+    p: Parameters<typeof resolveSlackSystemEventRouteState>[0],
+  ) => resolveSlackSystemEventRouteState(p).route;
+  const resolveSlackSystemEventCurrentRoute: NonNullable<
+    SlackMonitorContext["resolveSlackSystemEventCurrentRoute"]
+  > = ({ cfg: routeCfg, ...routeParams }) => {
+    const state = resolveSlackSystemEventRouteState(routeParams, routeCfg);
+    return state.kind === "resolved" ? state.route : null;
+  };
+  const resolveSlackSystemEventIdentityState = (
+    p: Parameters<typeof resolveSlackSystemEventRouteState>[0] & { senderIsOwner?: boolean },
+  ): Extract<SlackSystemEventRouteState, { kind: "resolved" }> | null => {
+    const state = resolveSlackSystemEventRouteState(p);
+    // Compatibility callers may still derive a legacy key, but protected events
+    // must never convert a binding-resolution failure into a personal route.
+    if (state.kind !== "resolved") {
+      return null;
+    }
+    const identity = resolveConversationIdentityMode({
+      config: params.cfg,
+      agentId: state.route.agentId,
+      routeMatchedBy: state.route.matchedBy,
+      chatType: state.route.chatType,
+      groupId: state.route.chatType === "direct" ? undefined : normalizeOptionalString(p.channelId),
+      groupSpace: params.teamId,
+      senderIsOwner: p.senderIsOwner,
+    });
+    if (!identity.allowed) {
+      return null;
+    }
+    return state;
+  };
+  const resolveSlackSystemEventIdentityRoute = (
+    p: Parameters<typeof resolveSlackSystemEventIdentityState>[0],
+  ): SlackSystemEventRoute | null => resolveSlackSystemEventIdentityState(p)?.route ?? null;
+  const resolveSlackSystemEventRouteReady = async (
+    p: Parameters<typeof resolveSlackSystemEventIdentityState>[0],
+  ): Promise<SlackSystemEventRoute | null> => {
+    const state = resolveSlackSystemEventIdentityState(p);
+    if (!state) {
+      return null;
+    }
+    if (!state.configuredBinding) {
+      touchRuntimeConversationBindingRoute({ bindingRecord: state.runtimeBinding });
+      return state.route;
+    }
+    const readiness = await ensureConfiguredBindingRouteReady({
+      cfg: params.cfg,
+      bindingResolution: state.configuredBinding,
+    });
+    if (!readiness.ok) {
+      return null;
+    }
+    touchRuntimeConversationBindingRoute({ bindingRecord: state.runtimeBinding });
+    return state.route;
+  };
+  const resolveSlackSystemEventSessionKey = (
+    p: Parameters<typeof resolveSlackSystemEventRoute>[0],
+  ) => resolveSlackSystemEventRoute(p).sessionKey;
 
   const resolveChannelName = async (channelId: string) => {
     const cached = channelCache.get(channelId);
@@ -642,6 +823,10 @@ export function createSlackMonitorContext(params: {
     releaseSeenMessage,
     shouldDropMismatchedSlackEvent,
     resolveSlackSystemEventSessionKey,
+    resolveSlackSystemEventRoute,
+    resolveSlackSystemEventCurrentRoute,
+    resolveSlackSystemEventIdentityRoute,
+    resolveSlackSystemEventRouteReady,
     isChannelAllowed,
     resolveChannelName,
     resolveUserName,

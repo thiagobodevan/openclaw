@@ -1,7 +1,15 @@
 // Discord plugin module implements agent components context behavior.
 import { ChannelType } from "discord-api-types/v10";
+import {
+  ensureConfiguredBindingRouteReady,
+  lookupRuntimeConversationBindingRoute,
+  resolveConfiguredBindingRoute,
+  touchRuntimeConversationBindingRoute,
+  type ConfiguredBindingRouteResult,
+} from "openclaw/plugin-sdk/conversation-binding-runtime";
 import { logError } from "openclaw/plugin-sdk/logging-core";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
+import { resolveAgentRoute, resolveConversationIdentityMode } from "openclaw/plugin-sdk/routing";
+import { resolveDiscordConversationIdentity } from "../conversation-identity.js";
 import type {
   AgentComponentContext,
   AgentComponentInteraction,
@@ -11,6 +19,7 @@ import type {
 } from "./agent-components.types.js";
 import { normalizeDiscordDisplaySlug, normalizeDiscordSlug } from "./allow-list.js";
 import { resolveDiscordChannelInfoSafe } from "./channel-access.js";
+import { shouldIgnoreStaleDiscordRouteBinding } from "./route-resolution.js";
 
 function formatUsername(user: { username: string; discriminator?: string | null }): string {
   if (user.discriminator && user.discriminator !== "0") {
@@ -27,7 +36,7 @@ function isThreadChannelType(channelType: number | undefined): boolean {
   );
 }
 
-export function resolveAgentComponentRoute(params: {
+type AgentComponentRouteParams = {
   ctx: AgentComponentContext;
   rawGuildId: string | undefined;
   memberRoleIds: string[];
@@ -36,8 +45,15 @@ export function resolveAgentComponentRoute(params: {
   userId: string;
   channelId: string;
   parentId: string | undefined;
-}) {
-  return resolveAgentRoute({
+  senderIsOwner?: boolean;
+};
+
+function resolveAgentComponentRouteState(params: AgentComponentRouteParams): {
+  route: ReturnType<typeof resolveAgentRoute>;
+  configuredBinding: ConfiguredBindingRouteResult["bindingResolution"];
+  runtimeBinding: ReturnType<typeof lookupRuntimeConversationBindingRoute>["bindingRecord"];
+} {
+  const route = resolveAgentRoute({
     cfg: params.ctx.cfg,
     channel: "discord",
     accountId: params.ctx.accountId,
@@ -49,6 +65,96 @@ export function resolveAgentComponentRoute(params: {
     },
     parentPeer: params.parentId ? { kind: "channel", id: params.parentId } : undefined,
   });
+  const conversationId =
+    (params.isDirectMessage
+      ? resolveDiscordConversationIdentity({
+          isDirectMessage: true,
+          userId: params.userId,
+        })
+      : params.channelId) ?? params.channelId;
+  const runtimeRoute = lookupRuntimeConversationBindingRoute({
+    route,
+    conversation: {
+      channel: "discord",
+      accountId: params.ctx.accountId,
+      conversationId,
+      parentConversationId: params.parentId,
+    },
+  });
+  const staleRuntimeBinding = shouldIgnoreStaleDiscordRouteBinding({
+    bindingRecord: runtimeRoute.bindingRecord,
+    route,
+  });
+  if (!staleRuntimeBinding && (runtimeRoute.boundSessionKey || runtimeRoute.bindingRecord)) {
+    return {
+      route: runtimeRoute.route,
+      configuredBinding: null,
+      runtimeBinding: runtimeRoute.bindingRecord,
+    };
+  }
+  const configuredRoute = resolveConfiguredBindingRoute({
+    cfg: params.ctx.cfg,
+    route,
+    conversation: {
+      channel: "discord",
+      accountId: params.ctx.accountId,
+      conversationId: params.channelId,
+      parentConversationId: params.parentId,
+    },
+  });
+  return {
+    route: configuredRoute.route,
+    configuredBinding: configuredRoute.bindingResolution,
+    runtimeBinding: null,
+  };
+}
+
+export function resolveAgentComponentRoute(params: AgentComponentRouteParams) {
+  return resolveAgentComponentRouteState(params).route;
+}
+
+export function resolveAgentComponentRouteAdmission(params: AgentComponentRouteParams) {
+  const state = resolveAgentComponentRouteState(params);
+  const identity = resolveConversationIdentityMode({
+    config: params.ctx.cfg,
+    agentId: state.route.agentId,
+    routeMatchedBy: state.route.matchedBy,
+    chatType: params.isDirectMessage ? "direct" : params.isGroupDm ? "group" : "channel",
+    groupId: params.isDirectMessage ? undefined : params.channelId,
+    groupSpace: params.rawGuildId,
+    senderIsOwner: params.senderIsOwner,
+  });
+  if (!identity.allowed) {
+    return null;
+  }
+  return state;
+}
+
+export async function ensureAgentComponentRouteAdmissionReady(params: {
+  ctx: AgentComponentContext;
+  admission: NonNullable<ReturnType<typeof resolveAgentComponentRouteAdmission>>;
+}) {
+  const { admission } = params;
+  if (!admission.configuredBinding) {
+    touchRuntimeConversationBindingRoute({ bindingRecord: admission.runtimeBinding });
+    return admission.route;
+  }
+  const readiness = await ensureConfiguredBindingRouteReady({
+    cfg: params.ctx.cfg,
+    bindingResolution: admission.configuredBinding,
+  });
+  if (!readiness.ok) {
+    return null;
+  }
+  touchRuntimeConversationBindingRoute({ bindingRecord: admission.runtimeBinding });
+  return admission.route;
+}
+
+export async function resolveAgentComponentRouteReady(params: AgentComponentRouteParams) {
+  const admission = resolveAgentComponentRouteAdmission(params);
+  return admission
+    ? await ensureAgentComponentRouteAdmissionReady({ ctx: params.ctx, admission })
+    : null;
 }
 
 export async function ackComponentInteraction(params: {

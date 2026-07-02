@@ -1,13 +1,20 @@
 // Discord plugin module implements ingress behavior.
 import { agentCommandFromIngress } from "openclaw/plugin-sdk/agent-runtime";
 import type { DiscordAccountConfig, OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import {
+  ensureConfiguredBindingRouteReady,
+  touchRuntimeConversationBindingRoute,
+} from "openclaw/plugin-sdk/conversation-binding-runtime";
 import { resolveRealtimeBootstrapContextInstructions } from "openclaw/plugin-sdk/realtime-bootstrap-context";
+import { resolveConversationIdentityMode } from "openclaw/plugin-sdk/routing";
 import { createSubsystemLogger, type RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatMention } from "../mentions.js";
 import { normalizeDiscordSlug } from "../monitor/allow-list.js";
 import { buildDiscordGroupSystemPrompt } from "../monitor/inbound-context.js";
+import { resolveDiscordStableSenderIsOwner } from "../monitor/native-command-auth.js";
 import { authorizeDiscordVoiceIngress } from "./access.js";
+import { isDiscordVoiceRouteCurrent, resolveDiscordVoiceAgentRoute } from "./route.js";
 import type { VoiceSessionEntry } from "./session.js";
 import type { DiscordVoiceSpeakerContextResolver } from "./speaker-context.js";
 
@@ -17,6 +24,8 @@ const logger = createSubsystemLogger("discord/voice");
 
 export type DiscordVoiceIngressContext = {
   extraSystemPrompt?: string;
+  memberRoleIds?: string[];
+  senderId?: string;
   senderIsOwner: boolean;
   speakerLabel: string;
 };
@@ -25,6 +34,60 @@ export type DiscordVoiceAgentTurnResult = {
   context: DiscordVoiceIngressContext;
   text: string;
 };
+
+async function admitCurrentDiscordVoiceRoute(params: {
+  entry: VoiceSessionEntry;
+  cfg: OpenClawConfig;
+  discordConfig: DiscordAccountConfig;
+}): Promise<boolean> {
+  let current;
+  try {
+    current = resolveDiscordVoiceAgentRoute({
+      cfg: params.cfg,
+      accountId: params.entry.route.accountId,
+      guildId: params.entry.guildId,
+      sessionChannelId: params.entry.sessionChannelId,
+      voiceConfig: params.discordConfig.voice,
+    });
+  } catch (error) {
+    logger.warn(
+      `discord voice: current route unavailable guild=${params.entry.guildId} channel=${params.entry.channelId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+  const identity = resolveConversationIdentityMode({
+    config: params.cfg,
+    agentId: current.route.agentId,
+    routeMatchedBy: current.route.matchedBy,
+    chatType: "channel",
+    groupId: params.entry.channelId,
+    groupChannel: params.entry.channelName,
+    groupSpace: params.entry.guildId,
+  });
+  if (
+    !identity.allowed ||
+    !isDiscordVoiceRouteCurrent({ expected: params.entry.route, current: current.route })
+  ) {
+    logger.warn(
+      `discord voice: route changed during active session guild=${params.entry.guildId} channel=${params.entry.channelId}`,
+    );
+    return false;
+  }
+  if (current.configuredBinding) {
+    const readiness = await ensureConfiguredBindingRouteReady({
+      cfg: params.cfg,
+      bindingResolution: current.configuredBinding,
+    });
+    if (!readiness.ok) {
+      logger.warn(
+        `discord voice: configured binding unavailable guild=${params.entry.guildId} channel=${params.entry.channelId}: ${readiness.error}`,
+      );
+      return false;
+    }
+  }
+  touchRuntimeConversationBindingRoute({ bindingRecord: current.runtimeBinding });
+  return true;
+}
 
 function summarizeAgentTurnPayloads(payloads: readonly unknown[]): string {
   let textPayloads = 0;
@@ -97,9 +160,31 @@ export async function resolveDiscordVoiceIngressContext(params: {
   if (!access.ok) {
     return null;
   }
+  if (
+    !(await admitCurrentDiscordVoiceRoute({
+      entry,
+      cfg: params.cfg,
+      discordConfig: params.discordConfig,
+    }))
+  ) {
+    return null;
+  }
   return {
     extraSystemPrompt: buildDiscordGroupSystemPrompt(access.channelConfig),
-    senderIsOwner: speaker.senderIsOwner,
+    memberRoleIds: speakerIdentity.memberRoleIds,
+    senderId: speakerIdentity.id,
+    senderIsOwner: resolveDiscordStableSenderIsOwner({
+      cfg: params.cfg,
+      providerAllowFrom:
+        params.ownerAllowFrom ??
+        params.discordConfig.allowFrom ??
+        params.discordConfig.dm?.allowFrom,
+      sender: {
+        id: speakerIdentity.id,
+        name: speakerIdentity.name,
+        tag: speakerIdentity.tag,
+      },
+    }),
     speakerLabel: speaker.label,
   };
 }
@@ -117,6 +202,7 @@ export async function runDiscordVoiceAgentTurn(params: {
   fetchGuildName: (guildId: string) => Promise<string | undefined>;
   speakerContext: DiscordVoiceSpeakerContextResolver;
 }): Promise<DiscordVoiceAgentTurnResult | null> {
+  const hasPreparedContext = params.context !== undefined;
   const context =
     params.context ??
     (await resolveDiscordVoiceIngressContext({
@@ -129,6 +215,16 @@ export async function runDiscordVoiceAgentTurn(params: {
       speakerContext: params.speakerContext,
     }));
   if (!context) {
+    return null;
+  }
+  if (
+    hasPreparedContext &&
+    !(await admitCurrentDiscordVoiceRoute({
+      entry: params.entry,
+      cfg: params.cfg,
+      discordConfig: params.discordConfig,
+    }))
+  ) {
     return null;
   }
   const voiceModel = normalizeOptionalString(params.discordConfig.voice?.model);
@@ -144,6 +240,22 @@ export async function runDiscordVoiceAgentTurn(params: {
       model: voiceModel,
       toolsAllow: params.toolsAllow,
       deliver: false,
+      senderIsOwner: context.senderIsOwner,
+      identityContractVersion: 1,
+      runContext: {
+        messageChannel: "discord",
+        accountId: params.entry.route.accountId,
+        chatType: "channel",
+        routeMatchedBy: params.entry.route.matchedBy,
+        groupId: params.entry.channelId,
+        groupChannel: params.entry.channelName,
+        groupSpace: params.entry.guildId,
+        memberRoleIds: context.memberRoleIds,
+        currentChannelId: params.entry.channelId,
+        chatId: params.entry.channelId,
+        currentInboundAudio: true,
+        senderId: context.senderId ?? params.userId,
+      },
     },
     params.runtime,
   );
@@ -172,6 +284,15 @@ export async function resolveDiscordVoiceRealtimeBootstrapContext(params: {
   const realtimeConfig = params.discordConfig.voice?.realtime;
   const files = realtimeConfig?.bootstrapContextFiles;
   if (files?.length === 0) {
+    return undefined;
+  }
+  if (
+    !(await admitCurrentDiscordVoiceRoute({
+      entry: params.entry,
+      cfg: params.cfg,
+      discordConfig: params.discordConfig,
+    }))
+  ) {
     return undefined;
   }
   try {

@@ -23,6 +23,7 @@ function createLifecycleConfig(params: {
   const webhookSecret = params.webhookSecret ?? "supersecret";
   const allowFrom = resolveLifecycleAllowFrom(params);
   return {
+    agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
     channels: {
       zalo: {
         enabled: true,
@@ -183,6 +184,19 @@ export function createImageLifecycleCore() {
   }));
   const readAllowFromStoreMock = vi.fn(async () => [] as string[]);
   const upsertPairingRequestMock = vi.fn(async () => ({ code: "PAIRCODE", created: true }));
+  const resolveAgentRouteMock = vi.fn(
+    (): {
+      agentId: string;
+      accountId: string;
+      sessionKey: string;
+      matchedBy: "binding.account" | "default";
+    } => ({
+      agentId: "main",
+      accountId: "default",
+      sessionKey: "agent:main:zalo:direct:chat-123",
+      matchedBy: "binding.account",
+    }),
+  );
   const core = {
     logging: {
       shouldLogVerbose: vi.fn(
@@ -197,11 +211,8 @@ export function createImageLifecycleCore() {
           upsertPairingRequestMock as unknown as PluginRuntime["channel"]["pairing"]["upsertPairingRequest"],
       },
       routing: {
-        resolveAgentRoute: vi.fn(() => ({
-          agentId: "main",
-          accountId: "default",
-          sessionKey: "agent:main:zalo:direct:chat-123",
-        })) as unknown as PluginRuntime["channel"]["routing"]["resolveAgentRoute"],
+        resolveAgentRoute:
+          resolveAgentRouteMock as unknown as PluginRuntime["channel"]["routing"]["resolveAgentRoute"],
       },
       session: {
         resolveStorePath: vi.fn(
@@ -354,6 +365,7 @@ export function createImageLifecycleCore() {
     saveMediaBufferMock,
     readAllowFromStoreMock,
     upsertPairingRequestMock,
+    resolveAgentRouteMock,
   };
 }
 

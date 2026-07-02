@@ -239,6 +239,7 @@ export async function monitorLineProvider(
                 core.channel.reply.dispatchReplyWithBufferedBlockDispatcher,
               record: ctx.turn.record,
               replyPipeline: {},
+              replyOptions: { identityContractVersion: 1 },
               delivery: {
                 durable: (payload, info) =>
                   resolveLineDurableReplyOptions({

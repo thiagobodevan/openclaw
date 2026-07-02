@@ -14,6 +14,8 @@ export function buildGetReplyCtx(overrides: Partial<MsgContext> = {}): MsgContex
     CommandBody: "hello",
     SessionKey: "agent:main:telegram:123",
     From: "telegram:user:42",
+    SenderId: "42",
+    OwnerAllowFrom: ["42"],
     To: "telegram:123",
     Timestamp: 1710000000000,
     ...overrides,
@@ -53,6 +55,8 @@ export function buildNativeResetContext(): MsgContext {
     SessionKey: "telegram:slash:123",
     CommandTargetSessionKey: "agent:main:telegram:direct:123",
     From: "telegram:123",
+    SenderId: "123",
+    OwnerAllowFrom: ["123"],
     To: "slash:123",
   };
 }

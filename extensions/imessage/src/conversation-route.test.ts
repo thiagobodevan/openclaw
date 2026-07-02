@@ -5,7 +5,10 @@ import {
   registerSessionBindingAdapter,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveIMessageConversationRoute } from "./conversation-route.js";
+import {
+  lookupIMessageConversationRoute,
+  resolveIMessageConversationRoute,
+} from "./conversation-route.js";
 
 const baseCfg = {
   session: { mainKey: "main", scope: "per-sender" },
@@ -56,5 +59,36 @@ describe("resolveIMessageConversationRoute", () => {
     expect(route.sessionKey).toBe("agent:codex:acp:bound-1");
     expect(route.matchedBy).toBe("binding.channel");
     expect(touch).toHaveBeenCalledWith("default:+15555550123", undefined);
+  });
+
+  it("looks up a runtime binding without renewing its lease", () => {
+    const touch = vi.fn();
+    registerSessionBindingAdapter({
+      channel: "imessage",
+      accountId: "default",
+      listBySession: () => [],
+      resolveByConversation: (conversation) => ({
+        bindingId: "default:+15555550123",
+        targetSessionKey: "agent:codex:acp:bound-1",
+        targetKind: "session",
+        conversation,
+        status: "active",
+        boundAt: Date.now(),
+        metadata: { boundBy: "user-1" },
+      }),
+      touch,
+    });
+
+    const state = lookupIMessageConversationRoute({
+      cfg: baseCfg,
+      accountId: "default",
+      isGroup: false,
+      peerId: "+15555550123",
+      sender: "+15555550123",
+    });
+
+    expect(state.route.agentId).toBe("codex");
+    expect(state.runtimeBinding?.bindingId).toBe("default:+15555550123");
+    expect(touch).not.toHaveBeenCalled();
   });
 });

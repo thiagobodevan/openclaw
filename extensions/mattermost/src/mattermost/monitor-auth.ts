@@ -104,6 +104,37 @@ function mapMattermostChannelKind(channelType?: string | null): "direct" | "grou
   return "channel";
 }
 
+export type MattermostCommandAudience = {
+  channelInfo: MattermostChannel;
+  kind: "direct" | "group" | "channel";
+  chatType: "direct" | "group" | "channel";
+  channelName: string;
+  channelDisplay: string;
+  roomLabel: string;
+};
+
+export function resolveMattermostCommandAudience(params: {
+  channelId: string;
+  channelInfo: MattermostChannel | null;
+}): MattermostCommandAudience | null {
+  const { channelId, channelInfo } = params;
+  if (!channelInfo?.type) {
+    return null;
+  }
+  const kind = mapMattermostChannelKind(channelInfo.type);
+  const channelName = channelInfo.name ?? "";
+  const channelDisplay = channelInfo.display_name ?? channelName;
+  const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${channelId}`;
+  return {
+    channelInfo,
+    kind,
+    chatType: kind,
+    channelName,
+    channelDisplay,
+    roomLabel,
+  };
+}
+
 export type MattermostCommandAuthDecision =
   | {
       ok: true;
@@ -264,7 +295,8 @@ export async function authorizeMattermostCommandInvocation(params: {
     hasControlCommand,
   } = params;
 
-  if (!channelInfo?.type) {
+  const audience = resolveMattermostCommandAudience({ channelId, channelInfo });
+  if (!audience) {
     return {
       ok: false,
       denyReason: "unknown-channel",
@@ -278,11 +310,7 @@ export async function authorizeMattermostCommandInvocation(params: {
     };
   }
 
-  const kind = mapMattermostChannelKind(channelInfo.type);
-  const chatType = kind;
-  const channelName = channelInfo.name ?? "";
-  const channelDisplay = channelInfo.display_name ?? channelName;
-  const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${channelId}`;
+  const { kind } = audience;
 
   const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
   const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "allowlist";
@@ -313,23 +341,13 @@ export async function authorizeMattermostCommandInvocation(params: {
       ok: false,
       denyReason,
       commandAuthorized: false,
-      channelInfo,
-      kind,
-      chatType,
-      channelName,
-      channelDisplay,
-      roomLabel,
+      ...audience,
     };
   }
 
   return {
     ok: true,
     commandAuthorized: ingress.commandAccess.authorized,
-    channelInfo,
-    kind,
-    chatType,
-    channelName,
-    channelDisplay,
-    roomLabel,
+    ...audience,
   };
 }

@@ -45,7 +45,14 @@ import {
   type ReplyDispatcher,
 } from "./reply-dispatcher.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
-import { buildTestCtx } from "./test-ctx.js";
+import { buildTestCtx as buildBaseTestCtx } from "./test-ctx.js";
+
+function buildTestCtx(overrides: Partial<MsgContext> = {}) {
+  return buildBaseTestCtx({
+    InputProvenance: { kind: "internal_system", sourceTool: "dispatch-test" },
+    ...overrides,
+  });
+}
 
 type AbortResult = {
   handled: boolean;
@@ -1161,6 +1168,103 @@ describe("dispatchReplyFromConfig", () => {
     );
   });
 
+  it("denies unbound shared conversations before loading plugins or running hooks", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(async () => ({ text: "unsafe fallback" }) satisfies ReplyPayload);
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        InputProvenance: { kind: "external_user" },
+        Provider: "slack",
+        Surface: "slack",
+        ChatType: "channel",
+        ChatId: "C_SHARED",
+        GroupSpace: "T_WORK",
+        AgentId: "personal",
+        AgentRouteMatchedBy: "default",
+        SessionKey: "agent:personal:slack:channel:C_SHARED",
+      }),
+      cfg: { agents: { list: [{ id: "personal", default: true }] } },
+      dispatcher,
+      replyOptions: { identityContractVersion: 1 },
+      replyResolver,
+    });
+
+    expect(result.queuedFinal).toBe(true);
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
+      text: "This conversation is not bound to a shared service agent. Ask an operator to configure an explicit agent binding for this audience.",
+    });
+    expect(runtimePluginMocks.ensureRuntimePluginsLoaded).not.toHaveBeenCalled();
+    expect(hookMocks.runner.hasHooks).not.toHaveBeenCalled();
+    expect(hookMocks.runner.runInboundClaim).not.toHaveBeenCalled();
+    expect(hookMocks.runner.runMessageReceived).not.toHaveBeenCalled();
+    expect(hookMocks.runner.runBeforeDispatch).not.toHaveBeenCalled();
+    expect(hookMocks.runner.runReplyDispatch).not.toHaveBeenCalled();
+    expect(replyResolver).not.toHaveBeenCalled();
+  });
+
+  it("preserves unversioned public dispatch behavior for existing plugins", async () => {
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(
+      async () => ({ text: "legacy plugin reply" }) satisfies ReplyPayload,
+    );
+
+    await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        InputProvenance: { kind: "external_user" },
+        Provider: "slack",
+        Surface: "slack",
+        ChatType: "channel",
+        ChatId: "C_SHARED",
+        GroupSpace: "T_WORK",
+        AgentId: "personal",
+        AgentRouteMatchedBy: "default",
+        SessionKey: "agent:personal:slack:channel:C_SHARED",
+      }),
+      cfg: { agents: { list: [{ id: "personal", default: true }] } },
+      dispatcher,
+      replyResolver,
+    });
+
+    expect(replyResolver).toHaveBeenCalledOnce();
+  });
+
+  it("denies service-to-personal inter-session dispatch before hooks", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(async () => ({ text: "unsafe fallback" }) satisfies ReplyPayload);
+
+    await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        InputProvenance: {
+          kind: "inter_session",
+          sourceSessionKey: "agent:team-ops:slack:channel:C_SHARED",
+          sourceTool: "sessions_send",
+        },
+        Provider: "webchat",
+        Surface: "webchat",
+        ChatType: "direct",
+        AgentId: "personal",
+        AgentRouteMatchedBy: "default",
+        SessionKey: "agent:personal:main",
+      }),
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "team-ops" }] },
+      },
+      dispatcher,
+      replyOptions: { identityContractVersion: 1 },
+      replyResolver,
+    });
+
+    expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
+      text: "This conversation is not bound to a shared service agent. Ask an operator to configure an explicit agent binding for this audience.",
+    });
+    expect(runtimePluginMocks.ensureRuntimePluginsLoaded).not.toHaveBeenCalled();
+    expect(hookMocks.runner.hasHooks).not.toHaveBeenCalled();
+    expect(replyResolver).not.toHaveBeenCalled();
+  });
+
   it("returns session metadata changes marked during reply resolution", async () => {
     setNoAbort();
     const sessionKey = "agent:main:main";
@@ -2242,6 +2346,7 @@ describe("dispatchReplyFromConfig", () => {
       ChatType: "direct",
       InputProvenance: {
         kind: "inter_session",
+        sourceSessionKey: "agent:main:main",
         sourceTool: "sessions_send",
         sourceChannel: "webchat",
       },

@@ -42,8 +42,39 @@ function installIrcRuntime() {
         buildMentionRegexes: buildMentionRegexesMock,
         matchesMentionPatterns: matchesMentionPatternsMock,
       },
+      routing: {
+        resolveAgentRoute: ({
+          accountId,
+          peer,
+        }: {
+          accountId?: string;
+          peer?: { kind?: string; id?: string };
+        }) => ({
+          agentId: "irc-service",
+          channel: "irc",
+          accountId: accountId ?? "default",
+          sessionKey: `agent:irc-service:irc:${peer?.kind ?? "direct"}:${peer?.id ?? "peer"}`,
+          mainSessionKey: "agent:irc-service:main",
+          lastRoutePolicy: "session",
+          matchedBy: "binding.peer",
+        }),
+      },
     },
   } as never);
+}
+
+function useServiceAgentRoute(runtime: ReturnType<typeof createPluginRuntimeMock>) {
+  vi.mocked(runtime.channel.routing.resolveAgentRoute).mockImplementation(
+    ({ accountId, peer }) => ({
+      agentId: "irc-service",
+      channel: "irc",
+      accountId: accountId ?? "default",
+      sessionKey: `agent:irc-service:irc:${peer?.kind ?? "direct"}:${peer?.id ?? "peer"}`,
+      mainSessionKey: "agent:irc-service:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.peer",
+    }),
+  );
 }
 
 function createRuntimeEnv() {
@@ -177,6 +208,7 @@ describe("irc inbound behavior", () => {
 
   it("passes the shared reply pipeline for dispatched replies", async () => {
     const coreRuntime = createPluginRuntimeMock();
+    useServiceAgentRoute(coreRuntime);
     setIrcRuntime(coreRuntime as never);
 
     await handleIrcInbound({
@@ -202,6 +234,7 @@ describe("irc inbound behavior", () => {
 
   it("uses channel:# prefix for group channel From and OriginatingTo fields", async () => {
     const coreRuntime = createPluginRuntimeMock();
+    useServiceAgentRoute(coreRuntime);
     const runtime = createRuntimeEnv();
     setIrcRuntime(coreRuntime as never);
 
@@ -282,6 +315,7 @@ describe("irc inbound behavior", () => {
 
   it("admits a sender matching a full nick!user@host DM allowlist entry", async () => {
     const coreRuntime = createPluginRuntimeMock();
+    useServiceAgentRoute(coreRuntime);
     const runtime = createRuntimeEnv();
     setIrcRuntime(coreRuntime as never);
 
@@ -310,5 +344,31 @@ describe("irc inbound behavior", () => {
       (coreRuntime.channel.inbound.dispatchReply as unknown as { mock: { calls: unknown[][] } })
         .mock.calls.length,
     ).toBe(1);
+  });
+
+  it("denies an unbound shared route before reading session state", async () => {
+    const coreRuntime = createPluginRuntimeMock();
+    const runtime = createRuntimeEnv();
+    setIrcRuntime(coreRuntime as never);
+
+    await handleIrcInbound({
+      message: createMessage({ target: "#guest", isGroup: true }),
+      account: createAccount({
+        config: {
+          dmPolicy: "open",
+          allowFrom: ["*"],
+          groupPolicy: "open",
+          groupAllowFrom: [],
+          groups: { "#guest": { enabled: true, requireMention: false } },
+        },
+      }),
+      config: { channels: { irc: {} } } as CoreConfig,
+      runtime,
+      sendReply: vi.fn(async () => {}),
+    });
+
+    expect(coreRuntime.channel.session.readSessionUpdatedAt).not.toHaveBeenCalled();
+    expect(coreRuntime.channel.inbound.dispatchReply).not.toHaveBeenCalled();
+    expect(runtime.log).toHaveBeenCalledWith("irc: drop channel #guest (identity=unbound_shared)");
   });
 });

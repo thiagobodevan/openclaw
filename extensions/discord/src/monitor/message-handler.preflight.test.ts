@@ -490,7 +490,7 @@ describe("preflightDiscordMessage", () => {
       }),
       cfg: {
         agents: {
-          list: [{ id: "newagent" }],
+          list: [{ id: "personal", default: true }, { id: "newagent" }],
         },
         bindings: [
           {
@@ -2127,6 +2127,160 @@ describe("preflightDiscordMessage", () => {
 
     expect(transcribeFirstAudioMock).not.toHaveBeenCalled();
     expect(result).toBeNull();
+  });
+
+  it("denies a personal guild route before audio preflight", async () => {
+    const channelId = "channel-audio-personal-1";
+    const guildId = "guild-audio-personal-1";
+    const client = createGuildTextClient(channelId);
+    const message = createDiscordMessage({
+      id: "m-audio-personal-1",
+      channelId,
+      content: "",
+      attachments: [
+        {
+          id: "att-1",
+          url: "https://cdn.discordapp.com/attachments/voice.ogg",
+          content_type: "audio/ogg",
+          filename: "voice.ogg",
+        },
+      ],
+      author: { id: "user-1", bot: false, username: "Alice" },
+    });
+
+    const result = await preflightDiscordMessage({
+      ...createPreflightArgs({
+        cfg: {
+          agents: { list: [{ id: "main", default: true }] },
+          session: { mainKey: "main", scope: "per-sender" },
+        } as import("openclaw/plugin-sdk/config-contracts").OpenClawConfig,
+        discordConfig: {} as DiscordConfig,
+        data: createGuildEvent({ channelId, guildId, author: message.author, message }),
+        client,
+      }),
+      guildEntries: {
+        [guildId]: {
+          channels: { [channelId]: { enabled: true, requireMention: false } },
+        },
+      },
+    });
+
+    expect(result).toBeNull();
+    expect(transcribeFirstAudioMock).not.toHaveBeenCalled();
+  });
+
+  it("denies a personal guild route before message hydration or identity egress", async () => {
+    const channelId = "channel-personal-prehydrate-1";
+    const guildId = "guild-personal-prehydrate-1";
+    const message = createDiscordMessage({
+      id: "m-personal-prehydrate-1",
+      channelId,
+      content: "",
+      author: { id: "user-1", bot: false, username: "Alice" },
+    });
+    const client = createGuildTextClient(channelId);
+    const restGet = vi.fn(async () => ({ id: message.id, content: "private" }));
+    client.rest = { get: restGet } as unknown as DiscordClient["rest"];
+
+    const result = await preflightDiscordMessage({
+      ...createPreflightArgs({
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }] },
+          session: { mainKey: "main", scope: "per-sender" },
+        } as import("openclaw/plugin-sdk/config-contracts").OpenClawConfig,
+        discordConfig: { pluralkit: { enabled: true } } as DiscordConfig,
+        data: createGuildEvent({ channelId, guildId, author: message.author, message }),
+        client,
+      }),
+    });
+
+    expect(result).toBeNull();
+    expect(restGet).not.toHaveBeenCalled();
+    expect(fetchPluralKitMessageInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("renews runtime bindings only after guild identity and sender admission", async () => {
+    const touch = vi.fn();
+    registerSessionBindingAdapter({
+      channel: "discord",
+      accountId: "default",
+      listBySession: () => [],
+      resolveByConversation: (conversation) => {
+        const agentId = conversation.conversationId === "channel-allowed" ? "service" : "personal";
+        return {
+          bindingId: `binding-${agentId}`,
+          targetSessionKey: `agent:${agentId}:discord:channel:${conversation.conversationId}`,
+          targetKind: "session",
+          conversation,
+          status: "active",
+          boundAt: 1,
+          metadata: { boundBy: "test" },
+        };
+      },
+      touch,
+    });
+    const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+      bindings: [
+        {
+          agentId: "service",
+          match: {
+            channel: "discord",
+            accountId: "default",
+            peer: { kind: "channel", id: "channel-allowed" },
+          },
+        },
+      ],
+      session: { mainKey: "main", scope: "per-sender" },
+    } as import("openclaw/plugin-sdk/config-contracts").OpenClawConfig;
+
+    const denied = await runGuildPreflight({
+      channelId: "channel-denied",
+      guildId: "guild-lease",
+      message: createDiscordMessage({
+        id: "message-denied",
+        channelId: "channel-denied",
+        content: "hello",
+        author: { id: "user-1", bot: false, username: "Alice" },
+      }),
+      discordConfig: {} as DiscordConfig,
+      cfg,
+      guildEntries: {
+        "guild-lease": {
+          channels: { "channel-denied": { enabled: true, requireMention: false } },
+        },
+      },
+    });
+    expect(denied).toBeNull();
+    expect(touch).not.toHaveBeenCalled();
+
+    const accepted = await runGuildPreflight({
+      channelId: "channel-allowed",
+      guildId: "guild-lease",
+      message: createDiscordMessage({
+        id: "message-allowed",
+        channelId: "channel-allowed",
+        content: "hello <@openclaw-bot>",
+        author: { id: "user-1", bot: false, username: "Alice" },
+        mentionedUsers: [{ id: "openclaw-bot" }],
+      }),
+      discordConfig: {} as DiscordConfig,
+      cfg,
+      guildEntries: {
+        "guild-lease": {
+          channels: {
+            "channel-allowed": {
+              enabled: true,
+              requireMention: false,
+              users: ["discord:user-1"],
+            },
+          },
+        },
+      },
+    });
+    expect(accepted).not.toBeNull();
+    expect(touch).toHaveBeenCalledOnce();
+    expect(touch).toHaveBeenCalledWith("binding-service", undefined);
   });
 
   it("drops guild message without mention when channel has configuredBinding and requireMention: true", async () => {

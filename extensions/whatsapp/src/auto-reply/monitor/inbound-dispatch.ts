@@ -371,6 +371,7 @@ export async function buildWhatsAppInboundContext(params: {
     route: {
       agentId: params.route.agentId,
       accountId: params.route.accountId,
+      matchedBy: params.route.matchedBy,
       routeSessionKey: params.route.sessionKey,
     },
     reply: {
@@ -408,6 +409,7 @@ export async function buildWhatsAppInboundContext(params: {
         fallbackE164: params.sender.e164,
       }),
       SenderE164: params.sender.e164,
+      OwnerAllowFrom: admission.sender.isOwner ? [admission.sender.id] : undefined,
       CommandSource:
         params.commandSource ??
         (params.commandTurn?.source === "native" || params.commandTurn?.source === "text"
@@ -809,6 +811,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
       },
     },
     replyOptions: {
+      identityContractVersion: 1,
       // Message-tool-only unmentioned group turns have no automatic visible reply.
       // Suppress composing there so silent background runs do not leak presence.
       suppressTyping:

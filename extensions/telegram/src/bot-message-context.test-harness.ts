@@ -11,6 +11,24 @@ export const baseTelegramMessageContextConfig = {
   messages: { groupChat: { mentionPatterns: [] } },
 } as never;
 
+function withTelegramIdentityTestRoute(cfg: Record<string, unknown>): Record<string, unknown> {
+  const agents =
+    cfg.agents && typeof cfg.agents === "object"
+      ? (cfg.agents as Record<string, unknown>)
+      : {};
+  if (Array.isArray(agents.list) || Array.isArray(cfg.bindings)) {
+    return cfg;
+  }
+  return {
+    ...cfg,
+    agents: {
+      ...agents,
+      list: [{ id: "personal", default: true }, { id: "main" }],
+    },
+    bindings: [{ agentId: "main", match: { channel: "telegram", accountId: "default" } }],
+  };
+}
+
 type TelegramTestSessionRuntime = NonNullable<BuildTelegramMessageContextParams["sessionRuntime"]>;
 type TopicNameEntryForTest = {
   name: string;
@@ -110,6 +128,7 @@ export async function buildTelegramMessageContextForTest(
           ),
           ...params.sessionRuntime,
         };
+  const cfg = withTelegramIdentityTestRoute(params.cfg ?? baseTelegramMessageContextConfig);
   return await buildTelegramMessageContext({
     primaryCtx: {
       message: {
@@ -132,8 +151,8 @@ export async function buildTelegramMessageContextForTest(
         ...params.botApi,
       },
     } as never,
-    cfg: (params.cfg ?? baseTelegramMessageContextConfig) as never,
-    loadFreshConfig: () => (params.cfg ?? baseTelegramMessageContextConfig) as never,
+    cfg: cfg as never,
+    loadFreshConfig: () => cfg as never,
     runtime: {
       recordChannelActivity: () => undefined,
       ...params.runtime,

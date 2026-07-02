@@ -13,7 +13,11 @@ import {
   type RealtimeVoiceTool,
   type TalkEventInput,
 } from "openclaw/plugin-sdk/realtime-voice";
-import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
+import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  normalizeAgentId,
+  resolveConversationIdentityMode,
+} from "openclaw/plugin-sdk/routing";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { GoogleMeetConfig, GoogleMeetToolPolicy } from "./config.js";
 
@@ -24,6 +28,29 @@ const GOOGLE_MEET_CONSULT_SYSTEM_PROMPT = [
   "Do not print secret values or dump environment variables; only check whether required configuration is present.",
   "Be accurate, brief, and speakable.",
 ].join(" ");
+
+function resolveGoogleMeetConsultIdentity(params: {
+  config: GoogleMeetConfig;
+  fullConfig: OpenClawConfig;
+  meetingSessionId: string;
+}) {
+  const configuredAgentId = normalizeOptionalString(params.config.realtime.agentId);
+  const agentId = normalizeAgentId(configuredAgentId);
+  return {
+    agentId,
+    routeMatchedBy: "config.agent",
+    chatType: "channel",
+    groupId: params.meetingSessionId,
+    senderIsOwner: false,
+    decision: resolveConversationIdentityMode({
+      config: params.fullConfig,
+      agentId,
+      routeMatchedBy: configuredAgentId ? "config.agent" : "default",
+      chatType: "channel",
+      groupId: params.meetingSessionId,
+    }),
+  };
+}
 
 export function resolveGoogleMeetRealtimeTools(policy: GoogleMeetToolPolicy): RealtimeVoiceTool[] {
   return resolveRealtimeVoiceAgentConsultTools(policy);
@@ -51,7 +78,10 @@ export async function consultOpenClawAgentForGoogleMeet(params: {
   args: unknown;
   transcript: Array<{ role: "user" | "assistant"; text: string }>;
 }): Promise<{ text: string }> {
-  const agentId = normalizeAgentId(params.config.realtime.agentId);
+  const { agentId, decision } = resolveGoogleMeetConsultIdentity(params);
+  if (!decision.allowed) {
+    throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+  }
   const requesterSessionKey =
     normalizeOptionalString(params.requesterSessionKey) ?? `agent:${agentId}:main`;
   const sessionKey = `agent:${agentId}:subagent:google-meet:${params.meetingSessionId}`;
@@ -60,6 +90,10 @@ export async function consultOpenClawAgentForGoogleMeet(params: {
     agentRuntime: params.runtime.agent,
     logger: params.logger,
     agentId,
+    routeMatchedBy: "config.agent",
+    chatType: "channel",
+    groupId: params.meetingSessionId,
+    senderIsOwner: false,
     sessionKey,
     messageProvider: "google-meet",
     lane: "google-meet",
@@ -76,6 +110,10 @@ export async function consultOpenClawAgentForGoogleMeet(params: {
     extraSystemPrompt: GOOGLE_MEET_CONSULT_SYSTEM_PROMPT,
   });
 }
+
+export const testing = {
+  resolveGoogleMeetConsultIdentity,
+};
 
 export function handleGoogleMeetRealtimeConsultToolCall(params: {
   strategy: string;

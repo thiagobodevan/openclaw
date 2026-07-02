@@ -1,3 +1,4 @@
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 // Msteams plugin module implements reaction handler behavior.
 import { normalizeMSTeamsConversationId } from "../inbound.js";
 import type { MSTeamsMessageHandlerDeps } from "../monitor-handler.types.js";
@@ -65,6 +66,7 @@ export function createMSTeamsReactionHandler(deps: MSTeamsMessageHandlerDeps) {
     const isGroupChat = conversationType === "groupChat" || activity.conversation?.isGroup === true;
     const isChannel = conversationType === "channel";
     const isDirectMessage = !isGroupChat && !isChannel;
+    const chatType = isDirectMessage ? "direct" : isChannel ? "channel" : "group";
 
     const senderId = from.aadObjectId ?? from.id;
     const senderName = from.name ?? from.id;
@@ -89,11 +91,31 @@ export function createMSTeamsReactionHandler(deps: MSTeamsMessageHandlerDeps) {
       cfg,
       channel: "msteams",
       peer: {
-        kind: isDirectMessage ? "direct" : isChannel ? "channel" : "group",
+        kind: chatType,
         id: isDirectMessage ? senderId : conversationId,
       },
       ...(teamId ? { teamId } : {}),
     });
+    const identity = resolveConversationIdentityAdmission({
+      cfg,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: chatType,
+        ChatId: isDirectMessage ? undefined : conversationId,
+        GroupSpace: teamId,
+        SenderId: senderId,
+        Provider: "msteams",
+        Surface: "msteams",
+        CommandAuthorized: true,
+      },
+    });
+    if (!identity.allowed) {
+      log.debug?.("dropping reaction before queue insertion", { reason: identity.reason });
+      return;
+    }
 
     // The replyToId points to the message that was reacted to.
     const targetMessageId = (activity as unknown as { replyToId?: string }).replyToId ?? "unknown";
@@ -117,6 +139,7 @@ export function createMSTeamsReactionHandler(deps: MSTeamsMessageHandlerDeps) {
       core.system.enqueueSystemEvent(label, {
         sessionKey: route.sessionKey,
         contextKey: `msteams:reaction:${conversationId}:${targetMessageId}:${senderId}:${reactionType}:${direction}`,
+        actor: { channel: "msteams", accountId: route.accountId, senderId },
       });
     }
   };

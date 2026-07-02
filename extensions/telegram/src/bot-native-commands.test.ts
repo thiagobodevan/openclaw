@@ -28,11 +28,25 @@ type TelegramInlineKeyboardReplyMarkup = {
 type PlugCommandHarnessParams = {
   botHarness?: CommandBotHarness;
   cfg?: OpenClawConfig;
+  identitySafe?: boolean;
   command?: Record<string, unknown>;
   args?: string;
   result?: Record<string, unknown>;
   registerOverrides?: Partial<Parameters<typeof registerTelegramNativeCommands>[0]>;
 };
+
+function withPlugCommandServiceIdentity(cfg: OpenClawConfig): OpenClawConfig {
+  if (cfg.bindings?.length) {
+    return cfg;
+  }
+  return {
+    ...cfg,
+    agents: cfg.agents ?? {
+      list: [{ id: "personal", default: true }, { id: "main" }],
+    },
+    bindings: [{ agentId: "main", match: { channel: "telegram", accountId: "default" } }],
+  };
+}
 
 function primePlugCommand(params: PlugCommandHarnessParams = {}) {
   pluginCommandMocks.getPluginCommandSpecs.mockReturnValue([
@@ -57,8 +71,12 @@ function primePlugCommand(params: PlugCommandHarnessParams = {}) {
 function registerPlugCommand(params: PlugCommandHarnessParams = {}) {
   const botHarness = params.botHarness ?? createCommandBot();
   primePlugCommand(params);
+  const cfg =
+    params.identitySafe === false
+      ? (params.cfg ?? {})
+      : withPlugCommandServiceIdentity(params.cfg ?? {});
   registerTelegramNativeCommands({
-    ...createNativeCommandTestParams(params.cfg ?? {}, {
+    ...createNativeCommandTestParams(cfg, {
       bot: botHarness.bot,
     }),
     ...params.registerOverrides,
@@ -387,6 +405,7 @@ describe("registerTelegramNativeCommands", () => {
   it("prefixes native command menu callback data so callback handlers can preserve native routing", async () => {
     const { bot, commandHandlers, sendMessage } = createCommandBot();
     const cfg = {
+      commands: { ownerAllowFrom: ["telegram:200"] },
       agents: {
         defaults: {
           model: "openai-codex/gpt-5.5",
@@ -768,6 +787,52 @@ describe("registerTelegramNativeCommands", () => {
     expect(commandParams.from).toBe("telegram:group:-1001234567890:topic:77");
     expect(commandParams.to).toBe("telegram:-1001234567890");
     expect(commandParams.messageThreadId).toBe(77);
+  });
+
+  it("denies plugin commands in an unbound shared conversation", async () => {
+    const getChat = vi.fn(async () => ({ id: -1001234567890, type: "supergroup" }));
+    const { handler, sendMessage } = registerPlugCommand({
+      identitySafe: false,
+      botHarness: createCommandBot({ api: { getChat } }),
+    });
+
+    await handler({
+      match: "",
+      message: {
+        message_id: 2,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: -1001234567890, type: "supergroup", title: "Shared Room" },
+        from: { id: 200, username: "guest" },
+      },
+    });
+
+    expect(pluginCommandMocks.executePluginCommand).not.toHaveBeenCalled();
+    expect(getChat).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      -1001234567890,
+      "This conversation is not bound to a shared service agent. Ask an operator to configure an explicit agent binding for this audience.",
+      undefined,
+    );
+  });
+
+  it("denies direct plugin commands when only wildcard command ownership is configured", async () => {
+    const { handler, sendMessage } = registerPlugCommand({
+      identitySafe: false,
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }] },
+        commands: { ownerAllowFrom: ["*"] },
+        channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
+      },
+    });
+
+    await handler(createPrivateCommandContext());
+
+    expect(pluginCommandMocks.executePluginCommand).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      100,
+      "This conversation is not bound to a shared service agent. Ask an operator to configure an explicit agent binding for this audience.",
+      undefined,
+    );
   });
 
   it("treats Telegram forum #General commands as topic 1 when Telegram omits topic metadata", async () => {

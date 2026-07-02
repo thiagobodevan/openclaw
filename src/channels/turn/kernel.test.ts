@@ -655,6 +655,28 @@ describe("channel turn kernel", () => {
     expect(deliver).toHaveBeenCalledWith({ text: "reply" }, { kind: "final" });
   });
 
+  it("rejects unsupported identity contract versions before recording", async () => {
+    const recordInboundSession = createRecordInboundSession();
+    const dispatchReplyWithBufferedBlockDispatcher = createDispatch();
+
+    await expect(
+      dispatchAssembledChannelTurn({
+        cfg,
+        channel: "test",
+        agentId: "main",
+        routeSessionKey: "agent:main:test:peer",
+        storePath: "/tmp/sessions.json",
+        ctxPayload: createCtx(),
+        recordInboundSession,
+        dispatchReplyWithBufferedBlockDispatcher,
+        delivery: { deliver: vi.fn() },
+        replyOptions: { identityContractVersion: 2 } as never,
+      }),
+    ).rejects.toThrow("Unsupported reply identity contract version: 2");
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+  });
+
   it("runs prepared dispatches after recording session metadata", async () => {
     const events: string[] = [];
     const log = vi.fn();
@@ -689,6 +711,36 @@ describe("channel turn kernel", () => {
       { stage: "dispatch", event: "start", messageId: "msg-1" },
       { stage: "dispatch", event: "done", messageId: "msg-1" },
     ]);
+  });
+
+  it("denies a v1 shared turn before recording session metadata", async () => {
+    const events: string[] = [];
+    const recordInboundSession = createRecordInboundSession(events);
+    const runDispatch = vi.fn(async () => {
+      events.push("dispatch");
+      return {
+        queuedFinal: true,
+        counts: { tool: 0, block: 0, final: 1 },
+      };
+    });
+
+    await runPreparedChannelTurn({
+      channel: "test",
+      routeSessionKey: "agent:main:test:channel:shared",
+      storePath: "/tmp/sessions.json",
+      ctxPayload: createCtx({
+        SessionKey: "agent:main:test:channel:shared",
+        AgentRouteMatchedBy: "default",
+        ChatType: "channel",
+        ChatId: "shared",
+      }),
+      recordInboundSession,
+      identity: { cfg, contractVersion: 1 },
+      runDispatch,
+    });
+
+    expect(events).toEqual(["dispatch"]);
+    expect(recordInboundSession).not.toHaveBeenCalled();
   });
 
   it("keeps channel message, harness, usage, and model diagnostics in one trace scope", async () => {
@@ -969,6 +1021,67 @@ describe("channel turn kernel", () => {
     expect(loggedEvents(log)).toEqual([
       { stage: "authorize", event: "drop", messageId: "msg-loop" },
     ]);
+  });
+
+  it("does not consume bot-loop budget for an identity-denied turn", async () => {
+    const identityCfg = {
+      agents: { list: [{ id: "main", default: true }, { id: "service" }] },
+    } as OpenClawConfig;
+    const recordInboundSession = createRecordInboundSession();
+    const runDispatch = vi.fn(async () => ({
+      queuedFinal: true,
+      counts: { tool: 0, block: 0, final: 1 },
+    }));
+    const botLoopProtection = {
+      scopeId: "identity-loop-test",
+      conversationId: "room",
+      senderId: "bot-a",
+      receiverId: "bot-b",
+      config: { maxEventsPerWindow: 1, windowSeconds: 60, cooldownSeconds: 60 },
+      defaultEnabled: true,
+    };
+    const runOne = async (params: {
+      agentId: string;
+      matchedBy: "default" | "binding.channel";
+      nowMs: number;
+    }) =>
+      await runPreparedChannelTurn({
+        channel: "test",
+        routeSessionKey: `agent:${params.agentId}:test:channel:room`,
+        storePath: "/tmp/sessions.json",
+        ctxPayload: createCtx({
+          SessionKey: `agent:${params.agentId}:test:channel:room`,
+          AgentId: params.agentId,
+          AgentRouteMatchedBy: params.matchedBy,
+          ChatType: "channel",
+          ChatId: "room",
+        }),
+        recordInboundSession,
+        identity: { cfg: identityCfg, contractVersion: 1 },
+        runDispatch,
+        botLoopProtection: { ...botLoopProtection, nowMs: params.nowMs },
+      });
+
+    const denied = await runOne({ agentId: "main", matchedBy: "default", nowMs: 1_000 });
+    const admitted = await runOne({
+      agentId: "service",
+      matchedBy: "binding.channel",
+      nowMs: 1_001,
+    });
+    const repeated = await runOne({
+      agentId: "service",
+      matchedBy: "binding.channel",
+      nowMs: 1_002,
+    });
+
+    expect(denied.dispatched).toBe(true);
+    expect(admitted.dispatched).toBe(true);
+    expect(repeated).toMatchObject({
+      admission: { kind: "drop", reason: "bot-loop-protection" },
+      dispatched: false,
+    });
+    expect(runDispatch).toHaveBeenCalledTimes(2);
+    expect(recordInboundSession).toHaveBeenCalledOnce();
   });
 
   it("suppresses direct prepared dispatches for observe-only admission", async () => {

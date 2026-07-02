@@ -101,6 +101,7 @@ async function processTwitchMessage(params: {
           route: {
             agentId: route.agentId,
             accountId: route.accountId,
+            matchedBy: route.matchedBy,
             routeSessionKey: route.sessionKey,
           },
           reply: {
@@ -157,6 +158,7 @@ async function processTwitchMessage(params: {
             },
           },
           replyPipeline: {},
+          replyOptions: { identityContractVersion: 1 },
           record: {
             onRecordError: (err) => {
               runtime.error?.(`Failed updating session meta: ${String(err)}`);

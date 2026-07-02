@@ -7,6 +7,9 @@ const resolveAllowlistProviderRuntimeGroupPolicy = vi.hoisted(() => vi.fn());
 const resolveDefaultGroupPolicy = vi.hoisted(() => vi.fn());
 const warnMissingProviderGroupPolicyFallbackOnce = vi.hoisted(() => vi.fn());
 const sendGoogleChatMessage = vi.hoisted(() => vi.fn());
+const resolveConversationIdentityMode = vi.hoisted(() =>
+  vi.fn(() => ({ mode: "organization", allowed: true, reason: "bound_service_agent" })),
+);
 
 vi.mock("../runtime-api.js", () => ({
   GROUP_POLICY_BLOCKED_LABEL: { space: "space" },
@@ -14,6 +17,7 @@ vi.mock("../runtime-api.js", () => ({
   isDangerousNameMatchingEnabled,
   resolveAllowlistProviderRuntimeGroupPolicy,
   resolveDefaultGroupPolicy,
+  resolveConversationIdentityMode,
   warnMissingProviderGroupPolicyFallbackOnce,
 }));
 
@@ -33,11 +37,19 @@ function createCore() {
       text: {
         hasControlCommand: vi.fn(() => false),
       },
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "googlechat-service",
+          sessionKey: "agent:googlechat-service:googlechat:direct:spaces/AAA",
+          matchedBy: "binding.peer",
+        })),
+      },
     },
   };
 }
 
 function primeCommonDefaults() {
+  sendGoogleChatMessage.mockReset();
   isDangerousNameMatchingEnabled.mockReturnValue(false);
   resolveDefaultGroupPolicy.mockReturnValue("allowlist");
   resolveAllowlistProviderRuntimeGroupPolicy.mockReturnValue({
@@ -45,6 +57,11 @@ function primeCommonDefaults() {
     providerMissingFallbackApplied: false,
   });
   warnMissingProviderGroupPolicyFallbackOnce.mockReturnValue(undefined);
+  resolveConversationIdentityMode.mockReturnValue({
+    mode: "organization",
+    allowed: true,
+    reason: "bound_service_agent",
+  });
 }
 
 const baseAccessConfig = {
@@ -59,6 +76,7 @@ const defaultSender = {
 } as const;
 
 let applyGoogleChatInboundAccessPolicy: typeof import("./monitor-access.js").applyGoogleChatInboundAccessPolicy;
+let resolveGoogleChatStableSenderIsOwner: typeof import("./monitor-access.js").resolveGoogleChatStableSenderIsOwner;
 
 function allowInboundGroupTraffic() {
   createChannelPairingController.mockReturnValue({
@@ -89,7 +107,47 @@ async function applyInboundAccessPolicy(
 
 describe("googlechat inbound access policy", () => {
   beforeAll(async () => {
-    ({ applyGoogleChatInboundAccessPolicy } = await import("./monitor-access.js"));
+    ({ applyGoogleChatInboundAccessPolicy, resolveGoogleChatStableSenderIsOwner } =
+      await import("./monitor-access.js"));
+  });
+
+  it("recognizes owners only by stable ids and gives command owners precedence", () => {
+    const account = {
+      accountId: "default",
+      config: { dm: { allowFrom: ["users/account-owner"] } },
+    } as never;
+
+    expect(
+      resolveGoogleChatStableSenderIsOwner({
+        config: { commands: { ownerAllowFrom: ["googlechat:users/command-owner"] } } as never,
+        account,
+        senderId: "users/command-owner",
+      }),
+    ).toBe(true);
+    expect(
+      resolveGoogleChatStableSenderIsOwner({
+        config: { commands: { ownerAllowFrom: ["googlechat:users/command-owner"] } } as never,
+        account,
+        senderId: "users/account-owner",
+      }),
+    ).toBe(false);
+    expect(
+      resolveGoogleChatStableSenderIsOwner({
+        config: {} as never,
+        account: {
+          accountId: "default",
+          config: { dm: { allowFrom: ["Alice Example"] } },
+        } as never,
+        senderId: "users/alice",
+      }),
+    ).toBe(false);
+    expect(
+      resolveGoogleChatStableSenderIsOwner({
+        config: { commands: { ownerAllowFrom: ["*"] } } as never,
+        account,
+        senderId: "users/account-owner",
+      }),
+    ).toBe(false);
   });
 
   afterAll(() => {
@@ -208,6 +266,40 @@ describe("googlechat inbound access policy", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not pair an unauthorized DM onto a denied personal identity", async () => {
+    primeCommonDefaults();
+    const issueChallenge = vi.fn();
+    createChannelPairingController.mockReturnValue({
+      readAllowFromStore: vi.fn(async () => []),
+      issueChallenge,
+    });
+    resolveConversationIdentityMode.mockReturnValue({
+      mode: "external",
+      allowed: false,
+      reason: "untrusted_direct",
+    });
+
+    await expect(
+      applyGoogleChatInboundAccessPolicy({
+        account: {
+          accountId: "default",
+          config: { dm: { policy: "pairing" } },
+        } as never,
+        config: { channels: { googlechat: {} } } as never,
+        core: createCore() as never,
+        space: { name: "spaces/AAA", displayName: "DM" } as never,
+        message: { annotations: [] } as never,
+        isGroup: false,
+        senderId: "users/guest",
+        senderName: "Guest",
+        rawBody: "hello",
+        logVerbose: vi.fn(),
+      }),
+    ).resolves.toEqual({ ok: false });
+    expect(issueChallenge).not.toHaveBeenCalled();
+    expect(sendGoogleChatMessage).not.toHaveBeenCalled();
   });
 
   it("allows group traffic when sender and mention gates pass", async () => {

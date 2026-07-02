@@ -1,8 +1,9 @@
 // Slack tests cover monitor plugin behavior.
 import type { App } from "@slack/bolt";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import * as conversationRuntime from "openclaw/plugin-sdk/conversation-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveSlackChannelConfig } from "./channel-config.js";
 import { createSlackMonitorContext, normalizeSlackChannelType } from "./context.js";
 
@@ -292,25 +293,96 @@ describe("resolveSlackSystemEventSessionKey", () => {
   });
 
   it("routes channel system events through account bindings", () => {
+    const cfg = {
+      agents: { list: [{ id: "main", default: true }, { id: "ops" }] },
+      bindings: [
+        {
+          agentId: "ops",
+          match: {
+            channel: "slack",
+            accountId: "work",
+          },
+        },
+      ],
+    } satisfies OpenClawConfig;
     const ctx = createSlackMonitorContext({
       ...baseParams(),
       accountId: "work",
-      cfg: {
-        bindings: [
-          {
-            agentId: "ops",
-            match: {
-              channel: "slack",
-              accountId: "work",
-            },
-          },
-        ],
-      },
+      cfg,
     });
     expect(
       ctx.resolveSlackSystemEventSessionKey({ channelId: "C123", channelType: "channel" }),
     ).toBe("agent:ops:slack:channel:c123");
+    expect(
+      ctx.resolveSlackSystemEventRoute({ channelId: "C123", channelType: "channel" }),
+    ).toMatchObject({
+      agentId: "ops",
+      matchedBy: "binding.account",
+      chatType: "channel",
+    });
+    const expectedThreadRoute = ctx.resolveSlackSystemEventRoute({
+      channelId: "C123",
+      channelType: "channel",
+      threadTs: "100.200",
+    });
+    expect(
+      ctx.resolveSlackSystemEventCurrentRoute?.({
+        cfg,
+        channelId: "C123",
+        channelType: "channel",
+        threadTs: "100.200",
+      }),
+    ).toEqual(expectedThreadRoute);
+    expect(
+      ctx.resolveSlackSystemEventCurrentRoute?.({
+        cfg: { agents: cfg.agents },
+        channelId: "C123",
+        channelType: "channel",
+        threadTs: "100.200",
+      }),
+    ).not.toEqual(expectedThreadRoute);
   });
+
+  it.each([
+    {
+      channelId: "C_TARGET",
+      channelType: "channel",
+      senderId: "U_GUEST",
+      peer: { kind: "channel", id: "channel:C_TARGET" },
+    },
+    {
+      channelId: "D_TARGET",
+      channelType: "im",
+      senderId: "U_TARGET",
+      peer: { kind: "direct", id: "user:U_TARGET" },
+    },
+  ] as const)(
+    "admits target-form $peer.kind service bindings for protected event routes",
+    async ({ channelId, channelType, senderId, peer }) => {
+      const ctx = createSlackMonitorContext({
+        ...baseParams(),
+        accountId: "work",
+        cfg: {
+          agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+          bindings: [
+            {
+              agentId: "service",
+              match: { channel: "slack", accountId: "work", peer },
+            },
+          ],
+        },
+      });
+
+      await expect(
+        ctx.resolveSlackSystemEventRouteReady({
+          channelId,
+          channelType,
+          senderId,
+          senderIsOwner: false,
+        }),
+      ).resolves.toMatchObject({ agentId: "service", matchedBy: "binding.peer" });
+    },
+  );
 
   it("routes DM system events through direct-peer bindings when sender is known", () => {
     const ctx = createSlackMonitorContext({
@@ -336,6 +408,274 @@ describe("resolveSlackSystemEventSessionKey", () => {
         senderId: "U123",
       }),
     ).toBe("agent:ops-dm:main");
+    expect(
+      ctx.resolveSlackSystemEventRoute({
+        channelId: "D123",
+        channelType: "im",
+        senderId: "U123",
+      }),
+    ).toMatchObject({
+      agentId: "ops-dm",
+      matchedBy: "binding.peer",
+      chatType: "direct",
+    });
+  });
+
+  it("admits only owner direct events on the unbound personal route", async () => {
+    const ctx = createSlackMonitorContext(baseParams());
+
+    await expect(
+      ctx.resolveSlackSystemEventRouteReady({
+        channelId: "D123",
+        channelType: "im",
+        senderId: "U_OWNER",
+        senderIsOwner: true,
+      }),
+    ).resolves.toMatchObject({ agentId: "main", matchedBy: "default", chatType: "direct" });
+    await expect(
+      ctx.resolveSlackSystemEventRouteReady({
+        channelId: "D123",
+        channelType: "im",
+        senderId: "U_GUEST",
+        senderIsOwner: false,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      ctx.resolveSlackSystemEventRouteReady({
+        channelId: "C123",
+        channelType: "channel",
+        senderId: "U_OWNER",
+        senderIsOwner: true,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("renews runtime bindings only after protected event identity admission", async () => {
+    const touch = vi.fn();
+    conversationRuntime.testing.resetSessionBindingAdaptersForTests();
+    conversationRuntime.registerSessionBindingAdapter({
+      channel: "slack",
+      accountId: "work",
+      listBySession: () => [],
+      resolveByConversation: (conversation) => {
+        const agentId = conversation.conversationId === "C_ALLOWED" ? "service" : "personal";
+        return {
+          bindingId: `binding-${agentId}`,
+          targetSessionKey: `agent:${agentId}:slack:channel:${conversation.conversationId}`,
+          targetKind: "session",
+          conversation,
+          status: "active",
+          boundAt: 1,
+        };
+      },
+      touch,
+    });
+    const ctx = createSlackMonitorContext({
+      ...baseParams(),
+      accountId: "work",
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+      },
+    });
+
+    try {
+      await expect(
+        ctx.resolveSlackSystemEventRouteReady({
+          channelId: "C_DENIED",
+          channelType: "channel",
+          senderId: "U_GUEST",
+          senderIsOwner: false,
+        }),
+      ).resolves.toBeNull();
+      expect(touch).not.toHaveBeenCalled();
+
+      expect(
+        ctx.resolveSlackSystemEventIdentityRoute({
+          channelId: "C_ALLOWED",
+          channelType: "channel",
+          senderId: "U_GUEST",
+          senderIsOwner: false,
+        }),
+      ).toMatchObject({ agentId: "service", matchedBy: "binding.channel" });
+      expect(touch).not.toHaveBeenCalled();
+
+      expect(
+        ctx.resolveSlackSystemEventCurrentRoute?.({
+          cfg: { agents: { list: [{ id: "personal", default: true }, { id: "service" }] } },
+          channelId: "C_ALLOWED",
+          channelType: "channel",
+          senderId: "U_GUEST",
+        }),
+      ).toMatchObject({ agentId: "service", matchedBy: "binding.channel" });
+      expect(touch).not.toHaveBeenCalled();
+
+      await expect(
+        ctx.resolveSlackSystemEventRouteReady({
+          channelId: "C_ALLOWED",
+          channelType: "channel",
+          senderId: "U_GUEST",
+          senderIsOwner: false,
+        }),
+      ).resolves.toMatchObject({ agentId: "service", matchedBy: "binding.channel" });
+      expect(touch).toHaveBeenCalledOnce();
+      expect(touch).toHaveBeenCalledWith("binding-service", undefined);
+    } finally {
+      conversationRuntime.testing.resetSessionBindingAdaptersForTests();
+    }
+  });
+
+  it("fails closed instead of admitting a legacy personal route after binding resolution errors", async () => {
+    const resolveRuntimeBinding = vi
+      .spyOn(conversationRuntime, "lookupRuntimeConversationBindingRoute")
+      .mockImplementation(() => {
+        throw new Error("binding store unavailable");
+      });
+    const ctx = createSlackMonitorContext({
+      ...baseParams(),
+      accountId: "work",
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+        bindings: [
+          {
+            agentId: "service",
+            match: {
+              channel: "slack",
+              accountId: "work",
+              peer: { kind: "direct", id: "U_OWNER" },
+            },
+          },
+        ],
+      },
+    });
+
+    try {
+      expect(
+        ctx.resolveSlackSystemEventRoute({
+          channelId: "D123",
+          channelType: "im",
+          senderId: "U_OWNER",
+        }),
+      ).toMatchObject({ agentId: "personal", matchedBy: "default" });
+      await expect(
+        ctx.resolveSlackSystemEventRouteReady({
+          channelId: "D123",
+          channelType: "im",
+          senderId: "U_OWNER",
+          senderIsOwner: true,
+        }),
+      ).resolves.toBeNull();
+    } finally {
+      resolveRuntimeBinding.mockRestore();
+    }
+  });
+
+  it("resolves and readies configured service bindings for interaction events", async () => {
+    const serviceRoute = {
+      agentId: "service",
+      channel: "slack",
+      accountId: "work",
+      sessionKey: "agent:service:acp:binding:slack:work:c123",
+      mainSessionKey: "agent:service:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    const bindingResolution = {
+      statefulTarget: {
+        agentId: "service",
+        sessionKey: serviceRoute.sessionKey,
+      },
+    };
+    const resolveConfigured = vi
+      .spyOn(conversationRuntime, "resolveConfiguredBindingRoute")
+      .mockReturnValue({
+        route: serviceRoute,
+        boundAgentId: "service",
+        boundSessionKey: serviceRoute.sessionKey,
+        bindingResolution,
+      } as never);
+    const ensureReady = vi
+      .spyOn(conversationRuntime, "ensureConfiguredBindingRouteReady")
+      .mockResolvedValue({ ok: true });
+    const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "service" }] },
+    } satisfies OpenClawConfig;
+    const ctx = createSlackMonitorContext({
+      ...baseParams(),
+      accountId: "work",
+      cfg,
+    });
+
+    expect(
+      ctx.resolveSlackSystemEventCurrentRoute?.({
+        cfg,
+        channelId: "C123",
+        channelType: "channel",
+        senderId: "U123",
+      }),
+    ).toMatchObject({
+      agentId: "service",
+      sessionKey: serviceRoute.sessionKey,
+      matchedBy: "binding.channel",
+    });
+    expect(ensureReady).not.toHaveBeenCalled();
+
+    expect(
+      await ctx.resolveSlackSystemEventRouteReady({
+        channelId: "C123",
+        channelType: "channel",
+        senderId: "U123",
+      }),
+    ).toMatchObject({
+      agentId: "service",
+      sessionKey: serviceRoute.sessionKey,
+      matchedBy: "binding.channel",
+    });
+    expect(resolveConfigured).toHaveBeenCalledTimes(2);
+    expect(ensureReady).toHaveBeenCalledOnce();
+    resolveConfigured.mockRestore();
+    ensureReady.mockRestore();
+  });
+
+  it("rejects shared personal bindings before preparing their runtime", async () => {
+    const personalRoute = {
+      agentId: "personal",
+      channel: "slack",
+      accountId: "work",
+      sessionKey: "agent:personal:acp:binding:slack:work:c123",
+      mainSessionKey: "agent:personal:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.channel" as const,
+    };
+    const resolveConfigured = vi
+      .spyOn(conversationRuntime, "resolveConfiguredBindingRoute")
+      .mockReturnValue({
+        route: personalRoute,
+        boundAgentId: "personal",
+        boundSessionKey: personalRoute.sessionKey,
+        bindingResolution: {
+          statefulTarget: {
+            agentId: "personal",
+            sessionKey: personalRoute.sessionKey,
+          },
+        },
+      } as never);
+    const ensureReady = vi.spyOn(conversationRuntime, "ensureConfiguredBindingRouteReady");
+    const ctx = createSlackMonitorContext({
+      ...baseParams(),
+      accountId: "work",
+      cfg: { agents: { list: [{ id: "personal", default: true }] } },
+    });
+
+    await expect(
+      ctx.resolveSlackSystemEventRouteReady({
+        channelId: "C123",
+        channelType: "channel",
+        senderId: "U123",
+      }),
+    ).resolves.toBeNull();
+    expect(ensureReady).not.toHaveBeenCalled();
+    resolveConfigured.mockRestore();
+    ensureReady.mockRestore();
   });
 });
 

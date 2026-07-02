@@ -19,7 +19,15 @@ export type SystemEvent = {
   text: string;
   ts: number;
   contextKey?: string | null;
+  contextMode?: "exact";
+  actor?: SystemEventActor;
   deliveryContext?: DeliveryContext;
+};
+
+export type SystemEventActor = {
+  channel: string;
+  accountId?: string;
+  senderId: string;
 };
 
 const MAX_EVENTS = 20;
@@ -36,6 +44,8 @@ const queues = resolveGlobalMap<string, SessionQueue>(SYSTEM_EVENT_QUEUES_KEY);
 type SystemEventOptions = {
   sessionKey: string;
   contextKey?: string | null;
+  contextMode?: "exact";
+  actor?: SystemEventActor;
   deliveryContext?: DeliveryContext;
 };
 
@@ -72,8 +82,40 @@ function getOrCreateSessionQueue(sessionKey: string): SessionQueue {
 function cloneSystemEvent(event: SystemEvent): SystemEvent {
   return {
     ...event,
+    ...(event.actor ? { actor: { ...event.actor } } : {}),
     ...(event.deliveryContext ? { deliveryContext: { ...event.deliveryContext } } : {}),
   };
+}
+
+function normalizeSystemEventActor(actor?: SystemEventActor): SystemEventActor | undefined {
+  if (!actor) {
+    return undefined;
+  }
+  const channel = normalizeOptionalLowercaseString(actor.channel);
+  const accountId = normalizeOptionalString(actor.accountId);
+  const senderId = normalizeOptionalString(actor.senderId);
+  if (!channel || !senderId) {
+    throw new Error("system event actors require a channel and senderId");
+  }
+  return { channel, ...(accountId ? { accountId } : {}), senderId };
+}
+
+function areSystemEventActorsEqual(left?: SystemEventActor, right?: SystemEventActor): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+  return (
+    left.channel === right.channel &&
+    left.senderId === right.senderId &&
+    left.accountId === right.accountId
+  );
+}
+
+export function isSystemEventVisibleToActor(event: SystemEvent, actor?: SystemEventActor): boolean {
+  if (!event.actor) {
+    return true;
+  }
+  return areSystemEventActorsEqual(event.actor, normalizeSystemEventActor(actor));
 }
 
 export function isSystemEventContextChanged(
@@ -89,14 +131,42 @@ function findDuplicateInQueue(
   queue: readonly SystemEvent[],
   text: string,
   contextKey: string | null,
+  contextMode: SystemEvent["contextMode"],
+  actor: SystemEventActor | undefined,
   deliveryContext: DeliveryContext | undefined,
 ): boolean {
-  const incoming = { text, contextKey, deliveryContext };
+  const incoming = { text, contextKey, contextMode, actor, deliveryContext };
   if (contextKey === null) {
     const last = queue[queue.length - 1];
     return last ? isDuplicateSystemEvent(last, incoming) : false;
   }
   return queue.some((event) => isDuplicateSystemEvent(event, incoming));
+}
+
+function makeSystemEventQueueSpace(
+  queue: SystemEvent[],
+  actor: SystemEventActor | undefined,
+): boolean {
+  if (queue.length < MAX_EVENTS) {
+    return true;
+  }
+  if (actor) {
+    const sameActorIndex = queue.findIndex((event) =>
+      areSystemEventActorsEqual(event.actor, actor),
+    );
+    if (sameActorIndex === -1) {
+      return false;
+    }
+    // An actor may replace only its own oldest entry. Otherwise one denied or
+    // noisy sender could evict another audience's queued context.
+    queue.splice(sameActorIndex, 1);
+    return true;
+  }
+  // Internal/generic events retain the established bounded queue behavior,
+  // preferring to discard actor-scoped context before another generic event.
+  const actorIndex = queue.findIndex((event) => event.actor !== undefined);
+  queue.splice(actorIndex === -1 ? 0 : actorIndex, 1);
+  return true;
 }
 
 export function enqueueSystemEventEntry(
@@ -112,8 +182,24 @@ export function enqueueSystemEventEntry(
     return null;
   }
   const normalizedContextKey = normalizeContextKey(options.contextKey);
+  if (options.contextMode === "exact" && normalizedContextKey === null) {
+    throw new Error("exact-context system events require a contextKey");
+  }
   const normalizedDeliveryContext = normalizeDeliveryContext(options.deliveryContext);
-  if (findDuplicateInQueue(entry.queue, cleaned, normalizedContextKey, normalizedDeliveryContext)) {
+  const normalizedActor = normalizeSystemEventActor(options.actor);
+  if (
+    findDuplicateInQueue(
+      entry.queue,
+      cleaned,
+      normalizedContextKey,
+      options.contextMode,
+      normalizedActor,
+      normalizedDeliveryContext,
+    )
+  ) {
+    return null;
+  }
+  if (!makeSystemEventQueueSpace(entry.queue, normalizedActor)) {
     return null;
   }
   if (normalizedContextKey !== null) {
@@ -123,12 +209,11 @@ export function enqueueSystemEventEntry(
     text: cleaned,
     ts: Date.now(),
     contextKey: normalizedContextKey,
+    contextMode: options.contextMode,
+    actor: normalizedActor,
     deliveryContext: normalizedDeliveryContext,
   };
   entry.queue.push(event);
-  if (entry.queue.length > MAX_EVENTS) {
-    entry.queue.shift();
-  }
   return cloneSystemEvent(event);
 }
 
@@ -161,11 +246,13 @@ function areDeliveryContextsEqual(left?: DeliveryContext, right?: DeliveryContex
 
 function isDuplicateSystemEvent(
   existing: SystemEvent,
-  incoming: Pick<SystemEvent, "text" | "contextKey" | "deliveryContext">,
+  incoming: Pick<SystemEvent, "text" | "contextKey" | "contextMode" | "actor" | "deliveryContext">,
 ): boolean {
   return (
     existing.text === incoming.text &&
     (existing.contextKey ?? null) === (incoming.contextKey ?? null) &&
+    existing.contextMode === incoming.contextMode &&
+    areSystemEventActorsEqual(existing.actor, incoming.actor) &&
     areDeliveryContextsEqual(existing.deliveryContext, incoming.deliveryContext)
   );
 }
@@ -175,6 +262,8 @@ function areSystemEventsEqual(left: SystemEvent, right: SystemEvent): boolean {
     left.text === right.text &&
     left.ts === right.ts &&
     (left.contextKey ?? null) === (right.contextKey ?? null) &&
+    left.contextMode === right.contextMode &&
+    areSystemEventActorsEqual(left.actor, right.actor) &&
     areDeliveryContextsEqual(left.deliveryContext, right.deliveryContext)
   );
 }

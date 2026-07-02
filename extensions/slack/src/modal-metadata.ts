@@ -5,6 +5,7 @@ type SlackModalPrivateMetadata = {
   sessionKey?: string;
   channelId?: string;
   channelType?: string;
+  threadTs?: string;
   userId?: string;
   pluginInteractiveData?: string;
 };
@@ -21,6 +22,7 @@ export function parseSlackModalPrivateMetadata(raw: unknown): SlackModalPrivateM
       sessionKey: normalizeOptionalString(parsed.sessionKey),
       channelId: normalizeOptionalString(parsed.channelId),
       channelType: normalizeOptionalString(parsed.channelType),
+      threadTs: normalizeOptionalString(parsed.threadTs),
       userId: normalizeOptionalString(parsed.userId),
       pluginInteractiveData: normalizeOptionalString(parsed.pluginInteractiveData),
     };
@@ -34,6 +36,7 @@ export function encodeSlackModalPrivateMetadata(input: SlackModalPrivateMetadata
     ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
     ...(input.channelId ? { channelId: input.channelId } : {}),
     ...(input.channelType ? { channelType: input.channelType } : {}),
+    ...(input.threadTs ? { threadTs: input.threadTs } : {}),
     ...(input.userId ? { userId: input.userId } : {}),
     ...(input.pluginInteractiveData ? { pluginInteractiveData: input.pluginInteractiveData } : {}),
   };

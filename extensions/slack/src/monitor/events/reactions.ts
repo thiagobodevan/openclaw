@@ -47,6 +47,10 @@ export function registerSlackReactionEvents(params: {
       if (!item || item.type !== "message") {
         return;
       }
+      const actorId = event.user;
+      if (!actorId) {
+        return;
+      }
       if (ctx.reactionMode === "off") {
         return;
       }
@@ -57,7 +61,7 @@ export function registerSlackReactionEvents(params: {
 
       const ingressContext = await authorizeAndResolveSlackSystemEventContext({
         ctx,
-        senderId: event.user,
+        senderId: actorId,
         channelId: item.channel,
         eventKind: "reaction",
       });
@@ -81,14 +85,15 @@ export function registerSlackReactionEvents(params: {
       ) {
         return;
       }
-      const actorLabel = actorInfo?.name ?? event.user;
+      const actorLabel = actorInfo?.name ?? actorId;
       const emojiLabel = event.reaction ?? "emoji";
       const authorLabel = authorInfo?.name ?? event.item_user;
       const baseText = `Slack reaction ${action}: :${emojiLabel}: by ${actorLabel} in ${ingressContext.channelLabel} msg ${item.ts}`;
       const text = authorLabel ? `${baseText} from ${authorLabel}` : baseText;
       enqueueSystemEvent(text, {
         sessionKey: ingressContext.sessionKey,
-        contextKey: `slack:reaction:${action}:${item.channel}:${item.ts}:${event.user}:${emojiLabel}`,
+        contextKey: `slack:reaction:${action}:${item.channel}:${item.ts}:${actorId}:${emojiLabel}`,
+        actor: { channel: "slack", accountId: ctx.accountId, senderId: actorId },
       });
     } catch (err) {
       ctx.runtime.error?.(danger(`slack reaction handler failed: ${formatErrorMessage(err)}`));

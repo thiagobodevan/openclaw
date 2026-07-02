@@ -17,6 +17,7 @@ import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-na
 import { logDebug } from "openclaw/plugin-sdk/logging-core";
 import { mimeTypeFromFilePath } from "openclaw/plugin-sdk/media-mime";
 import type { HistoryEntry } from "openclaw/plugin-sdk/reply-history";
+import { resolveConversationIdentityMode } from "openclaw/plugin-sdk/routing";
 import { getChildLogger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 import { resolveDefaultDiscordAccountId } from "../accounts.js";
@@ -66,6 +67,7 @@ import {
   resolveDiscordMessageText,
   resolveMediaList,
 } from "./message-utils.js";
+import { resolveDiscordStableSenderIsOwner } from "./native-command-auth.js";
 import { resolveDiscordSenderIdentity, resolveDiscordWebhookId } from "./sender-identity.js";
 
 export type {
@@ -234,17 +236,9 @@ export async function preflightDiscordMessage(
     return null;
   }
 
-  message = await hydrateDiscordMessageIfNeeded({
-    client: params.client,
-    message,
-    messageChannelId,
-  });
-  if (isPreflightAborted(params.abortSignal)) {
-    return null;
-  }
-
-  const pluralkitConfig = params.discordConfig?.pluralkit;
-  const webhookId = resolveDiscordWebhookId(message);
+  // Channel type and parent id are the minimum provider facts required to
+  // classify DMs, group DMs, and inherited thread routes. Admit that route
+  // before message hydration, thread expansion, or optional identity egress.
   const isGuildMessage = Boolean(params.data.guild_id);
   const channelInfo = await resolveDiscordChannelInfo(params.client, messageChannelId);
   if (isPreflightAborted(params.abortSignal)) {
@@ -254,6 +248,57 @@ export async function preflightDiscordMessage(
     isGuildMessage,
     channelType: channelInfo?.type,
   });
+  const memberRoleIds = Array.isArray(params.data.rawMember?.roles)
+    ? params.data.rawMember.roles
+    : [];
+  const routeState = await resolveDiscordPreflightRoute({
+    preflight: params,
+    author,
+    isDirectMessage,
+    isGroupDm,
+    messageChannelId,
+    memberRoleIds,
+    earlyThreadParentId: channelInfo?.parentId,
+  });
+  const preliminarySender = resolveDiscordSenderIdentity({
+    author,
+    member: params.data.member,
+  });
+  const identity = resolveConversationIdentityMode({
+    config: params.cfg,
+    agentId: routeState.effectiveRoute.agentId,
+    routeMatchedBy: routeState.effectiveRoute.matchedBy,
+    chatType: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
+    groupId: isDirectMessage ? undefined : messageChannelId,
+    groupChannel: isDirectMessage ? undefined : channelInfo?.name,
+    groupSpace: params.data.guild_id,
+    senderIsOwner: resolveDiscordStableSenderIsOwner({
+      cfg: params.cfg,
+      providerAllowFrom: params.allowFrom,
+      sender: preliminarySender,
+    }),
+  });
+  if (!identity.allowed) {
+    logInboundDrop({
+      log: logVerbose,
+      channel: "discord",
+      reason: "conversation identity not admitted",
+      target: messageChannelId,
+    });
+    return null;
+  }
+  message = await hydrateDiscordMessageIfNeeded({
+    client: params.client,
+    message,
+    messageChannelId,
+    channelInfo,
+  });
+  if (isPreflightAborted(params.abortSignal)) {
+    return null;
+  }
+
+  const pluralkitConfig = params.discordConfig?.pluralkit;
+  const webhookId = resolveDiscordWebhookId(message);
   const messageText = resolveDiscordMessageText(message, {
     includeForwarded: true,
   });
@@ -380,20 +425,6 @@ export async function preflightDiscordMessage(
   const { earlyThreadChannel, earlyThreadParentId, earlyThreadParentName, earlyThreadParentType } =
     threadContext;
 
-  // Routing inputs are payload-derived, but config must come from the boundary
-  // snapshot already threaded into the monitor path.
-  const memberRoleIds = Array.isArray(params.data.rawMember?.roles)
-    ? params.data.rawMember.roles
-    : [];
-  const routeState = await resolveDiscordPreflightRoute({
-    preflight: params,
-    author,
-    isDirectMessage,
-    isGroupDm,
-    messageChannelId,
-    memberRoleIds,
-    earlyThreadParentId,
-  });
   const {
     conversationRuntime,
     threadBinding,
@@ -729,6 +760,7 @@ export async function preflightDiscordMessage(
     enqueueSystemEvent(systemText, {
       sessionKey: effectiveRoute.sessionKey,
       contextKey: `discord:system:${messageChannelId}:${message.id}`,
+      actor: { channel: "discord", accountId: resolvedAccountId, senderId: author.id },
     });
     return null;
   }
@@ -772,6 +804,9 @@ export async function preflightDiscordMessage(
   logDebug(
     `[discord-preflight] success: route=${effectiveRoute.agentId} sessionKey=${effectiveRoute.sessionKey}`,
   );
+  routeState.conversationRuntime.touchRuntimeConversationBindingRoute({
+    bindingRecord: routeState.runtimeBinding,
+  });
   return buildDiscordMessagePreflightContext({
     preflightParams: params,
     data,

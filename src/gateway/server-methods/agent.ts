@@ -33,7 +33,10 @@ import {
   parseExecApprovalFollowupApprovalId,
 } from "../../agents/bash-tools.exec-approval-followup-state.js";
 import { clearAllCliSessions } from "../../agents/cli-session.js";
-import type { AgentCommandOpts } from "../../agents/command/types.js";
+import type {
+  AgentCommandIdentityIngressOpts,
+  AgentCommandOpts,
+} from "../../agents/command/types.js";
 import {
   clearEmbeddedAgentRunAbortabilityForRunId,
   isEmbeddedAgentRunAbortableForRunId,
@@ -55,6 +58,7 @@ import {
   normalizeAgentRunTimeoutPhase,
   normalizeProviderStarted,
 } from "../../agents/run-timeout-attribution.js";
+import { isLiveOwnedSessionTarget } from "../../agents/session-target-identity.js";
 import {
   normalizeSpawnedRunMetadata,
   resolveIngressWorkspaceOverrideForSpawnedRun,
@@ -103,6 +107,7 @@ import {
 } from "../../infra/voicewake-routing.js";
 import type { PromptImageOrderEntry } from "../../media/prompt-image-order.js";
 import type { PluginHookSessionEndReason } from "../../plugins/hook-types.js";
+import { isInterSessionIdentityTransitionAllowed } from "../../routing/conversation-identity.js";
 import {
   classifySessionKeyShape,
   isAcpSessionKey,
@@ -943,7 +948,7 @@ function deleteGatewayDedupeEntries(params: {
 }
 
 function dispatchAgentRunFromGateway(params: {
-  ingressOpts: Parameters<typeof agentCommandFromIngress>[0];
+  ingressOpts: AgentCommandIdentityIngressOpts;
   runId: string;
   dedupeKeys: readonly string[];
   /**
@@ -1222,47 +1227,6 @@ export const agentHandlers: GatewayRequestHandlers = {
       idempotencyKey: idem,
       execApprovalFollowupApprovalId,
     });
-    const cached = readGatewayDedupeEntry({
-      dedupe: context.dedupe,
-      keys: agentDedupeKeys,
-    });
-    if (cached) {
-      if (cached.ok && isAcceptedAgentDedupePayload(cached.payload)) {
-        const cachedRunId =
-          typeof cached.payload.runId === "string" && cached.payload.runId.trim()
-            ? cached.payload.runId.trim()
-            : runId;
-        const cachedSessionKey =
-          typeof cached.payload.sessionKey === "string" && cached.payload.sessionKey.trim()
-            ? cached.payload.sessionKey.trim()
-            : undefined;
-        const cachedAgentId =
-          cachedSessionKey === "global" &&
-          typeof cached.payload.agentId === "string" &&
-          cached.payload.agentId.trim()
-            ? cached.payload.agentId.trim()
-            : undefined;
-        respond(
-          true,
-          {
-            runId: cachedRunId,
-            status: "in_flight" as const,
-            ...(cachedSessionKey ? { sessionKey: cachedSessionKey } : {}),
-            ...(cachedAgentId ? { agentId: cachedAgentId } : {}),
-          },
-          undefined,
-          {
-            cached: true,
-            runId: cachedRunId,
-          },
-        );
-        return;
-      }
-      respond(cached.ok, cached.payload, cached.error, {
-        cached: true,
-      });
-      return;
-    }
     let agentDedupeReserved = false;
     let agentRunAccepted = false;
     let committedResetCompletion:
@@ -1493,12 +1457,89 @@ export const agentHandlers: GatewayRequestHandlers = {
         return;
       }
     }
+    if (inputProvenance?.kind === "inter_session") {
+      const targetAgentId =
+        agentId ??
+        (requestedSessionKey
+          ? resolveAgentIdFromSessionKey(
+              resolveSessionStoreKey({ cfg, sessionKey: requestedSessionKey }),
+            )
+          : resolveDefaultAgentId(cfg));
+      const targetIsLiveOwnedChild = Boolean(
+        requestedSessionKey &&
+        canUseInternalRuntimeHandoff &&
+        isLiveOwnedSessionTarget({
+          requesterSessionKey: inputProvenance.sourceSessionKey,
+          targetSessionKey: requestedSessionKey,
+        }),
+      );
+      // Inter-session admission must precede dedupe, session writes, and active-run state.
+      // The runner rechecks after final session resolution, but that is too late for Gateway state.
+      if (
+        !isInterSessionIdentityTransitionAllowed({
+          config: cfg,
+          sourceSessionKey: inputProvenance.sourceSessionKey,
+          sourceTool: inputProvenance.sourceTool,
+          targetAgentId,
+          targetIsLiveOwnedChild,
+        })
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "inter-session identity transition denied"),
+        );
+        return;
+      }
+    }
     // Keep deleted-agent rejection ahead of dedupe, media offload, reset, and
-    // dispatch so agent RPC shares the chat.send / sessions.send boundary.
+    // dispatch, but after inter-session admission so denied callers cannot read
+    // target session state while probing a persisted key.
     if (
       requestedSessionKey &&
       respondDeletedAgentSessionForKey({ sessionKey: requestedSessionKey, agentId, respond })
     ) {
+      return;
+    }
+    const cached = readGatewayDedupeEntry({
+      dedupe: context.dedupe,
+      keys: agentDedupeKeys,
+    });
+    if (cached) {
+      if (cached.ok && isAcceptedAgentDedupePayload(cached.payload)) {
+        const cachedRunId =
+          typeof cached.payload.runId === "string" && cached.payload.runId.trim()
+            ? cached.payload.runId.trim()
+            : runId;
+        const cachedSessionKey =
+          typeof cached.payload.sessionKey === "string" && cached.payload.sessionKey.trim()
+            ? cached.payload.sessionKey.trim()
+            : undefined;
+        const cachedAgentId =
+          cachedSessionKey === "global" &&
+          typeof cached.payload.agentId === "string" &&
+          cached.payload.agentId.trim()
+            ? cached.payload.agentId.trim()
+            : undefined;
+        respond(
+          true,
+          {
+            runId: cachedRunId,
+            status: "in_flight" as const,
+            ...(cachedSessionKey ? { sessionKey: cachedSessionKey } : {}),
+            ...(cachedAgentId ? { agentId: cachedAgentId } : {}),
+          },
+          undefined,
+          {
+            cached: true,
+            runId: cachedRunId,
+          },
+        );
+        return;
+      }
+      respond(cached.ok, cached.payload, cached.error, {
+        cached: true,
+      });
       return;
     }
     // Drop an exec-approval followup whose session key was rebound by /new or
@@ -2810,6 +2851,15 @@ export const agentHandlers: GatewayRequestHandlers = {
                     resolveAgentIdFromSessionKey(resolvedSessionKey) === agentId)
                 ? agentId
                 : undefined;
+          const trustedInterSessionTargetIsLiveOwnedChild = Boolean(
+            canUseInternalRuntimeHandoff &&
+            inputProvenance?.kind === "inter_session" &&
+            resolvedSessionKey &&
+            isLiveOwnedSessionTarget({
+              requesterSessionKey: inputProvenance.sourceSessionKey,
+              targetSessionKey: resolvedSessionKey,
+            }),
+          );
           let execApprovalFollowupRuntimeHandoff =
             canUseInternalRuntimeHandoff && execApprovalFollowupApprovalId
               ? consumeExecApprovalFollowupRuntimeHandoff({
@@ -2854,6 +2904,7 @@ export const agentHandlers: GatewayRequestHandlers = {
               accountId: resolvedAccountId,
               threadId: resolvedThreadId,
               runContext: {
+                isInternal: true,
                 messageChannel: originMessageChannel,
                 accountId: resolvedAccountId,
                 groupId: resolvedGroupId,
@@ -2861,6 +2912,7 @@ export const agentHandlers: GatewayRequestHandlers = {
                 groupSpace: resolvedGroupSpace,
                 currentThreadTs: resolvedThreadId != null ? String(resolvedThreadId) : undefined,
               },
+              identityContractVersion: 1,
               ...(execApprovalFollowupElevatedDefaults
                 ? { bashElevated: execApprovalFollowupElevatedDefaults }
                 : {}),
@@ -2881,6 +2933,7 @@ export const agentHandlers: GatewayRequestHandlers = {
               acpTurnSource: request.acpTurnSource,
               internalEvents: request.internalEvents,
               inputProvenance,
+              trustedInterSessionTargetIsLiveOwnedChild,
               senderIsOwner: clientHasAdminScope(client),
               sessionEffects,
               skipInitialSessionTouch: skipAgentInitialSessionTouch,

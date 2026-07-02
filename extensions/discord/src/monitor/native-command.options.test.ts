@@ -262,9 +262,21 @@ describe("createDiscordNativeCommand option wiring", () => {
 
   it("uses the provider-startup catalog snapshot for /think autocomplete", async () => {
     const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      bindings: [
+        {
+          agentId: "team-service",
+          match: {
+            channel: "discord",
+            accountId: "default",
+            peer: { kind: "direct", id: "owner" },
+          },
+        },
+      ],
+      commands: { ownerAllowFrom: ["user:owner"] },
       channels: {
         discord: {
-          dm: { enabled: true, policy: "open", allowFrom: ["*"] },
+          dm: { enabled: true, policy: "open", allowFrom: ["user:owner"] },
         },
       },
     } as OpenClawConfig;
@@ -282,6 +294,42 @@ describe("createDiscordNativeCommand option wiring", () => {
 
     expect(loadModelCatalogMock).toHaveBeenCalledWith({ cacheOnly: true });
     expect(loadModelCatalogMock).toHaveBeenCalledWith({ config: cfg });
+  });
+
+  it("stops shared-room autocomplete before catalog work when identity is denied", async () => {
+    const cfg = {
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      commands: {
+        allowFrom: { discord: ["user:allowed-user"] },
+      },
+      channels: {
+        discord: {
+          groupPolicy: "allowlist",
+          guilds: {
+            "guild-1": {
+              channels: {
+                "channel-1": { enabled: true, requireMention: false },
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+    const command = createNativeCommand("think", { cfg });
+    const level = requireOption(command, "level");
+    const autocomplete = requireAutocomplete(level, "think level option did not wire autocomplete");
+
+    const respond = await runAutocomplete(autocomplete, {
+      userId: "allowed-user",
+      channelType: ChannelType.GuildText,
+      channelId: "channel-1",
+      channelName: "general",
+      guildId: "guild-1",
+      focusedValue: "xh",
+    });
+
+    expect(respond).toHaveBeenCalledWith([]);
+    expect(loadModelCatalogMock).not.toHaveBeenCalled();
   });
 
   it("keeps static choices for non-acp string action arguments", () => {
@@ -371,6 +419,22 @@ describe("createDiscordNativeCommand option wiring", () => {
       prompt === "/pair" ? ({ command: { name: "pair" }, args: "" } as never) : null,
     );
     try {
+      const cfg = {
+        ...createAllowedGuildAutocompleteConfig({
+          ownerAllowFrom: ["user:owner-user"],
+        }),
+        agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+        bindings: [
+          {
+            agentId: "team-service",
+            match: {
+              channel: "discord",
+              accountId: "default",
+              peer: { kind: "channel", id: "channel-1" },
+            },
+          },
+        ],
+      } as OpenClawConfig;
       const command = createDiscordNativeCommand({
         command: {
           name: "pair",
@@ -389,9 +453,7 @@ describe("createDiscordNativeCommand option wiring", () => {
             },
           ],
         },
-        cfg: createAllowedGuildAutocompleteConfig({
-          ownerAllowFrom: ["user:owner-user"],
-        }),
+        cfg,
         discordConfig: {
           groupPolicy: "allowlist",
           guilds: {
@@ -441,6 +503,18 @@ describe("createDiscordNativeCommand option wiring", () => {
     );
     const sourceCfg = {
       session: { dmScope: "main" },
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      bindings: [
+        {
+          agentId: "team-service",
+          match: {
+            channel: "discord",
+            accountId: "default",
+            peer: { kind: "direct", id: "owner" },
+          },
+        },
+      ],
+      commands: { ownerAllowFrom: ["user:owner"] },
       channels: {
         discord: {
           dm: { enabled: true, policy: "disabled" },
@@ -449,9 +523,21 @@ describe("createDiscordNativeCommand option wiring", () => {
     } as OpenClawConfig;
     const runtimeCfg = {
       session: { dmScope: "per-channel-peer" },
+      agents: { list: [{ id: "personal", default: true }, { id: "team-service" }] },
+      bindings: [
+        {
+          agentId: "team-service",
+          match: {
+            channel: "discord",
+            accountId: "default",
+            peer: { kind: "direct", id: "owner" },
+          },
+        },
+      ],
+      commands: { ownerAllowFrom: ["user:owner"] },
       channels: {
         discord: {
-          dm: { enabled: true, policy: "open", allowFrom: ["*"] },
+          dm: { enabled: true, policy: "open", allowFrom: ["user:owner"] },
         },
       },
     } as OpenClawConfig;

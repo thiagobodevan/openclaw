@@ -12,6 +12,7 @@ import type { ReplyToMode } from "../../../config/types.base.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { PluginHookChannelContext } from "../../../plugins/hook-types.js";
+import type { AgentRouteMatch } from "../../../routing/resolve-route.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
 import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.types.js";
 import type { SkillSnapshot } from "../../../skills/types.js";
@@ -96,6 +97,7 @@ export type FollowupRun = {
   run: {
     agentId: string;
     agentDir: string;
+    routeMatchedBy?: AgentRouteMatch;
     sessionId: string;
     sessionKey?: string;
     runtimePolicySessionKey?: string;

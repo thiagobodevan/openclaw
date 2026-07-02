@@ -1,6 +1,9 @@
 // Mattermost tests cover monitor.inbound system event plugin behavior.
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { generateInteractionToken } from "./interactions.js";
 import { monitorMattermostProvider } from "./monitor.js";
 import type { OpenClawConfig, RuntimeEnv } from "./runtime-api.js";
 
@@ -78,6 +81,7 @@ class FakeWebSocket {
 
 const mockState = vi.hoisted(() => ({
   abortController: undefined as AbortController | undefined,
+  buildModelsProviderData: vi.fn(),
   createMattermostClient: vi.fn(),
   createMattermostDraftStream: vi.fn(),
   dispatchReplyFromConfig: vi.fn(),
@@ -85,10 +89,12 @@ const mockState = vi.hoisted(() => ({
   fetchMattermostMe: vi.fn(),
   registerMattermostMonitorSlashCommands: vi.fn(),
   registerPluginHttpRoute: vi.fn(),
+  readPairingStore: vi.fn(async () => []),
   resolveChannelInfo: vi.fn(),
   resolveMattermostMedia: vi.fn(),
   resolveUserInfo: vi.fn(),
   runtimeCore: undefined as unknown,
+  upsertPairingRequest: vi.fn(async () => ({ code: "123456", created: true })),
   updateMattermostPost: vi.fn(),
 }));
 
@@ -126,9 +132,13 @@ vi.mock("./runtime-api.js", async () => {
   return {
     ...actual,
     buildAgentMediaPayload: vi.fn(() => ({})),
+    buildModelsProviderData: mockState.buildModelsProviderData,
     createChannelPairingController: vi.fn(() => ({
-      readStoreForDmPolicy: vi.fn(async () => []),
-      upsertPairingRequest: vi.fn(async () => ({ code: "123456", created: true })),
+      accountId: "default",
+      readAllowFromStore: mockState.readPairingStore,
+      readStoreForDmPolicy: mockState.readPairingStore,
+      upsertPairingRequest: mockState.upsertPairingRequest,
+      issueChallenge: vi.fn(),
     })),
     createChannelMessageReplyPipeline: vi.fn(() => ({
       onModelSelected: vi.fn(),
@@ -145,6 +155,7 @@ function createRuntimeCore(
   routeOverride?: {
     accountId?: string;
     agentId?: string;
+    matchedBy?: "binding.channel" | "default";
     lastRoutePolicy?: "main" | "session";
     mainSessionKey?: string;
     sessionKey?: string;
@@ -291,7 +302,8 @@ function createRuntimeCore(
       routing: {
         resolveAgentRoute: () => ({
           accountId: routeOverride?.accountId ?? "default",
-          agentId: routeOverride?.agentId ?? "main",
+          agentId: routeOverride?.agentId ?? "mattermost-service",
+          matchedBy: routeOverride?.matchedBy ?? "binding.channel",
           lastRoutePolicy: routeOverride?.lastRoutePolicy ?? "main",
           mainSessionKey: routeOverride?.mainSessionKey ?? "mattermost:default:channel:chan-1",
           sessionKey: routeOverride?.sessionKey ?? "mattermost:default:channel:chan-1",
@@ -361,6 +373,27 @@ const testRuntime = (): RuntimeEnv =>
       throw new Error(`exit ${code}`);
     }) as RuntimeEnv["exit"],
   }) satisfies RuntimeEnv;
+
+function createInteractionRequest(body: unknown): IncomingMessage {
+  return Object.assign(Readable.from([JSON.stringify(body)]), {
+    method: "POST",
+    headers: {},
+    socket: { remoteAddress: "127.0.0.1" },
+  }) as unknown as IncomingMessage;
+}
+
+function createInteractionResponse(): ServerResponse & { body: string } {
+  const response = {
+    statusCode: 200,
+    body: "",
+    setHeader: vi.fn(),
+    end(chunk?: string | Buffer | Uint8Array) {
+      response.body = chunk ? String(chunk) : "";
+      return response;
+    },
+  };
+  return response as unknown as ServerResponse & { body: string };
+}
 
 describe("mattermost inbound user posts", () => {
   beforeEach(() => {
@@ -441,7 +474,244 @@ describe("mattermost inbound user posts", () => {
     expect(ctx?.ConversationLabel).toBe("Town Square id:chan-1");
     expect(ctx?.MessageSid).toBe("post-1");
     expect(ctx?.OriginatingChannel).toBe("mattermost");
+    expect(ctx?.AgentRouteMatchedBy).toBe("binding.channel");
     expect(ctx?.Provider).toBe("mattermost");
+  });
+
+  it("denies an unbound shared route before media preparation", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.runtimeCore = createRuntimeCore(testConfig, {
+      agentId: "main",
+      matchedBy: "default",
+    });
+
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+    socket.emitOpen();
+    await socket.emitMessage({
+      event: "posted",
+      data: {
+        channel_id: "chan-1",
+        post: JSON.stringify({
+          id: "post-unbound",
+          channel_id: "chan-1",
+          user_id: "user-1",
+          message: "shared attachment",
+          file_ids: ["file-1"],
+        }),
+      },
+      broadcast: { channel_id: "chan-1", user_id: "user-1" },
+    });
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.resolveUserInfo).not.toHaveBeenCalled();
+    expect(mockState.readPairingStore).not.toHaveBeenCalled();
+    expect(mockState.upsertPairingRequest).not.toHaveBeenCalled();
+    expect(mockState.resolveMattermostMedia).not.toHaveBeenCalled();
+    expect(mockState.dispatchReplyFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("denies an untrusted direct route before profile or pairing work", async () => {
+    const cfg: OpenClawConfig = {
+      ...testConfig,
+      agents: { list: [{ id: "main", default: true }] },
+      commands: { ownerAllowFrom: [] },
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          dmPolicy: "pairing",
+        },
+      },
+    };
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.runtimeCore = createRuntimeCore(cfg, {
+      agentId: "main",
+      matchedBy: "default",
+    });
+    mockState.resolveChannelInfo.mockResolvedValueOnce({
+      id: "dm-1",
+      name: "",
+      display_name: "",
+      type: "D",
+    });
+
+    const monitor = monitorMattermostProvider({
+      config: cfg,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+    socket.emitOpen();
+    await socket.emitMessage({
+      event: "posted",
+      data: {
+        channel_id: "dm-1",
+        post: JSON.stringify({
+          id: "post-direct-untrusted",
+          channel_id: "dm-1",
+          user_id: "guest-1",
+          message: "hello",
+        }),
+      },
+      broadcast: { channel_id: "dm-1", user_id: "guest-1" },
+    });
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.resolveUserInfo).not.toHaveBeenCalled();
+    expect(mockState.readPairingStore).not.toHaveBeenCalled();
+    expect(mockState.upsertPairingRequest).not.toHaveBeenCalled();
+    expect(mockState.dispatchReplyFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("denies an unbound shared button before queue or post mutation", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.runtimeCore = createRuntimeCore(testConfig, {
+      agentId: "main",
+      matchedBy: "default",
+    });
+    const request = vi.fn(async () => ({
+      id: "post-button",
+      channel_id: "chan-1",
+      message: "Choose",
+      props: { attachments: [{ actions: [{ id: "approve", name: "Approve" }] }] },
+    }));
+    mockState.createMattermostClient.mockReturnValue({ request });
+
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+    socket.emitOpen();
+    await vi.waitFor(() => expect(mockState.registerPluginHttpRoute).toHaveBeenCalled());
+    const registration = mockState.registerPluginHttpRoute.mock.calls.at(0)?.[0] as
+      | { handler?: (req: IncomingMessage, res: ServerResponse) => Promise<void> }
+      | undefined;
+    if (!registration?.handler) {
+      throw new Error("expected Mattermost interaction handler registration");
+    }
+    const context = {
+      action_id: "approve",
+      __openclaw_channel_id: "chan-1",
+      oc_model_picker: true,
+      action: "providers",
+      ownerUserId: "user-1",
+    };
+    const req = createInteractionRequest({
+      user_id: "user-1",
+      user_name: "alice",
+      channel_id: "chan-1",
+      post_id: "post-button",
+      context: {
+        ...context,
+        _token: generateInteractionToken(context, "default"),
+      },
+    });
+    const res = createInteractionResponse();
+
+    await registration.handler(req, res);
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("not bound to a shared service agent");
+    expect(mockState.readPairingStore).not.toHaveBeenCalled();
+    expect(mockState.upsertPairingRequest).not.toHaveBeenCalled();
+    expect(mockState.buildModelsProviderData).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(mockState.updateMattermostPost).not.toHaveBeenCalled();
+    expect(mockState.dispatchReplyFromConfig).not.toHaveBeenCalled();
+  });
+
+  it("enqueues an allowlisted reaction for an explicitly bound service agent", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+    socket.emitOpen();
+    await socket.emitMessage({
+      event: "reaction_added",
+      data: {
+        reaction: JSON.stringify({
+          user_id: "user-1",
+          post_id: "post-1",
+          emoji_name: "thumbsup",
+        }),
+      },
+      broadcast: { channel_id: "chan-1" },
+    });
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.enqueueSystemEvent).toHaveBeenCalledWith(
+      expect.stringContaining("Mattermost reaction added"),
+      expect.objectContaining({
+        sessionKey: "mattermost:default:channel:chan-1",
+        actor: { channel: "mattermost", accountId: "default", senderId: "user-1" },
+      }),
+    );
+  });
+
+  it("does not enqueue an allowlisted shared reaction on the default personal route", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.runtimeCore = createRuntimeCore(testConfig, {
+      agentId: "main",
+      matchedBy: "default",
+    });
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+    socket.emitOpen();
+    await socket.emitMessage({
+      event: "reaction_added",
+      data: {
+        reaction: JSON.stringify({
+          user_id: "user-1",
+          post_id: "post-1",
+          emoji_name: "thumbsup",
+        }),
+      },
+      broadcast: { channel_id: "chan-1" },
+    });
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(mockState.resolveUserInfo).not.toHaveBeenCalled();
   });
 
   it("dispatches a bare bot mention whose body is empty after normalization as a wake event", async () => {
@@ -1038,6 +1308,7 @@ describe("mattermost inbound user posts", () => {
     const abortController = new AbortController();
     mockState.abortController = abortController;
     const directConfig: OpenClawConfig = {
+      agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
       session: { dmScope: "per-channel-peer" },
       channels: {
         mattermost: {
@@ -1052,6 +1323,7 @@ describe("mattermost inbound user posts", () => {
       },
     };
     const runtimeCore = createRuntimeCore(directConfig, {
+      agentId: "main",
       lastRoutePolicy: "session",
       mainSessionKey: "agent:main:main",
       sessionKey: "agent:main:mattermost:direct:user-1",

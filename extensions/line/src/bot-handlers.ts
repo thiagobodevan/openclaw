@@ -16,7 +16,11 @@ import {
   createChannelHistoryWindow,
   type HistoryEntry,
 } from "openclaw/plugin-sdk/reply-history";
-import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
+import {
+  resolveAgentRoute,
+  resolveConversationIdentityMode,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 import { danger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import {
@@ -33,6 +37,8 @@ import {
   buildLineMessageContext,
   buildLinePostbackContext,
   getLineSourceInfo,
+  lookupLineInboundRoute,
+  prepareLineInboundRoute,
   type LineInboundContext,
 } from "./bot-message-context.js";
 import { downloadLineMedia } from "./download.js";
@@ -332,6 +338,28 @@ async function shouldProcessLineEvent(
     accountId: account.accountId,
     log: (message) => logVerbose(message),
   });
+  const peerId = (groupId ?? roomId ?? senderId) || "unknown";
+  const { route } = lookupLineInboundRoute({ source: event.source, cfg, account });
+  const identity = resolveConversationIdentityMode({
+    config: cfg,
+    agentId: route.agentId,
+    routeMatchedBy: route.matchedBy,
+    chatType: isGroup ? "group" : "direct",
+    groupId: isGroup ? peerId : undefined,
+    groupSpace: isGroup ? peerId : undefined,
+    senderIsOwner:
+      !isGroup &&
+      resolveStableSenderIsOwner({
+        senderId,
+        commandOwnerAllowFrom: cfg.commands?.ownerAllowFrom,
+        providerAllowFrom: account.config.allowFrom,
+        normalizeEntry: normalizeLineAllowEntry,
+      }),
+  });
+  if (!identity.allowed) {
+    logVerbose(`line: denied inbound identity before pairing or history (${identity.reason})`);
+    return null;
+  }
 
   if (
     access.senderAccess.decision === "allow" &&
@@ -466,6 +494,13 @@ async function handleMessageEvent(event: MessageEvent, context: LineHandlerConte
     return;
   }
 
+  const preparedRoute = await prepareLineInboundRoute({
+    source: event.source,
+    cfg,
+    account,
+    commandAuthorized: decision.commandAccess.authorized,
+  });
+
   const allMedia: MediaRef[] = [];
 
   if (isDownloadableLineMessageType(message.type)) {
@@ -497,6 +532,7 @@ async function handleMessageEvent(event: MessageEvent, context: LineHandlerConte
     commandAuthorized: decision.commandAccess.authorized,
     groupHistories: context.groupHistories,
     historyLimit: context.historyLimit ?? DEFAULT_GROUP_HISTORY_LIMIT,
+    preparedRoute,
   });
 
   if (!messageContext) {

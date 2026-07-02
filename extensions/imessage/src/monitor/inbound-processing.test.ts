@@ -18,7 +18,20 @@ beforeEach(() => {
 });
 
 describe("resolveIMessageInboundDecision echo detection", () => {
-  const cfg = {} as OpenClawConfig;
+  const cfg = {
+    agents: { list: [{ id: "main", default: true }, { id: "imessage-service" }] },
+    bindings: [
+      {
+        agentId: "imessage-service",
+        match: {
+          channel: "imessage",
+          accountId: "default",
+          peer: { kind: "group", id: "*" },
+        },
+      },
+    ],
+    channels: { imessage: { allowFrom: ["+15555550123"] } },
+  } as OpenClawConfig;
   type InboundDecisionParams = Parameters<typeof resolveIMessageInboundDecision>[0];
 
   function createInboundDecisionParams(
@@ -41,7 +54,7 @@ describe("resolveIMessageInboundDecision echo detection", () => {
       cfg,
       accountId: "default",
       opts: undefined,
-      allowFrom: ["*"],
+      allowFrom: ["+15555550123"],
       groupAllowFrom: [],
       groupPolicy: "open",
       dmPolicy: "open",
@@ -189,6 +202,17 @@ describe("resolveIMessageInboundDecision echo detection", () => {
   it("keeps self-chat cache scoped to configured group threads", async () => {
     const selfChatCache = createSelfChatCache();
     const groupedCfg = {
+      agents: { list: [{ id: "main", default: true }, { id: "imessage-service" }] },
+      bindings: [
+        {
+          agentId: "imessage-service",
+          match: {
+            channel: "imessage",
+            accountId: "default",
+            peer: { kind: "group", id: "*" },
+          },
+        },
+      ],
       channels: {
         imessage: {
           groups: {
@@ -639,6 +663,33 @@ describe("resolveIMessageInboundDecision echo detection", () => {
     expect(decision).toEqual({ kind: "drop", reason: "reaction target not sent by agent" });
   });
 
+  it("denies an unbound shared reaction before reading outbound reply state", async () => {
+    const echoHas = vi.fn(() => false);
+    const isKnownFromMeMessageId = vi.fn(() => true);
+    const decision = await resolveDecision({
+      cfg: { agents: { list: [{ id: "main", default: true }] } },
+      message: {
+        is_group: true,
+        chat_id: 42,
+        is_reaction: true,
+        reaction_emoji: "❤️",
+        reacted_to_guid: "personal-reply",
+        text: "",
+      },
+      messageText: "",
+      bodyText: "",
+      echoCache: { has: echoHas },
+      isKnownFromMeMessageId,
+    });
+
+    expect(decision).toEqual({
+      kind: "drop",
+      reason: "conversation identity unbound_shared",
+    });
+    expect(echoHas).not.toHaveBeenCalled();
+    expect(isKnownFromMeMessageId).not.toHaveBeenCalled();
+  });
+
   it("returns a reaction decision for all reaction notification mode", async () => {
     const decision = await resolveDecision({
       reactionNotifications: "all",
@@ -673,6 +724,196 @@ describe("resolveIMessageInboundDecision echo detection", () => {
     });
 
     expect(decision).toEqual({ kind: "drop", reason: "reaction notifications disabled" });
+  });
+});
+
+describe("resolveIMessageInboundDecision identity admission", () => {
+  it("denies an unbound shared route before history or loop-drop state", async () => {
+    const groupHistories = new Map();
+    const decision = await resolveIMessageInboundDecision({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }] },
+        messages: { groupChat: { mentionPatterns: ["@openclaw"] } },
+      },
+      accountId: "default",
+      message: {
+        id: 42,
+        chat_id: 42,
+        sender: "+15555550123",
+        is_from_me: true,
+        is_group: true,
+        text: "background message",
+      },
+      messageText: "background message",
+      bodyText: "background message",
+      allowFrom: ["*"],
+      groupAllowFrom: [],
+      groupPolicy: "open",
+      dmPolicy: "open",
+      storeAllowFrom: [],
+      historyLimit: 10,
+      groupHistories,
+    });
+
+    expect(decision).toEqual({
+      kind: "drop",
+      reason: "conversation identity unbound_shared",
+    });
+    expect(groupHistories).toEqual(new Map());
+  });
+
+  it("denies a direct pairing request on the personal default route", async () => {
+    const decision = await resolveIMessageInboundDecision({
+      cfg: { agents: { list: [{ id: "main", default: true }] } },
+      accountId: "default",
+      message: {
+        id: 42,
+        sender: "+15555550123",
+        is_from_me: false,
+        is_group: false,
+        text: "hello",
+      },
+      messageText: "hello",
+      bodyText: "hello",
+      allowFrom: [],
+      groupAllowFrom: [],
+      groupPolicy: "open",
+      dmPolicy: "pairing",
+      storeAllowFrom: [],
+      historyLimit: 0,
+      groupHistories: new Map(),
+    });
+
+    expect(decision).toEqual({
+      kind: "drop",
+      reason: "conversation identity untrusted_direct",
+    });
+  });
+
+  it("allows a direct pairing request on an explicitly bound service route", async () => {
+    const decision = await resolveIMessageInboundDecision({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }, { id: "imessage-service" }] },
+        bindings: [
+          {
+            agentId: "imessage-service",
+            match: {
+              channel: "imessage",
+              accountId: "default",
+              peer: { kind: "direct", id: "+15555550123" },
+            },
+          },
+        ],
+      },
+      accountId: "default",
+      message: {
+        id: 42,
+        sender: "+15555550123",
+        is_from_me: false,
+        is_group: false,
+        text: "hello",
+      },
+      messageText: "hello",
+      bodyText: "hello",
+      allowFrom: [],
+      groupAllowFrom: [],
+      groupPolicy: "open",
+      dmPolicy: "pairing",
+      storeAllowFrom: [],
+      historyLimit: 0,
+      groupHistories: new Map(),
+    });
+
+    expect(decision).toMatchObject({
+      kind: "pairing",
+      route: { agentId: "imessage-service", matchedBy: "binding.peer" },
+    });
+  });
+
+  it("uses the routed account allowlist for a direct personal owner", async () => {
+    const decision = await resolveIMessageInboundDecision({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }] },
+        channels: {
+          imessage: {
+            allowFrom: ["+15555559999"],
+            accounts: {
+              work: { allowFrom: ["+15555550123"] },
+            },
+          },
+        },
+      },
+      accountId: "work",
+      message: {
+        id: 42,
+        sender: "+15555550123",
+        is_from_me: false,
+        is_group: false,
+        text: "hello",
+      },
+      messageText: "hello",
+      bodyText: "hello",
+      allowFrom: ["+15555550123"],
+      groupAllowFrom: [],
+      groupPolicy: "open",
+      dmPolicy: "allowlist",
+      storeAllowFrom: [],
+      historyLimit: 0,
+      groupHistories: new Map(),
+    });
+
+    expect(decision).toMatchObject({
+      kind: "dispatch",
+      route: { agentId: "main", accountId: "work" },
+    });
+  });
+
+  it("does not consume self-chat state for a denied direct conversation", async () => {
+    const selfChatCache = createSelfChatCache();
+    const remember = vi.spyOn(selfChatCache, "remember");
+    const message = {
+      id: 42,
+      chat_identifier: "+15555550123",
+      created_at: "2026-07-01T12:00:00.000Z",
+      sender: "+15555550123",
+      is_group: false,
+      text: "same text",
+    };
+    const baseParams = {
+      accountId: "default",
+      messageText: "same text",
+      bodyText: "same text",
+      allowFrom: [],
+      groupAllowFrom: [],
+      groupPolicy: "open",
+      dmPolicy: "allowlist",
+      storeAllowFrom: [],
+      historyLimit: 0,
+      groupHistories: new Map(),
+      selfChatCache,
+    } satisfies Omit<Parameters<typeof resolveIMessageInboundDecision>[0], "cfg" | "message">;
+
+    const denied = await resolveIMessageInboundDecision({
+      ...baseParams,
+      cfg: { agents: { list: [{ id: "main", default: true }] } },
+      message: { ...message, is_from_me: true },
+    });
+    const admitted = await resolveIMessageInboundDecision({
+      ...baseParams,
+      cfg: {
+        agents: { list: [{ id: "main", default: true }] },
+        channels: { imessage: { allowFrom: ["+15555550123"] } },
+      },
+      allowFrom: ["+15555550123"],
+      message: { ...message, id: 43, is_from_me: false },
+    });
+
+    expect(denied).toEqual({
+      kind: "drop",
+      reason: "conversation identity untrusted_direct",
+    });
+    expect(remember).not.toHaveBeenCalled();
+    expect(admitted).toMatchObject({ kind: "dispatch" });
   });
 });
 
@@ -738,6 +979,54 @@ describe("describeIMessageEchoDropLog", () => {
 });
 
 describe("buildIMessageInboundContext", () => {
+  it("uses the normalized handle as the stable sender identity", async () => {
+    const rawSender = "+1 (555) 555-0123";
+    const decision = await resolveIMessageInboundDecision({
+      cfg: {} as OpenClawConfig,
+      accountId: "default",
+      message: {
+        id: 12344,
+        sender: rawSender,
+        text: "Hello",
+        is_from_me: false,
+        is_group: false,
+      },
+      opts: undefined,
+      messageText: "Hello",
+      bodyText: "Hello",
+      allowFrom: ["+15555550123"],
+      groupAllowFrom: [],
+      groupPolicy: "open",
+      dmPolicy: "open",
+      storeAllowFrom: [],
+      historyLimit: 0,
+      groupHistories: new Map(),
+      echoCache: undefined,
+      selfChatCache: undefined,
+      logVerbose: undefined,
+    });
+    expect(decision.kind).toBe("dispatch");
+    if (decision.kind !== "dispatch") {
+      return;
+    }
+
+    const { ctxPayload } = await buildIMessageInboundContext({
+      cfg: {} as OpenClawConfig,
+      decision,
+      message: {
+        id: 12344,
+        sender: rawSender,
+        text: "Hello",
+        is_from_me: false,
+        is_group: false,
+      },
+      historyLimit: 0,
+      groupHistories: new Map(),
+    });
+
+    expect(ctxPayload.SenderId).toBe("+15555550123");
+  });
+
   it("keeps numeric row id and provider GUID separately for action tooling", async () => {
     const decision = await resolveIMessageInboundDecision({
       cfg: {} as OpenClawConfig,
@@ -753,7 +1042,7 @@ describe("buildIMessageInboundContext", () => {
       opts: undefined,
       messageText: "Hello",
       bodyText: "Hello",
-      allowFrom: ["*"],
+      allowFrom: ["+15555550123"],
       groupAllowFrom: [],
       groupPolicy: "open",
       dmPolicy: "open",
@@ -803,7 +1092,7 @@ describe("buildIMessageInboundContext", () => {
       opts: undefined,
       messageText: "current",
       bodyText: "current",
-      allowFrom: ["*"],
+      allowFrom: ["+15555550123"],
       groupAllowFrom: [],
       groupPolicy: "open",
       dmPolicy: "open",
@@ -884,7 +1173,10 @@ describe("resolveIMessageInboundDecision command auth", () => {
       storeAllowFrom: [],
     });
 
-    expect(decision).toEqual({ kind: "drop", reason: "dmPolicy blocked" });
+    expect(decision).toEqual({
+      kind: "drop",
+      reason: "conversation identity untrusted_direct",
+    });
   });
 
   it("authorizes DM commands for senders in pairing-mode store allowlist", async () => {

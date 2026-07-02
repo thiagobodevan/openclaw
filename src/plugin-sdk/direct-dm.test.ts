@@ -14,36 +14,42 @@ const baseCfg = {
   commands: { useAccessGroups: true },
 } as unknown as OpenClawConfig;
 
-function createDirectDmRuntime() {
+function createDirectDmRuntime(
+  options: { includeRouteProvenance?: boolean; routeAgentId?: string } = {},
+) {
   const recordInboundSession = vi.fn(async () => {});
   const dispatchReplyWithBufferedBlockDispatcher = vi.fn(async ({ dispatcherOptions }) => {
     await dispatcherOptions.deliver({ text: "reply text" });
   });
+  const runtime = {
+    channel: {
+      routing: {
+        resolveAgentRoute: vi.fn(({ accountId, peer }) => ({
+          agentId: options.routeAgentId ?? "agent-main",
+          accountId,
+          sessionKey: `dm:${peer.id}`,
+          ...(options.includeRouteProvenance === false
+            ? {}
+            : { matchedBy: "binding.peer" as const }),
+        })),
+      },
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/direct-dm-session-store"),
+        readSessionUpdatedAt: vi.fn(() => 1234),
+        recordInboundSession,
+      },
+      reply: {
+        resolveEnvelopeFormatOptions: vi.fn(() => ({ mode: "agent" })),
+        formatAgentEnvelope: vi.fn(({ body }) => `env:${body}`),
+        finalizeInboundContext: vi.fn((ctx) => ctx),
+        dispatchReplyWithBufferedBlockDispatcher,
+      },
+    },
+  };
   return {
     recordInboundSession,
     dispatchReplyWithBufferedBlockDispatcher,
-    runtime: {
-      channel: {
-        routing: {
-          resolveAgentRoute: vi.fn(({ accountId, peer }) => ({
-            agentId: "agent-main",
-            accountId,
-            sessionKey: `dm:${peer.id}`,
-          })),
-        },
-        session: {
-          resolveStorePath: vi.fn(() => "/tmp/direct-dm-session-store"),
-          readSessionUpdatedAt: vi.fn(() => 1234),
-          recordInboundSession,
-        },
-        reply: {
-          resolveEnvelopeFormatOptions: vi.fn(() => ({ mode: "agent" })),
-          formatAgentEnvelope: vi.fn(({ body }) => `env:${body}`),
-          finalizeInboundContext: vi.fn((ctx) => ctx),
-          dispatchReplyWithBufferedBlockDispatcher,
-        },
-      },
-    } as never,
+    runtime,
   };
 }
 
@@ -222,7 +228,7 @@ describe("plugin-sdk/direct-dm", () => {
       cfg: {
         session: { store: { type: "jsonl" } },
       } as never,
-      runtime,
+      runtime: runtime as never,
       channel: "nostr",
       channelLabel: "Nostr",
       accountId: "default",
@@ -251,8 +257,134 @@ describe("plugin-sdk/direct-dm", () => {
     expect(result.ctxPayload.SenderId).toBe("sender-1");
     expect(result.ctxPayload.MessageSid).toBe("event-123");
     expect(result.ctxPayload.CommandAuthorized).toBe(true);
+    expect(result.ctxPayload.AgentRouteMatchedBy).toBe("binding.peer");
     expect(recordInboundSession).toHaveBeenCalledTimes(1);
     expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledTimes(1);
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyOptions: expect.not.objectContaining({ identityContractVersion: expect.anything() }),
+      }),
+    );
     expect(deliver).toHaveBeenCalledWith({ text: "reply text" });
+  });
+
+  it("keeps unversioned direct-DM runtimes compatible without route provenance", async () => {
+    const { dispatchReplyWithBufferedBlockDispatcher, runtime } = createDirectDmRuntime({
+      includeRouteProvenance: false,
+    });
+
+    await expect(
+      dispatchInboundDirectDmWithRuntime({
+        cfg: {} as never,
+        runtime: runtime as never,
+        channel: "nostr",
+        channelLabel: "Nostr",
+        accountId: "default",
+        peer: { kind: "direct", id: "sender-1" },
+        senderId: "sender-1",
+        senderAddress: "nostr:sender-1",
+        recipientAddress: "nostr:bot-1",
+        conversationLabel: "sender-1",
+        rawBody: "hello world",
+        messageId: "event-123",
+        deliver: async () => {},
+        onRecordError: () => {},
+        onDispatchError: () => {},
+      }),
+    ).resolves.toMatchObject({ route: { agentId: "agent-main" } });
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledOnce();
+  });
+
+  it("requires route provenance for identity contract v1 before recording or dispatch", async () => {
+    const { recordInboundSession, dispatchReplyWithBufferedBlockDispatcher, runtime } =
+      createDirectDmRuntime({ includeRouteProvenance: false });
+
+    await expect(
+      dispatchInboundDirectDmWithRuntime({
+        cfg: {} as never,
+        runtime: runtime as never,
+        channel: "nostr",
+        channelLabel: "Nostr",
+        accountId: "default",
+        peer: { kind: "direct", id: "sender-1" },
+        senderId: "sender-1",
+        senderAddress: "nostr:sender-1",
+        recipientAddress: "nostr:bot-1",
+        conversationLabel: "sender-1",
+        rawBody: "hello world",
+        messageId: "event-123",
+        identityContractVersion: 1,
+        deliver: async () => {},
+        onRecordError: () => {},
+        onDispatchError: () => {},
+      }),
+    ).rejects.toThrow("Identity contract v1 requires route provenance.");
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+    expect(runtime.channel.session.resolveStorePath).not.toHaveBeenCalled();
+    expect(runtime.channel.session.readSessionUpdatedAt).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported identity contract versions before route or session work", async () => {
+    const { recordInboundSession, dispatchReplyWithBufferedBlockDispatcher, runtime } =
+      createDirectDmRuntime();
+
+    await expect(
+      dispatchInboundDirectDmWithRuntime({
+        cfg: {} as never,
+        runtime: runtime as never,
+        channel: "nostr",
+        channelLabel: "Nostr",
+        accountId: "default",
+        peer: { kind: "direct", id: "sender-1" },
+        senderId: "sender-1",
+        senderAddress: "nostr:sender-1",
+        recipientAddress: "nostr:bot-1",
+        conversationLabel: "sender-1",
+        rawBody: "hello world",
+        messageId: "event-123",
+        identityContractVersion: 2,
+        deliver: async () => {},
+        onRecordError: () => {},
+        onDispatchError: () => {},
+      } as never),
+    ).rejects.toThrow("Unsupported reply identity contract version: 2");
+    expect(runtime.channel.routing.resolveAgentRoute).not.toHaveBeenCalled();
+    expect(runtime.channel.session.resolveStorePath).not.toHaveBeenCalled();
+    expect(runtime.channel.session.readSessionUpdatedAt).not.toHaveBeenCalled();
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+  });
+
+  it("denies an untrusted personal-route DM before reading session state", async () => {
+    const { recordInboundSession, dispatchReplyWithBufferedBlockDispatcher, runtime } =
+      createDirectDmRuntime({ routeAgentId: "main" });
+    const deliver = vi.fn(async () => {});
+
+    await dispatchInboundDirectDmWithRuntime({
+      cfg: {} as never,
+      runtime: runtime as never,
+      channel: "nostr",
+      channelLabel: "Nostr",
+      accountId: "default",
+      peer: { kind: "direct", id: "guest" },
+      senderId: "guest",
+      senderAddress: "nostr:guest",
+      recipientAddress: "nostr:bot-1",
+      conversationLabel: "guest",
+      rawBody: "hello world",
+      messageId: "event-guest",
+      identityContractVersion: 1,
+      deliver,
+      onRecordError: () => {},
+      onDispatchError: () => {},
+    });
+
+    expect(runtime.channel.session.readSessionUpdatedAt).not.toHaveBeenCalled();
+    expect(recordInboundSession).not.toHaveBeenCalled();
+    expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
+    expect(deliver).toHaveBeenCalledWith({
+      text: expect.stringContaining("not bound to a shared service agent"),
+    });
   });
 });

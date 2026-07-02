@@ -327,6 +327,15 @@ describe("heartbeat-wake", () => {
       agentId: "ops",
       sessionKey: "agent:ops:guildchat:channel:alerts",
       heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        systemEventContextKey: "slack:interaction:c_alerts:100:deploy",
+        routeMatchedBy: "binding.channel",
+        chatType: "channel",
+        groupId: "C_ALERTS",
+        groupSpace: "T_WORK",
+        senderId: "U_OWNER",
+      },
       coalesceMs: 0,
     });
 
@@ -339,6 +348,15 @@ describe("heartbeat-wake", () => {
       agentId: "ops",
       sessionKey: "agent:ops:guildchat:channel:alerts",
       heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        systemEventContextKey: "slack:interaction:c_alerts:100:deploy",
+        routeMatchedBy: "binding.channel",
+        chatType: "channel",
+        groupId: "C_ALERTS",
+        groupSpace: "T_WORK",
+        senderId: "U_OWNER",
+      },
     });
 
     await vi.advanceTimersByTimeAsync(1000);
@@ -350,6 +368,15 @@ describe("heartbeat-wake", () => {
       agentId: "ops",
       sessionKey: "agent:ops:guildchat:channel:alerts",
       heartbeat: { target: "last" },
+      conversation: {
+        messageChannel: "slack",
+        systemEventContextKey: "slack:interaction:c_alerts:100:deploy",
+        routeMatchedBy: "binding.channel",
+        chatType: "channel",
+        groupId: "C_ALERTS",
+        groupSpace: "T_WORK",
+        senderId: "U_OWNER",
+      },
     });
   });
 
@@ -433,5 +460,57 @@ describe("heartbeat-wake", () => {
         sessionKey: "agent:main:forum:group:-1001",
       },
     ]);
+  });
+
+  it("keeps same-session channel interactions distinct by system event", async () => {
+    vi.useFakeTimers();
+    const handler = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
+    setHeartbeatWakeHandler(handler);
+    const conversation = {
+      messageChannel: "slack" as const,
+      routeMatchedBy: "binding.channel" as const,
+      chatType: "channel" as const,
+      groupId: "C_ALERTS",
+      senderId: "U_OWNER",
+      resolveCurrentRoute: () => ({
+        agentId: "ops",
+        sessionKey: "agent:ops:slack:channel:c_alerts",
+        matchedBy: "binding.channel" as const,
+      }),
+    };
+
+    requestHeartbeat({
+      source: "channel-interaction",
+      intent: "immediate",
+      reason: "hook:slack-interaction",
+      agentId: "ops",
+      sessionKey: "agent:ops:slack:channel:c_alerts",
+      conversation: {
+        ...conversation,
+        systemEventContextKey: "slack:interaction:c_alerts:100:approve",
+      },
+      coalesceMs: 100,
+    });
+    requestHeartbeat({
+      source: "channel-interaction",
+      intent: "immediate",
+      reason: "hook:slack-interaction",
+      agentId: "ops",
+      sessionKey: "agent:ops:slack:channel:c_alerts",
+      conversation: {
+        ...conversation,
+        systemEventContextKey: "slack:interaction:c_alerts:100:reject",
+      },
+      coalesceMs: 100,
+    });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(
+      handler.mock.calls
+        .map((call) => call[0].conversation.systemEventContextKey)
+        .toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(["slack:interaction:c_alerts:100:approve", "slack:interaction:c_alerts:100:reject"]);
   });
 });

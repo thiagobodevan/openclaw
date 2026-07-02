@@ -21,7 +21,7 @@ export function registerSlackChannelEvents(params: {
 }) {
   const { ctx, trackEvent } = params;
 
-  const enqueueChannelSystemEvent = (paramsLocal: {
+  const enqueueChannelSystemEvent = async (paramsLocal: {
     kind: "created" | "renamed";
     channelId: string | undefined;
     channelName: string | undefined;
@@ -40,12 +40,15 @@ export function registerSlackChannelEvents(params: {
       channelId: paramsLocal.channelId,
       channelName: paramsLocal.channelName,
     });
-    const sessionKey = ctx.resolveSlackSystemEventSessionKey({
+    const route = await ctx.resolveSlackSystemEventRouteReady({
       channelId: paramsLocal.channelId,
       channelType: "channel",
     });
+    if (!route) {
+      return;
+    }
     enqueueSystemEvent(`Slack channel ${paramsLocal.kind}: ${label}.`, {
-      sessionKey,
+      sessionKey: route.sessionKey,
       contextKey: `slack:channel:${paramsLocal.kind}:${paramsLocal.channelId ?? paramsLocal.channelName ?? "unknown"}`,
     });
   };
@@ -62,7 +65,7 @@ export function registerSlackChannelEvents(params: {
         const payload = event as SlackChannelCreatedEvent;
         const channelId = payload.channel?.id;
         const channelName = payload.channel?.name;
-        enqueueChannelSystemEvent({ kind: "created", channelId, channelName });
+        await enqueueChannelSystemEvent({ kind: "created", channelId, channelName });
       } catch (err) {
         ctx.runtime.error?.(
           danger(`slack channel created handler failed: ${formatErrorMessage(err)}`),
@@ -83,7 +86,7 @@ export function registerSlackChannelEvents(params: {
         const payload = event as SlackChannelRenamedEvent;
         const channelId = payload.channel?.id;
         const channelName = payload.channel?.name_normalized ?? payload.channel?.name;
-        enqueueChannelSystemEvent({ kind: "renamed", channelId, channelName });
+        await enqueueChannelSystemEvent({ kind: "renamed", channelId, channelName });
       } catch (err) {
         ctx.runtime.error?.(
           danger(`slack channel rename handler failed: ${formatErrorMessage(err)}`),

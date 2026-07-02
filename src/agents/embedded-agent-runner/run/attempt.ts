@@ -1277,6 +1277,10 @@ export async function runEmbeddedAttempt(
       senderUsername: params.senderUsername,
       senderE164: params.senderE164,
       senderIsOwner: params.senderIsOwner,
+      isInternal:
+        (params.trigger !== undefined && params.trigger !== "user") ||
+        params.inputProvenance?.kind === "internal_system",
+      routeMatchedBy: params.routeMatchedBy,
       modelProvider: params.provider,
       modelId: params.modelId,
       modelApi: params.model.api,

@@ -84,10 +84,21 @@ function createRuntime() {
 
 describe("dispatchSmsInboundEvent", () => {
   it("creates and sends a pairing challenge for first-time SMS senders", async () => {
-    const { runtime, readAllowFromStore, upsertPairingRequest } = createRuntime();
+    const { runtime, readAllowFromStore, upsertPairingRequest, resolveAgentRoute } =
+      createRuntime();
+    resolveAgentRoute.mockReturnValue({
+      agentId: "team-ops",
+      accountId: "default",
+      sessionKey: "agent:team-ops:sms:direct:+15551234567",
+      matchedBy: "binding.peer",
+    });
 
     await dispatchSmsInboundEvent({
-      cfg: {},
+      cfg: {
+        agents: {
+          list: [{ id: "main", default: true }, { id: "team-ops" }],
+        },
+      },
       account: createAccount(),
       channelRuntime: runtime,
       msg: {
@@ -118,14 +129,48 @@ describe("dispatchSmsInboundEvent", () => {
     );
   });
 
-  it("uses the canonical routed session key for authorized SMS turns", async () => {
-    const { runtime, resolveAgentRoute, run, buildContext, resolveStorePath } = createRuntime();
+  it("denies an untrusted personal route before pairing reads, writes, or SMS egress", async () => {
+    const { runtime, readAllowFromStore, upsertPairingRequest, resolveAgentRoute, run } =
+      createRuntime();
     resolveAgentRoute.mockReturnValue({
       agentId: "main",
       accountId: "default",
       sessionKey: "agent:main:sms:direct:+15551234567",
+      matchedBy: "default",
     });
-    buildContext.mockReturnValue({ SessionKey: "agent:main:sms:direct:+15551234567" });
+    sendSmsViaTwilio.mockClear();
+
+    await dispatchSmsInboundEvent({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }] },
+        commands: { ownerAllowFrom: ["+15550000000"] },
+      },
+      account: createAccount(),
+      channelRuntime: runtime,
+      msg: {
+        from: "+15551234567",
+        to: "+15557654321",
+        body: "hello",
+        messageSid: "SM-untrusted",
+        accountSid: "AC123",
+      },
+    });
+
+    expect(readAllowFromStore).not.toHaveBeenCalled();
+    expect(upsertPairingRequest).not.toHaveBeenCalled();
+    expect(sendSmsViaTwilio).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("uses the canonical routed session key for authorized SMS turns", async () => {
+    const { runtime, resolveAgentRoute, run, buildContext, resolveStorePath } = createRuntime();
+    resolveAgentRoute.mockReturnValue({
+      agentId: "team-ops",
+      accountId: "default",
+      sessionKey: "agent:team-ops:sms:direct:+15551234567",
+      matchedBy: "binding.peer",
+    });
+    buildContext.mockReturnValue({ SessionKey: "agent:team-ops:sms:direct:+15551234567" });
     resolveStorePath.mockReturnValue("/tmp/openclaw-sessions");
 
     await dispatchSmsInboundEvent({
@@ -157,11 +202,13 @@ describe("dispatchSmsInboundEvent", () => {
     expect(buildContext).toHaveBeenCalledWith(
       expect.objectContaining({
         route: expect.objectContaining({
-          routeSessionKey: "agent:main:sms:direct:+15551234567",
-          dispatchSessionKey: "agent:main:sms:direct:+15551234567",
+          agentId: "team-ops",
+          matchedBy: "binding.peer",
+          routeSessionKey: "agent:team-ops:sms:direct:+15551234567",
+          dispatchSessionKey: "agent:team-ops:sms:direct:+15551234567",
         }),
       }),
     );
-    expect(turn.routeSessionKey).toBe("agent:main:sms:direct:+15551234567");
+    expect(turn.routeSessionKey).toBe("agent:team-ops:sms:direct:+15551234567");
   });
 });

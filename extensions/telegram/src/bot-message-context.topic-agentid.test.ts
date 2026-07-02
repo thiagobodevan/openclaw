@@ -25,6 +25,21 @@ vi.mock("openclaw/plugin-sdk/runtime-config-snapshot", async () => {
 const { buildTelegramMessageContextForTest } =
   await import("./bot-message-context.test-harness.js");
 
+const topicRoutingConfig = {
+  agents: {
+    list: [
+      { id: "personal", default: true },
+      { id: "main" },
+      { id: "zu" },
+      { id: "q" },
+      { id: "support" },
+    ],
+  },
+  bindings: [{ agentId: "main", match: { channel: "telegram", accountId: "default" } }],
+  channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
+  messages: { groupChat: { mentionPatterns: [] } },
+};
+
 describe("buildTelegramMessageContext per-topic agentId routing", () => {
   function buildForumMessage(threadId = 3) {
     return {
@@ -48,6 +63,7 @@ describe("buildTelegramMessageContext per-topic agentId routing", () => {
   }) {
     return await buildTelegramMessageContextForTest({
       message: buildForumMessage(params.threadId),
+      cfg: topicRoutingConfig,
       options: { forceWasMentioned: true },
       resolveGroupActivation: () => true,
       resolveTelegramGroupConfig: () => ({
@@ -74,6 +90,7 @@ describe("buildTelegramMessageContext per-topic agentId routing", () => {
 
     expect(ctx?.ctxPayload?.SessionKey).toContain("agent:zu:");
     expect(ctx?.ctxPayload?.SessionKey).toContain("telegram:group:-1001234567890:topic:3");
+    expect(ctx?.ctxPayload?.AgentRouteMatchedBy).toBe("config.agent");
   });
 
   it("different topics route to different agents", async () => {
@@ -112,6 +129,7 @@ describe("buildTelegramMessageContext per-topic agentId routing", () => {
         from: { id: 42, first_name: "Alice" },
       },
       options: { forceWasMentioned: true },
+      cfg: topicRoutingConfig,
       resolveGroupActivation: () => true,
       resolveTelegramGroupConfig,
     });
@@ -129,7 +147,7 @@ describe("buildTelegramMessageContext per-topic agentId routing", () => {
     expect(ctx?.ctxPayload?.SessionKey).toContain("agent:main:");
   });
 
-  it("preserves an unknown topic agentId in the session key", async () => {
+  it("rejects an unknown topic agentId", async () => {
     vi.mocked(getRuntimeConfig).mockReturnValue({
       agents: {
         list: [{ id: "main", default: true }, { id: "zu" }],
@@ -140,7 +158,33 @@ describe("buildTelegramMessageContext per-topic agentId routing", () => {
 
     const ctx = await buildForumContext({ topicConfig: { agentId: "ghost" } });
 
-    expect(ctx?.ctxPayload?.SessionKey).toContain("agent:ghost:");
+    expect(ctx).toBeNull();
+  });
+
+  it("denies an unbound shared route before probing omitted forum metadata", async () => {
+    const getChat = vi.fn(async () => ({
+      id: -1001234567890,
+      type: "supergroup",
+      is_forum: true,
+    }));
+
+    const ctx = await buildTelegramMessageContextForTest({
+      message: {
+        message_id: 1,
+        chat: { id: -1001234567890, type: "supergroup", title: "Shared" },
+        date: 1700000000,
+        text: "hello",
+        from: { id: 42, first_name: "Alice" },
+      },
+      botApi: { getChat },
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }] },
+        channels: { telegram: {} },
+      },
+    });
+
+    expect(ctx).toBeNull();
+    expect(getChat).not.toHaveBeenCalled();
   });
 
   it("routes DM topic to specific agent when agentId is set", async () => {
@@ -157,6 +201,7 @@ describe("buildTelegramMessageContext per-topic agentId routing", () => {
         from: { id: 42, first_name: "Alice" },
       },
       options: { forceWasMentioned: true },
+      cfg: topicRoutingConfig,
       resolveGroupActivation: () => true,
       resolveTelegramGroupConfig: () => ({
         groupConfig: { requireMention: false },

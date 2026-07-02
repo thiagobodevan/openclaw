@@ -3,7 +3,8 @@ import {
   channelIngressRoutes,
   resolveStableChannelMessageIngress,
 } from "openclaw/plugin-sdk/channel-ingress-runtime";
-import { resolveInboundRouteEnvelopeBuilderWithRuntime } from "openclaw/plugin-sdk/inbound-envelope";
+import { createInboundEnvelopeBuilder } from "openclaw/plugin-sdk/inbound-envelope";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import {
   normalizeOptionalString,
   normalizeStringEntries,
@@ -132,16 +133,68 @@ export async function handleNextcloudTalkInbound(params: {
     return;
   }
 
-  const roomKind = await resolveNextcloudTalkRoomKind({
-    account,
-    roomToken: message.roomToken,
-    runtime,
-  });
-  const isGroup = roomKind === "direct" ? false : roomKind === "group" ? true : message.isGroupChat;
   const senderId = message.senderId;
   const senderName = message.senderName;
   const roomToken = message.roomToken;
   const roomName = message.roomName;
+  let isGroup = message.isGroupChat;
+
+  const resolveIdentityRoute = () => {
+    const route = core.channel.routing.resolveAgentRoute({
+      cfg: config as OpenClawConfig,
+      channel: CHANNEL_ID,
+      accountId: account.accountId,
+      peer: {
+        kind: isGroup ? "group" : "direct",
+        id: isGroup ? roomToken : senderId,
+      },
+    });
+    const decision = resolveConversationIdentityAdmission({
+      cfg: config as OpenClawConfig,
+      ctx: {
+        AgentId: route.agentId,
+        AgentRouteMatchedBy: route.matchedBy,
+        SessionKey: route.sessionKey,
+        AccountId: route.accountId,
+        ChatType: isGroup ? "group" : "direct",
+        ChatId: isGroup ? roomToken : undefined,
+        GroupChannel: isGroup ? roomToken : undefined,
+        SenderId: senderId,
+        From: isGroup ? `nextcloud-talk:room:${roomToken}` : `nextcloud-talk:${senderId}`,
+        To: `nextcloud-talk:${roomToken}`,
+        Provider: CHANNEL_ID,
+        Surface: CHANNEL_ID,
+      },
+    });
+    return { route, decision };
+  };
+  let identityRoute = resolveIdentityRoute();
+  // The webhook audience fact is conservative. Never use authenticated room
+  // hydration to turn an unbound shared route into a personal conversation.
+  if (!identityRoute.decision.allowed) {
+    runtime.log?.(
+      `nextcloud-talk: drop ${isGroup ? "room" : "DM sender"} ${isGroup ? roomToken : senderId} (identity=${identityRoute.decision.reason})`,
+    );
+    return;
+  }
+
+  const roomKind = await resolveNextcloudTalkRoomKind({
+    account,
+    roomToken,
+    runtime,
+  });
+  const hydratedIsGroup =
+    roomKind === "direct" ? false : roomKind === "group" ? true : message.isGroupChat;
+  if (hydratedIsGroup !== isGroup) {
+    isGroup = hydratedIsGroup;
+    identityRoute = resolveIdentityRoute();
+    if (!identityRoute.decision.allowed) {
+      runtime.log?.(
+        `nextcloud-talk: drop ${isGroup ? "room" : "DM sender"} ${isGroup ? roomToken : senderId} (identity=${identityRoute.decision.reason})`,
+      );
+      return;
+    }
+  }
 
   statusSink?.({ lastInboundAt: message.timestamp });
 
@@ -155,12 +208,13 @@ export async function handleNextcloudTalkInbound(params: {
     surface: CHANNEL_ID,
   });
   const hasControlCommand = core.channel.text.hasControlCommand(rawBody, config as OpenClawConfig);
-  const shouldRequireMention = isGroup
-    ? resolveNextcloudTalkRequireMention({
-        roomConfig,
-        wildcardConfig: roomMatch.wildcardConfig,
-      })
-    : false;
+  const shouldRequireMention = () =>
+    isGroup
+      ? resolveNextcloudTalkRequireMention({
+          roomConfig,
+          wildcardConfig: roomMatch.wildcardConfig,
+        })
+      : false;
   const { groupPolicy, providerMissingFallbackApplied } =
     resolveAllowlistProviderRuntimeGroupPolicy({
       providerConfigPresent:
@@ -206,7 +260,7 @@ export async function handleNextcloudTalkInbound(params: {
       policy: {
         groupAllowFromFallbackToAllowFrom: true,
         activation: {
-          requireMention: isGroup && shouldRequireMention,
+          requireMention: shouldRequireMention(),
           allowTextCommands,
         },
       },
@@ -233,7 +287,6 @@ export async function handleNextcloudTalkInbound(params: {
     blockedLabel: GROUP_POLICY_BLOCKED_LABEL.room,
     log: (messageValue) => runtime.log?.(messageValue),
   });
-  const commandAuthorized = access.commandAccess.authorized;
   const accessReason =
     access.ingress.reasonCode === "route_blocked"
       ? "route blocked"
@@ -300,18 +353,18 @@ export async function handleNextcloudTalkInbound(params: {
     runtime.log?.(`nextcloud-talk: drop room ${roomToken} (no mention)`);
     return;
   }
-  const { route, buildEnvelope } = resolveInboundRouteEnvelopeBuilderWithRuntime({
+  const commandAuthorized = access.commandAccess.authorized;
+  const route = identityRoute.route;
+  const buildEnvelope = createInboundEnvelopeBuilder({
     cfg: config as OpenClawConfig,
-    channel: CHANNEL_ID,
-    accountId: account.accountId,
-    peer: {
-      kind: isGroup ? "group" : "direct",
-      id: isGroup ? roomToken : senderId,
-    },
-    runtime: core.channel,
+    route,
     sessionStore: (config.session as Record<string, unknown> | undefined)?.store as
       | string
       | undefined,
+    resolveStorePath: core.channel.session.resolveStorePath,
+    readSessionUpdatedAt: core.channel.session.readSessionUpdatedAt,
+    resolveEnvelopeFormatOptions: core.channel.reply.resolveEnvelopeFormatOptions,
+    formatAgentEnvelope: core.channel.reply.formatAgentEnvelope,
   });
 
   const fromLabel = isGroup ? `room:${roomName || roomToken}` : senderName || `user:${senderId}`;
@@ -332,6 +385,8 @@ export async function handleNextcloudTalkInbound(params: {
     From: isGroup ? `nextcloud-talk:room:${roomToken}` : `nextcloud-talk:${senderId}`,
     To: `nextcloud-talk:${roomToken}`,
     SessionKey: route.sessionKey,
+    AgentId: route.agentId,
+    AgentRouteMatchedBy: route.matchedBy,
     AccountId: route.accountId,
     ChatType: isGroup ? "group" : "direct",
     ConversationLabel: fromLabel,
@@ -376,6 +431,7 @@ export async function handleNextcloudTalkInbound(params: {
     },
     replyPipeline: {},
     replyOptions: {
+      identityContractVersion: 1,
       skillFilter: roomConfig?.skills,
       disableBlockStreaming:
         typeof account.config.blockStreaming === "boolean"

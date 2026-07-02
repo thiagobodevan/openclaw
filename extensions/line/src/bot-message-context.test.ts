@@ -85,7 +85,13 @@ describe("buildLineMessageContext", () => {
     sessionBindingTesting.resetSessionBindingAdaptersForTests();
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-line-context-"));
     storePath = path.join(tmpDir, "sessions.json");
-    cfg = { session: { store: storePath } };
+    cfg = {
+      session: { store: storePath },
+      agents: {
+        list: [{ id: "personal", default: true }, { id: "main" }, { id: "codex" }],
+      },
+      bindings: [{ agentId: "main", match: { channel: "line", accountId: "default" } }],
+    };
   });
 
   afterEach(async () => {
@@ -238,6 +244,8 @@ describe("buildLineMessageContext", () => {
     const event = createMessageEvent({ type: "user", userId: "user-1" });
     const directCfg: OpenClawConfig = {
       session: { store: storePath, dmScope: "per-channel-peer" },
+      agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
+      bindings: [{ agentId: "main", match: { channel: "line", accountId: "default" } }],
     };
 
     const context = await buildLineMessageContext({
@@ -420,5 +428,34 @@ describe("buildLineMessageContext", () => {
     expect(context?.route.agentId).toBe("codex");
     expect(context?.route.sessionKey).toBe("agent:codex:acp:binding:line:default:test123");
     expect(context?.route.matchedBy).toBe("binding.channel");
+  });
+
+  it("denies a shared personal route before configured ACP initialization", async () => {
+    const groupId = "group-personal";
+    const personalBindingCfg: OpenClawConfig = {
+      session: { store: storePath },
+      agents: { list: [{ id: "main", default: true }] },
+      bindings: [
+        {
+          type: "acp",
+          agentId: "main",
+          match: {
+            channel: "line",
+            accountId: "default",
+            peer: { kind: "group", id: groupId },
+          },
+        },
+      ],
+    };
+
+    await expect(
+      buildLineMessageContext({
+        event: createMessageEvent({ type: "group", groupId, userId: "guest" }),
+        allMedia: [],
+        cfg: personalBindingCfg,
+        account,
+        commandAuthorized: true,
+      }),
+    ).rejects.toThrow("not bound to a shared service agent");
   });
 });

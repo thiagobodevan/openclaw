@@ -1145,6 +1145,7 @@ async function processDiscordMessageInner(
             limit: historyLimit,
           },
       replyOptions: {
+        identityContractVersion: 1,
         abortSignal,
         skillFilter: channelConfig?.skills,
         sourceReplyDeliveryMode,

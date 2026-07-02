@@ -10,13 +10,21 @@ import {
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
   ensureConfiguredBindingRouteReady,
+  lookupRuntimeConversationBindingRoute,
   resolvePinnedMainDmOwnerFromAllowlist,
   resolveConfiguredBindingRoute,
-  resolveRuntimeConversationBindingRoute,
+  touchRuntimeConversationBindingRoute,
+  type ConfiguredBindingRouteResult,
+  type RuntimeConversationBindingRouteResult,
 } from "openclaw/plugin-sdk/conversation-runtime";
 import { finalizeInboundContext } from "openclaw/plugin-sdk/reply-dispatch-runtime";
 import { createChannelHistoryWindow, type HistoryEntry } from "openclaw/plugin-sdk/reply-history";
-import { resolveAgentRoute, resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
+import {
+  EXTERNAL_CONVERSATION_IDENTITY_DENIAL,
+  resolveAgentRoute,
+  resolveConversationIdentityAdmission,
+  resolveInboundLastRouteSessionKey,
+} from "openclaw/plugin-sdk/routing";
 import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeAllowFrom } from "./bot-access.js";
@@ -41,6 +49,7 @@ interface BuildLineMessageContextParams {
   commandAuthorized: boolean;
   groupHistories?: Map<string, HistoryEntry[]>;
   historyLimit?: number;
+  preparedRoute?: LineInboundRoute;
 }
 
 type LineSourceInfo = {
@@ -85,24 +94,23 @@ function buildPeerId(source: EventSource): string {
   return "unknown";
 }
 
-async function resolveLineInboundRoute(params: {
-  source: EventSource;
-  cfg: OpenClawConfig;
-  account: ResolvedLineAccount;
-}): Promise<{
+export type LineInboundRoute = {
   userId?: string;
   groupId?: string;
   roomId?: string;
   isGroup: boolean;
   peerId: string;
   route: ReturnType<typeof resolveAgentRoute>;
-}> {
-  recordChannelActivity({
-    channel: "line",
-    accountId: params.account.accountId,
-    direction: "inbound",
-  });
+  configuredBinding: ConfiguredBindingRouteResult["bindingResolution"];
+  configuredBindingSessionKey: string;
+  runtimeBinding: RuntimeConversationBindingRouteResult["bindingRecord"];
+};
 
+export function lookupLineInboundRoute(params: {
+  source: EventSource;
+  cfg: OpenClawConfig;
+  account: ResolvedLineAccount;
+}): LineInboundRoute {
   const { userId, groupId, roomId, isGroup } = getLineSourceInfo(params.source);
   const peerId = buildPeerId(params.source);
   let route = resolveAgentRoute({
@@ -114,28 +122,20 @@ async function resolveLineInboundRoute(params: {
       id: peerId,
     },
   });
-
+  const conversation = {
+    channel: "line",
+    accountId: params.account.accountId,
+    conversationId: peerId,
+  };
   const configuredRoute = resolveConfiguredBindingRoute({
     cfg: params.cfg,
     route,
-    conversation: {
-      channel: "line",
-      accountId: params.account.accountId,
-      conversationId: peerId,
-    },
+    conversation,
   });
   let configuredBinding = configuredRoute.bindingResolution;
   const configuredBindingSessionKey = configuredRoute.boundSessionKey ?? "";
   route = configuredRoute.route;
-
-  const runtimeRoute = resolveRuntimeConversationBindingRoute({
-    route,
-    conversation: {
-      channel: "line",
-      accountId: params.account.accountId,
-      conversationId: peerId,
-    },
-  });
+  const runtimeRoute = lookupRuntimeConversationBindingRoute({ route, conversation });
   route = runtimeRoute.route;
   if (runtimeRoute.bindingRecord) {
     configuredBinding = null;
@@ -145,24 +145,73 @@ async function resolveLineInboundRoute(params: {
         : `line: plugin-bound conversation ${peerId}`,
     );
   }
+  return {
+    userId,
+    groupId,
+    roomId,
+    isGroup,
+    peerId,
+    route,
+    configuredBinding,
+    configuredBindingSessionKey,
+    runtimeBinding: runtimeRoute.bindingRecord,
+  };
+}
 
-  if (configuredBinding) {
+export async function prepareLineInboundRoute(params: {
+  source: EventSource;
+  cfg: OpenClawConfig;
+  account: ResolvedLineAccount;
+  commandAuthorized: boolean;
+}): Promise<LineInboundRoute> {
+  const state = lookupLineInboundRoute(params);
+  const { userId, groupId, roomId, isGroup, peerId, route } = state;
+
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: params.cfg,
+    ctx: {
+      AgentId: route.agentId,
+      SessionKey: route.sessionKey,
+      AgentRouteMatchedBy: route.matchedBy,
+      AccountId: route.accountId ?? params.account.accountId,
+      ChatType: isGroup ? "group" : "direct",
+      ChatId: isGroup ? peerId : undefined,
+      GroupChannel: isGroup ? peerId : undefined,
+      SenderId: userId,
+      Provider: "line",
+      Surface: "line",
+      CommandAuthorized: params.commandAuthorized,
+    },
+  });
+  if (!identityDecision.allowed) {
+    logVerbose(`line: denied inbound identity for ${peerId} (${identityDecision.reason})`);
+    throw new Error(EXTERNAL_CONVERSATION_IDENTITY_DENIAL);
+  }
+
+  if (state.configuredBinding) {
     const ensured = await ensureConfiguredBindingRouteReady({
       cfg: params.cfg,
-      bindingResolution: configuredBinding,
+      bindingResolution: state.configuredBinding,
     });
     if (!ensured.ok) {
       logVerbose(
-        `line: configured ACP binding unavailable for ${peerId} -> ${configuredBindingSessionKey}: ${ensured.error}`,
+        `line: configured ACP binding unavailable for ${peerId} -> ${state.configuredBindingSessionKey}: ${ensured.error}`,
       );
       throw new Error(`Configured ACP binding unavailable: ${ensured.error}`);
     }
     logVerbose(
-      `line: using configured ACP binding for ${peerId} -> ${configuredBindingSessionKey}`,
+      `line: using configured ACP binding for ${peerId} -> ${state.configuredBindingSessionKey}`,
     );
   }
 
-  return { userId, groupId, roomId, isGroup, peerId, route };
+  touchRuntimeConversationBindingRoute({ bindingRecord: state.runtimeBinding });
+  recordChannelActivity({
+    channel: "line",
+    accountId: params.account.accountId,
+    direction: "inbound",
+  });
+
+  return state;
 }
 
 const STICKER_PACKAGES: Record<string, string> = {
@@ -339,6 +388,7 @@ async function finalizeLineInboundContext(params: {
     From: fromAddress,
     To: toAddress,
     SessionKey: params.route.sessionKey,
+    AgentRouteMatchedBy: params.route.matchedBy,
     AccountId: params.route.accountId,
     ChatType: params.source.isGroup ? "group" : "direct",
     ConversationLabel: conversationLabel,
@@ -440,11 +490,9 @@ export async function buildLineMessageContext(params: BuildLineMessageContextPar
   const { event, allMedia, cfg, account, commandAuthorized, groupHistories, historyLimit } = params;
 
   const source = event.source;
-  const { userId, groupId, roomId, isGroup, peerId, route } = await resolveLineInboundRoute({
-    source,
-    cfg,
-    account,
-  });
+  const { userId, groupId, roomId, isGroup, peerId, route } =
+    params.preparedRoute ??
+    (await prepareLineInboundRoute({ source, cfg, account, commandAuthorized }));
 
   const message = event.message;
   const messageId = message.id;
@@ -529,10 +577,11 @@ export async function buildLinePostbackContext(params: {
   const { event, cfg, account, commandAuthorized } = params;
 
   const source = event.source;
-  const { userId, groupId, roomId, isGroup, peerId, route } = await resolveLineInboundRoute({
+  const { userId, groupId, roomId, isGroup, peerId, route } = await prepareLineInboundRoute({
     source,
     cfg,
     account,
+    commandAuthorized,
   });
 
   const timestamp = event.timestamp;

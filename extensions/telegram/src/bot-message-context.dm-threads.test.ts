@@ -76,6 +76,14 @@ afterEach(() => {
 });
 
 describe("buildTelegramMessageContext dm thread sessions", () => {
+  const dmThreadConfig = {
+    agents: {
+      list: [{ id: "personal", default: true }, { id: "main" }, { id: "support" }],
+    },
+    bindings: [{ agentId: "main", match: { channel: "telegram", accountId: "default" } }],
+    channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
+    messages: { groupChat: { mentionPatterns: [] } },
+  };
   const buildContext = async (
     message: Record<string, unknown>,
     params?: Pick<
@@ -86,6 +94,7 @@ describe("buildTelegramMessageContext dm thread sessions", () => {
     await buildTelegramMessageContextForTest({
       message,
       ...params,
+      cfg: params?.cfg ?? dmThreadConfig,
     });
 
   const dmThreadMessage = {

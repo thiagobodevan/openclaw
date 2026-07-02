@@ -113,7 +113,7 @@ describe("Zalo polling media replies", () => {
     accountId: "acct-zalo-polling-media",
     sessionKey: "agent:main:zalo:direct:dm-chat-1",
     mainSessionKey: "agent:main:main",
-    matchedBy: "default",
+    matchedBy: "binding.account",
   }));
   const dispatchReplyWithBufferedBlockDispatcherMock = vi.fn();
 

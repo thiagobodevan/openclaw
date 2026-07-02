@@ -351,6 +351,7 @@ export async function buildDiscordMessageProcessContext(params: {
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
+      matchedBy: route.matchedBy,
       routeSessionKey: route.sessionKey,
       dispatchSessionKey: effectiveSessionKey,
       parentSessionKey: autoThreadContext?.ParentSessionKey ?? threadKeys.parentSessionKey,

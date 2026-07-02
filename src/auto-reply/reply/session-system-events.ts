@@ -14,8 +14,10 @@ import {
 import { isExecCompletionEvent } from "../../infra/heartbeat-events-filter.js";
 import {
   consumeSelectedSystemEventEntries,
+  isSystemEventVisibleToActor,
   peekSystemEventEntries,
   type SystemEvent,
+  type SystemEventActor,
 } from "../../infra/system-events.js";
 
 function isCronContextSystemEvent(event: SystemEvent): boolean {
@@ -106,14 +108,27 @@ export async function drainFormattedSystemEvents(params: {
   isMainSession: boolean;
   isNewSession: boolean;
   suppressHeartbeatOwnedEvents?: boolean;
+  contextKey?: string;
+  actor?: SystemEventActor;
 }): Promise<string | undefined> {
   const summaryLines: string[] = [];
   const systemLines: string[] = [];
   // Exec completions have a dedicated heartbeat prompt; leave those entries queued
   // so the heartbeat path can consume and deliver them.
+  const normalizedContextKey = normalizeLowercaseStringOrEmpty(params.contextKey);
+  // Exact-context wakes own one queued event. Ordinary actor events may only be
+  // consumed by a turn from the same stable channel/account/sender identity.
+  const candidates = normalizedContextKey
+    ? peekSystemEventEntries(params.sessionKey).filter(
+        (event) => event.contextKey === normalizedContextKey,
+      )
+    : peekSystemEventEntries(params.sessionKey).filter(
+        (event) =>
+          event.contextMode !== "exact" && isSystemEventVisibleToActor(event, params.actor),
+      );
   const queued = consumeSelectedSystemEventEntries(
     params.sessionKey,
-    selectGenericSystemEvents(peekSystemEventEntries(params.sessionKey), {
+    selectGenericSystemEvents(candidates, {
       suppressHeartbeatOwnedEvents: params.suppressHeartbeatOwnedEvents,
     }),
   );

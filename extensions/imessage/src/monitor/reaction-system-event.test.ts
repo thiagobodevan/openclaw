@@ -17,7 +17,8 @@ describe("enqueueIMessageReactionSystemEvent", () => {
       decision: {
         text: "iMessage reaction added: 👎 by +15555550123 on msg lobster-reply-guid",
         contextKey: "imessage:reaction:added:3:lobster-reply-guid:+15555550123:👎",
-        route: { sessionKey: "agent:main:main" },
+        senderNormalized: "+15555550123",
+        route: { accountId: "default", sessionKey: "agent:main:main" },
         reaction: {
           targetGuid: "lobster-reply-guid",
           action: "added",
@@ -34,6 +35,7 @@ describe("enqueueIMessageReactionSystemEvent", () => {
       {
         sessionKey: "agent:main:main",
         contextKey: "imessage:reaction:added:3:lobster-reply-guid:+15555550123:👎",
+        actor: { channel: "imessage", accountId: "default", senderId: "+15555550123" },
       },
     );
     expect(runtime.log).toHaveBeenCalledWith(

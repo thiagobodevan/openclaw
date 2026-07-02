@@ -63,6 +63,7 @@ describe("buildChannelInboundEventContext", () => {
       route: {
         agentId: "main",
         accountId: "acct",
+        matchedBy: "binding.team",
         routeSessionKey: "agent:main:test:group:room-1",
         parentSessionKey: "agent:main:test:group",
         modelParentSessionKey: "agent:main:test:model",
@@ -140,6 +141,7 @@ describe("buildChannelInboundEventContext", () => {
       To: "test:room:room-1",
       SessionKey: "agent:main:test:group:room-1",
       AgentId: "main",
+      AgentRouteMatchedBy: "binding.team",
       AccountId: "acct",
       ParentSessionKey: "agent:main:test:group",
       ModelParentSessionKey: "agent:main:test:model",

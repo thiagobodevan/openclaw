@@ -135,6 +135,7 @@ describe("handleClickClackInbound", () => {
         defaults: {
           model: "openai/gpt-5.4-mini",
         },
+        list: [{ id: "main", default: true }, { id: "service-bot" }],
       },
     } satisfies CoreConfig;
     const account = {
@@ -193,6 +194,27 @@ describe("handleClickClackInbound", () => {
     expect(sendRequest?.replyToId).toBe("msg_1");
   });
 
+  it("does not invoke model mode for an unbound shared route", async () => {
+    sendClickClackTextMock.mockReset();
+    const runtime = createRuntime();
+    setClickClackRuntime(runtime);
+
+    await handleClickClackInbound({
+      account: createAgentAccount({
+        replyMode: "model",
+        model: "openai/gpt-5.4-mini",
+      }),
+      config: {
+        agents: { defaults: { model: "openai/gpt-5.4-mini" } },
+      },
+      message: createMessage({ body: "hello bot" }),
+    });
+
+    expect(runtime.llm.complete).not.toHaveBeenCalled();
+    expect(runtime.channel.inbound.dispatchReply).not.toHaveBeenCalled();
+    expect(sendClickClackTextMock).not.toHaveBeenCalled();
+  });
+
   it("marks agent turns command-authorized for allowlisted senders", async () => {
     const runtime = createRuntime();
     vi.mocked(runtime.channel.commands.shouldComputeCommandAuthorized).mockReturnValue(true);
@@ -202,11 +224,13 @@ describe("handleClickClackInbound", () => {
         defaults: {
           model: "openai/gpt-5.4-mini",
         },
+        list: [{ id: "main", default: true }, { id: "service-bot" }],
       },
     } satisfies CoreConfig;
 
     await handleClickClackInbound({
       account: createAgentAccount({
+        agentId: "service-bot",
         allowFrom: ["usr_owner"],
         config: { allowFrom: ["usr_owner"] },
       }),
@@ -219,6 +243,30 @@ describe("handleClickClackInbound", () => {
     expect(dispatchReply.mock.calls[0]?.[0].ctxPayload.CommandAuthorized).toBe(true);
   });
 
+  it("marks an account-selected agent as an explicit service route", async () => {
+    const runtime = createRuntime();
+    setClickClackRuntime(runtime);
+    const cfg = {
+      agents: {
+        defaults: { model: "openai/gpt-5.4-mini" },
+        list: [{ id: "main", default: true }, { id: "service-bot" }],
+      },
+    } satisfies CoreConfig;
+
+    await handleClickClackInbound({
+      account: createAgentAccount({ agentId: "service-bot" }),
+      config: cfg,
+      message: createMessage(),
+    });
+
+    const dispatchReply = vi.mocked(runtime.channel.inbound.dispatchReply);
+    expect(dispatchReply).toHaveBeenCalledTimes(1);
+    expect(dispatchReply.mock.calls[0]?.[0].ctxPayload).toMatchObject({
+      AgentId: "service-bot",
+      AgentRouteMatchedBy: "config.agent",
+    });
+  });
+
   it("propagates account toolsAllow into agent reply dispatch", async () => {
     const runtime = createRuntime();
     setClickClackRuntime(runtime);
@@ -227,6 +275,7 @@ describe("handleClickClackInbound", () => {
         defaults: {
           model: "openai/gpt-5.4-mini",
         },
+        list: [{ id: "main", default: true }, { id: "service-bot" }],
       },
       tools: {
         allow: ["*"],
@@ -235,6 +284,7 @@ describe("handleClickClackInbound", () => {
 
     await handleClickClackInbound({
       account: createAgentAccount({
+        agentId: "service-bot",
         toolsAllow: ["message"],
       }),
       config: cfg,
@@ -261,6 +311,7 @@ describe("handleClickClackInbound", () => {
           model: "openai/gpt-5.4-mini",
         },
       },
+      commands: { ownerAllowFrom: ["usr_owner"] },
     } satisfies CoreConfig;
 
     await handleClickClackInbound({

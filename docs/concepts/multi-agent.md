@@ -238,6 +238,20 @@ Bindings are **deterministic** and **most-specific wins**:
   </Step>
 </Steps>
 
+## Conversation identity modes
+
+OpenClaw resolves an identity mode from trusted routing and sender facts before starting an agent turn:
+
+- **Personal:** an owner-authenticated direct conversation may use the default agent's workspace and instructions.
+- **Organization:** an explicit binding to a non-default agent uses that service agent's workspace, instructions, session, and effective tool policy.
+- **External:** an unbound group/channel, a guest direct message, or a shared binding to the default personal agent is denied before the agent runs.
+
+Channel allowlists and `toolsBySender` remain important, but they answer different questions: an allowlist admits a sender, and sender policy restricts tools. Neither one selects a safe agent identity. Bind every team or shared audience to a dedicated non-default agent. Route matching uses stable channel, account, peer, guild, team, role, and sender IDs; display names do not establish trust.
+
+<Warning>
+The default-agent routing fallback is for personal owner-direct use. It is not a shared-audience identity. A shared route must resolve through an explicit binding to a separate agent, even when the room and sender are already allowlisted.
+</Warning>
+
 <AccordionGroup>
   <Accordion title="Tie-breaking and AND semantics">
     - If multiple bindings match in the same tier, the first one in config order wins.

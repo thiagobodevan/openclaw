@@ -109,8 +109,10 @@ Voice-call credentials accept SecretRefs. `plugins.entries.voice-call.config.twi
           fromNumber: "+15550001234", // or TWILIO_FROM_NUMBER for Twilio
           toNumber: "+15550005678",
           sessionScope: "per-phone", // per-phone | per-call
+          agentId: "voice-service",
           numbers: {
             "+15550009999": {
+              agentId: "cards-service",
               inboundGreeting: "Silver Fox Cards, how can I help?",
               responseSystemPrompt: "You are a concise baseball card specialist.",
               tts: {
@@ -242,7 +244,7 @@ Current runtime behaviour:
 - Provider-owned raw config lives under `realtime.providers.<providerId>`.
 - Voice Call exposes the shared `openclaw_agent_consult` realtime tool by default. The realtime model can call it when the caller asks for deeper reasoning, current information, or normal OpenClaw tools.
 - `realtime.consultPolicy` optionally adds guidance for when the realtime model should call `openclaw_agent_consult`.
-- `realtime.agentContext.enabled` is default-off. When enabled, Voice Call injects a bounded agent identity and selected workspace-file capsule into the realtime provider instructions at session setup.
+- `realtime.agentContext.enabled` is default-off. When enabled, Voice Call injects a bounded agent identity and selected workspace-file capsule into the realtime provider instructions at session setup. Per-number `agentId` routes omit this process-wide capsule so a routed service call cannot inherit another agent's identity or workspace context; use `openclaw_agent_consult` for routed agent context.
 - `realtime.fastContext.enabled` is default-off. When enabled, Voice Call first searches indexed memory/session context for the consult question and returns those snippets to the realtime model within `realtime.fastContext.timeoutMs` before falling back to the full consult agent only if `realtime.fastContext.fallbackToConsult` is true.
 - If `realtime.provider` points at an unregistered provider, or no realtime voice provider is registered at all, Voice Call logs a warning and skips realtime media instead of failing the whole plugin.
 - Consult session keys reuse the stored call session when available, then fall back to the configured `sessionScope` (`per-phone` by default, or `per-call` for isolated calls).
@@ -280,7 +282,7 @@ for tool work, current information, memory lookups, or workspace state.
     entries: {
       "voice-call": {
         config: {
-          agentId: "main",
+          agentId: "voice-service",
           realtime: {
             enabled: true,
             provider: "google",
@@ -319,6 +321,7 @@ for tool work, current information, memory lookups, or workspace state.
           "voice-call": {
             config: {
               provider: "twilio",
+              agentId: "voice-service",
               inboundPolicy: "allowlist",
               allowFrom: ["+15550005678"],
               realtime: {
@@ -559,11 +562,18 @@ Inbound policy defaults to `disabled`. To enable inbound calls, set:
 
 ```json5
 {
+  agentId: "voice-service",
   inboundPolicy: "allowlist",
   allowFrom: ["+15550001234"],
   inboundGreeting: "Hello! How can I help?",
 }
 ```
+
+Inbound calls require an explicit non-default service-agent identity. Set
+`agentId` on the global Voice Call config for unmatched numbers, or set an
+`agentId` on every enabled `numbers` route. Calls whose effective config would
+use the default personal agent are rejected. Gateway startup warns about each
+global or per-number fallback that would be rejected.
 
 <Warning>
 `inboundPolicy: "allowlist"` is a low-assurance caller-ID screen. The
@@ -581,8 +591,8 @@ Auto-responses use the agent system. Tune with `responseModel`,
 
 Use `numbers` when one Voice Call plugin receives calls for multiple phone
 numbers and each number should behave like a different line. For example, one
-number can use a casual personal assistant while another uses a business
-persona, a different response agent, and a different TTS voice.
+number can use the team service agent while another uses a department-specific
+service agent, response policy, and TTS voice.
 
 Routes are selected from the provider-supplied dialed `To` number. Keys must be
 E.164 numbers. When a call arrives, Voice Call resolves the matching route once,
@@ -606,6 +616,7 @@ you can usually override only the provider voice:
 
 ```json5
 {
+  agentId: "voice-service",
   inboundGreeting: "Hello from the main line.",
   responseSystemPrompt: "You are the default voice assistant.",
   tts: {
@@ -616,6 +627,7 @@ you can usually override only the provider voice:
   },
   numbers: {
     "+15550001111": {
+      agentId: "cards-service",
       inboundGreeting: "Silver Fox Cards, how can I help?",
       responseSystemPrompt: "You are a concise baseball card specialist.",
       tts: {

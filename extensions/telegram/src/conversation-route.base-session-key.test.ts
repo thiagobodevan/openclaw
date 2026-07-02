@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   resolveTelegramConversationBaseSessionKey,
   resolveTelegramConversationRoute,
+  touchTelegramConversationRoute,
 } from "./conversation-route.js";
 
 describe("resolveTelegramConversationBaseSessionKey", () => {
@@ -203,10 +204,14 @@ describe("resolveTelegramConversationBaseSessionKey", () => {
       senderId: 12345,
     });
 
-    expect(touch).toHaveBeenCalledWith("binding-plugin-owned", undefined);
+    expect(touch).not.toHaveBeenCalled();
     expect(result.bindingMode).toEqual({ kind: "plugin-owned-runtime" });
     expect(result.route.agentId).toBe("main");
     expect(result.route.sessionKey).toBe("agent:main:telegram:group:-1001234567890:topic:11");
     expect(result.route.matchedBy).toBe("default");
+
+    touchTelegramConversationRoute(result);
+
+    expect(touch).toHaveBeenCalledWith("binding-plugin-owned", undefined);
   });
 });

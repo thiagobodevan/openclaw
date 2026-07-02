@@ -10,8 +10,12 @@ import type {
   TelegramGroupConfig,
 } from "openclaw/plugin-sdk/config-contracts";
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
-import { deriveLastRoutePolicy } from "openclaw/plugin-sdk/routing";
-import { normalizeAccountId, resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
+import {
+  deriveLastRoutePolicy,
+  normalizeAccountId,
+  resolveConversationIdentityMode,
+  resolveThreadSessionKeys,
+} from "openclaw/plugin-sdk/routing";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import {
   expandTelegramAllowFromWithAccessGroups,
@@ -34,15 +38,19 @@ import {
   buildTelegramInboundOriginTarget,
   buildTypingThreadParams,
   extractTelegramForumFlag,
+  resolveTelegramDirectPeerId,
   resolveTelegramForumFlag,
   resolveTelegramBotHasTopicsEnabled,
+  resolveTelegramCommandAuthorization,
   resolveTelegramThreadSpec,
   shouldUseTelegramDmThreadSession,
 } from "./bot/helpers.js";
 import type { TelegramGetChat } from "./bot/types.js";
 import {
   resolveTelegramConversationBaseSessionKey,
+  resolveTelegramConversationIdentityRoute,
   resolveTelegramConversationRoute,
+  touchTelegramConversationRoute,
 } from "./conversation-route.js";
 import { enforceTelegramDmAccess } from "./dm-access.js";
 import { evaluateTelegramGroupBaseAccess } from "./group-access.js";
@@ -147,6 +155,39 @@ export const buildTelegramMessageContext = async ({
   const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
   const senderId = msg.from?.id ? String(msg.from.id) : "";
   const messageThreadId = (msg as { message_thread_id?: number }).message_thread_id;
+  const freshCfg =
+    loadFreshConfig?.() ??
+    (runtime?.getRuntimeConfig ?? (await loadTelegramMessageContextRuntime()).getRuntimeConfig)();
+  if (isGroup) {
+    const forumHint = extractTelegramForumFlag(msg.chat) === true || msg.is_topic_message === true;
+    const stableThreadSpec = resolveTelegramThreadSpec({
+      isGroup: true,
+      isForum: forumHint,
+      messageThreadId,
+    });
+    const stableThreadId = stableThreadSpec.scope === "forum" ? stableThreadSpec.id : undefined;
+    const stableTopicConfig = resolveTelegramGroupConfig(chatId, stableThreadId).topicConfig;
+    const stableIdentity = resolveTelegramConversationIdentityRoute({
+      cfg: freshCfg,
+      accountId: account.accountId,
+      chatId,
+      isGroup: true,
+      resolvedThreadId: stableThreadId,
+      replyThreadId: stableThreadSpec.id,
+      senderId,
+      topicAgentId: stableTopicConfig?.agentId,
+      groupTitle: msg.chat.title,
+    }).identity;
+    if (!stableIdentity.allowed) {
+      logInboundDrop({
+        log: logVerbose,
+        channel: "telegram",
+        reason: `conversation identity denied (${stableIdentity.reason})`,
+        target: String(chatId),
+      });
+      return null;
+    }
+  }
   const reactionApi =
     typeof bot.api.setMessageReaction === "function"
       ? bot.api.setMessageReaction.bind(bot.api)
@@ -172,58 +213,6 @@ export const buildTelegramMessageContext = async ({
   const replyThreadId = threadSpec.id;
   const dmThreadId = threadSpec.scope === "dm" ? threadSpec.id : undefined;
   let topicName: string | undefined;
-  if (isForum && resolvedThreadId != null) {
-    const topicNameCacheScope = resolveTopicNameCacheScope(
-      await resolveTelegramMessageContextStorePath({
-        cfg,
-        agentId: account.accountId,
-        sessionRuntime,
-      }),
-    );
-    const ftCreated = msg.forum_topic_created;
-    const ftEdited = msg.forum_topic_edited;
-    const ftClosed = msg.forum_topic_closed;
-    const ftReopened = msg.forum_topic_reopened;
-    const topicPatch = ftCreated?.name
-      ? {
-          name: ftCreated.name,
-          iconColor: ftCreated.icon_color,
-          iconCustomEmojiId: ftCreated.icon_custom_emoji_id,
-          closed: false,
-        }
-      : ftEdited?.name
-        ? {
-            name: ftEdited.name,
-            iconCustomEmojiId: ftEdited.icon_custom_emoji_id,
-          }
-        : ftClosed
-          ? { closed: true }
-          : ftReopened
-            ? { closed: false }
-            : undefined;
-
-    if (topicPatch) {
-      await updateTopicName(chatId, resolvedThreadId, topicPatch, topicNameCacheScope);
-    }
-
-    topicName = await getTopicName(chatId, resolvedThreadId, topicNameCacheScope);
-    if (!topicName) {
-      const replyFtCreated = msg.reply_to_message?.forum_topic_created;
-      if (replyFtCreated?.name) {
-        await updateTopicName(
-          chatId,
-          resolvedThreadId,
-          {
-            name: replyFtCreated.name,
-            iconColor: replyFtCreated.icon_color,
-            iconCustomEmojiId: replyFtCreated.icon_custom_emoji_id,
-          },
-          topicNameCacheScope,
-        );
-        topicName = replyFtCreated.name;
-      }
-    }
-  }
 
   const threadIdForConfig = resolvedThreadId ?? dmThreadId;
   const { groupConfig, topicConfig } = resolveTelegramGroupConfig(chatId, threadIdForConfig);
@@ -236,9 +225,6 @@ export const buildTelegramMessageContext = async ({
     groupConfig,
     dmPolicy,
   });
-  const freshCfg =
-    loadFreshConfig?.() ??
-    (runtime?.getRuntimeConfig ?? (await loadTelegramMessageContextRuntime()).getRuntimeConfig)();
   const conversationRoute = resolveTelegramConversationRoute({
     cfg: freshCfg,
     accountId: account.accountId,
@@ -265,6 +251,34 @@ export const buildTelegramMessageContext = async ({
       channel: "telegram",
       reason: "non-default account requires explicit binding",
       target: route.accountId,
+    });
+    return null;
+  }
+  const directSenderIsOwner =
+    !isGroup &&
+    resolveTelegramCommandAuthorization({
+      cfg: freshCfg,
+      accountId: account.accountId,
+      chatId,
+      isGroup,
+      resolvedThreadId,
+      senderId: resolveTelegramDirectPeerId({ chatId, senderId }),
+    }).stableSenderIsOwner;
+  const identityDecision = resolveConversationIdentityMode({
+    config: freshCfg,
+    agentId: route.agentId,
+    routeMatchedBy: route.matchedBy,
+    chatType: isGroup ? "group" : "direct",
+    groupId: isGroup ? String(chatId) : undefined,
+    groupChannel: isGroup ? msg.chat.title : undefined,
+    senderIsOwner: directSenderIsOwner,
+  });
+  if (!identityDecision.allowed) {
+    logInboundDrop({
+      log: logVerbose,
+      channel: "telegram",
+      reason: `conversation identity denied (${identityDecision.reason})`,
+      target: String(chatId),
     });
     return null;
   }
@@ -368,6 +382,60 @@ export const buildTelegramMessageContext = async ({
     return null;
   }
   let initialTypingCueSent = false;
+  if (isForum && resolvedThreadId != null) {
+    // Topic metadata is persistent shared state. Do not read or mutate it until
+    // the live conversation route has crossed the identity boundary.
+    const topicNameCacheScope = resolveTopicNameCacheScope(
+      await resolveTelegramMessageContextStorePath({
+        cfg,
+        agentId: account.accountId,
+        sessionRuntime,
+      }),
+    );
+    const ftCreated = msg.forum_topic_created;
+    const ftEdited = msg.forum_topic_edited;
+    const ftClosed = msg.forum_topic_closed;
+    const ftReopened = msg.forum_topic_reopened;
+    const topicPatch = ftCreated?.name
+      ? {
+          name: ftCreated.name,
+          iconColor: ftCreated.icon_color,
+          iconCustomEmojiId: ftCreated.icon_custom_emoji_id,
+          closed: false,
+        }
+      : ftEdited?.name
+        ? {
+            name: ftEdited.name,
+            iconCustomEmojiId: ftEdited.icon_custom_emoji_id,
+          }
+        : ftClosed
+          ? { closed: true }
+          : ftReopened
+            ? { closed: false }
+            : undefined;
+
+    if (topicPatch) {
+      await updateTopicName(chatId, resolvedThreadId, topicPatch, topicNameCacheScope);
+    }
+
+    topicName = await getTopicName(chatId, resolvedThreadId, topicNameCacheScope);
+    if (!topicName) {
+      const replyFtCreated = msg.reply_to_message?.forum_topic_created;
+      if (replyFtCreated?.name) {
+        await updateTopicName(
+          chatId,
+          resolvedThreadId,
+          {
+            name: replyFtCreated.name,
+            iconColor: replyFtCreated.icon_color,
+            iconCustomEmojiId: replyFtCreated.icon_custom_emoji_id,
+          },
+          topicNameCacheScope,
+        );
+        topicName = replyFtCreated.name;
+      }
+    }
+  }
   const ensureConfiguredBindingReady = async (): Promise<boolean> => {
     if (bindingMode.kind !== "configured") {
       return true;
@@ -480,6 +548,7 @@ export const buildTelegramMessageContext = async ({
   if (!(await ensureConfiguredBindingReady())) {
     return null;
   }
+  touchTelegramConversationRoute(conversationRoute);
 
   // Direct chats are now reply-eligible; send the first typing cue before
   // expensive context/session construction without showing typing for dropped turns.

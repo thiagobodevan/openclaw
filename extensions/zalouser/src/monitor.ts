@@ -20,6 +20,10 @@ import {
   resolveSendableOutboundReplyParts,
   type OutboundReplyPayload,
 } from "openclaw/plugin-sdk/reply-payload";
+import {
+  resolveConversationIdentityAdmission,
+  resolveConversationIdentityMode,
+} from "openclaw/plugin-sdk/routing";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
 import {
   resolveDefaultGroupPolicy,
@@ -293,31 +297,8 @@ async function processMessage(
   }
   const senderName = message.senderName ?? "";
   const configuredGroupName = message.groupName?.trim() || "";
-  const groupContext =
-    isGroup && !configuredGroupName
-      ? await resolveZaloGroupContext(account.profile, chatId).catch((err: unknown) => {
-          logVerbose(
-            core,
-            runtime,
-            `zalouser: group context lookup failed for ${chatId}: ${String(err)}`,
-          );
-          return null;
-        })
-      : null;
-  const groupName = configuredGroupName || groupContext?.name?.trim() || "";
-  const groupMembers = groupContext?.members?.slice(0, 20).join(", ") || undefined;
-
-  if (message.eventMessage) {
-    try {
-      await sendZalouserDeliveryAcks({
-        profile: account.profile,
-        isGroup,
-        message: message.eventMessage,
-      });
-    } catch (err) {
-      logVerbose(core, runtime, `zalouser: delivery/seen ack failed for ${chatId}: ${String(err)}`);
-    }
-  }
+  let groupName = configuredGroupName;
+  let groupMembers: string | undefined;
 
   const defaultGroupPolicy = resolveDefaultGroupPolicy(config);
   const { groupPolicy, providerMissingFallbackApplied } = resolveOpenProviderRuntimeGroupPolicy({
@@ -335,40 +316,6 @@ async function processMessage(
   const groups = account.config.groups ?? {};
   const routeAllowlistConfigured = Object.keys(groups).length > 0;
   const allowNameMatching = isDangerousNameMatchingEnabled(account.config);
-  if (isGroup) {
-    const groupEntry = findZalouserGroupEntry(
-      groups,
-      buildZalouserGroupCandidates({
-        groupId: chatId,
-        groupName,
-        includeGroupIdAlias: true,
-        includeWildcard: true,
-        allowNameMatching,
-      }),
-    );
-    const routeAccess = resolveZalouserRouteAccess({
-      groupPolicy,
-      configured: routeAllowlistConfigured,
-      matched: Boolean(groupEntry),
-      enabled: isZalouserGroupEntryAllowed(groupEntry),
-    });
-    if (!routeAccess.allowed) {
-      if (routeAccess.reason === "disabled") {
-        logVerbose(core, runtime, `zalouser: drop group ${chatId} (groupPolicy=disabled)`);
-      } else if (routeAccess.reason === "empty_allowlist") {
-        logVerbose(
-          core,
-          runtime,
-          `zalouser: drop group ${chatId} (groupPolicy=allowlist, no allowlist)`,
-        );
-      } else if (routeAccess.reason === "route_not_allowlisted") {
-        logVerbose(core, runtime, `zalouser: drop group ${chatId} (not allowlisted)`);
-      } else if (routeAccess.reason === "route_disabled") {
-        logVerbose(core, runtime, `zalouser: drop group ${chatId} (group disabled)`);
-      }
-      return;
-    }
-  }
 
   const dmPolicy = account.config.dmPolicy ?? "pairing";
   const configAllowFrom = normalizeStringEntries(account.config.allowFrom);
@@ -411,6 +358,18 @@ async function processMessage(
         }
       : undefined,
   });
+  const peer = isGroup
+    ? { kind: "group" as const, id: chatId }
+    : { kind: "direct" as const, id: senderId };
+  const route = core.channel.routing.resolveAgentRoute({
+    cfg: config,
+    channel: "zalouser",
+    accountId: account.accountId,
+    peer,
+  });
+  const commandAuthorized = accessDecision.commandAccess.requested
+    ? accessDecision.commandAccess.authorized
+    : undefined;
   if (isGroup && accessDecision.senderAccess.decision !== "allow") {
     if (accessDecision.senderAccess.reasonCode === "group_policy_empty_allowlist") {
       logVerbose(core, runtime, "Blocked zalouser group message (no group allowlist)");
@@ -426,6 +385,21 @@ async function processMessage(
 
   if (!isGroup && accessDecision.senderAccess.decision !== "allow") {
     if (accessDecision.senderAccess.decision === "pairing") {
+      const pairingIdentity = resolveConversationIdentityMode({
+        config,
+        agentId: route.agentId,
+        routeMatchedBy: route.matchedBy,
+        chatType: "direct",
+        senderIsOwner: false,
+      });
+      if (!pairingIdentity.allowed) {
+        logVerbose(
+          core,
+          runtime,
+          `zalouser: drop inbound identity before pairing (${pairingIdentity.reason})`,
+        );
+        return;
+      }
       await pairing.issueChallenge({
         senderId,
         senderIdLine: `Your Zalo user id: ${senderId}`,
@@ -459,9 +433,6 @@ async function processMessage(
     return;
   }
 
-  const commandAuthorized = accessDecision.commandAccess.requested
-    ? accessDecision.commandAccess.authorized
-    : undefined;
   const hasControlCommand = core.channel.commands.isControlCommandMessage(commandBody, config);
   if (isGroup && hasControlCommand && commandAuthorized !== true) {
     logVerbose(
@@ -471,21 +442,92 @@ async function processMessage(
     );
     return;
   }
-
-  const peer = isGroup
-    ? { kind: "group" as const, id: chatId }
-    : { kind: "direct" as const, id: senderId };
-
-  const route = core.channel.routing.resolveAgentRoute({
+  const identityDecision = resolveConversationIdentityAdmission({
     cfg: config,
-    channel: "zalouser",
-    accountId: account.accountId,
-    peer: {
-      // Keep DM peer kind as "direct" so session keys follow dmScope and UI labels stay DM-shaped.
-      kind: peer.kind,
-      id: peer.id,
+    ctx: {
+      AgentId: route.agentId,
+      SessionKey: route.sessionKey,
+      AgentRouteMatchedBy: route.matchedBy,
+      AccountId: route.accountId ?? account.accountId,
+      ChatType: isGroup ? "group" : "direct",
+      ChatId: isGroup ? chatId : undefined,
+      GroupChannel: isGroup ? chatId : undefined,
+      SenderId: normalizeZalouserSender(senderId) ?? undefined,
+      Provider: "zalouser",
+      Surface: "zalouser",
+      CommandAuthorized: commandAuthorized,
     },
   });
+  if (!identityDecision.allowed) {
+    logVerbose(
+      core,
+      runtime,
+      `zalouser: drop inbound identity before provider preparation (${identityDecision.reason})`,
+    );
+    return;
+  }
+
+  const groupContext =
+    isGroup && !configuredGroupName
+      ? await resolveZaloGroupContext(account.profile, chatId).catch((err: unknown) => {
+          logVerbose(
+            core,
+            runtime,
+            `zalouser: group context lookup failed for ${chatId}: ${String(err)}`,
+          );
+          return null;
+        })
+      : null;
+  groupName = configuredGroupName || groupContext?.name?.trim() || "";
+  groupMembers = groupContext?.members?.slice(0, 20).join(", ") || undefined;
+
+  if (isGroup) {
+    const groupEntry = findZalouserGroupEntry(
+      groups,
+      buildZalouserGroupCandidates({
+        groupId: chatId,
+        groupName,
+        includeGroupIdAlias: true,
+        includeWildcard: true,
+        allowNameMatching,
+      }),
+    );
+    const routeAccess = resolveZalouserRouteAccess({
+      groupPolicy,
+      configured: routeAllowlistConfigured,
+      matched: Boolean(groupEntry),
+      enabled: isZalouserGroupEntryAllowed(groupEntry),
+    });
+    if (!routeAccess.allowed) {
+      if (routeAccess.reason === "disabled") {
+        logVerbose(core, runtime, `zalouser: drop group ${chatId} (groupPolicy=disabled)`);
+      } else if (routeAccess.reason === "empty_allowlist") {
+        logVerbose(
+          core,
+          runtime,
+          `zalouser: drop group ${chatId} (groupPolicy=allowlist, no allowlist)`,
+        );
+      } else if (routeAccess.reason === "route_not_allowlisted") {
+        logVerbose(core, runtime, `zalouser: drop group ${chatId} (not allowlisted)`);
+      } else if (routeAccess.reason === "route_disabled") {
+        logVerbose(core, runtime, `zalouser: drop group ${chatId} (group disabled)`);
+      }
+      return;
+    }
+  }
+
+  if (message.eventMessage) {
+    try {
+      await sendZalouserDeliveryAcks({
+        profile: account.profile,
+        isGroup,
+        message: message.eventMessage,
+      });
+    } catch (err) {
+      logVerbose(core, runtime, `zalouser: delivery/seen ack failed for ${chatId}: ${String(err)}`);
+    }
+  }
+
   const historyKey = isGroup ? route.sessionKey : undefined;
   const channelHistory = createChannelHistoryWindow({
     historyMap: historyState.groupHistories,
@@ -641,6 +683,7 @@ async function processMessage(
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
+      matchedBy: route.matchedBy,
       routeSessionKey: route.sessionKey,
       dispatchSessionKey: inboundSessionKey,
     },
@@ -739,6 +782,7 @@ async function processMessage(
       },
     },
     replyPipeline,
+    replyOptions: { identityContractVersion: 1 },
     record: {
       onRecordError: (err) => {
         runtime.error?.(`zalouser: failed updating session meta: ${String(err)}`);

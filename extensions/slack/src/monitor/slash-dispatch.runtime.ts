@@ -1,3 +1,9 @@
+import {
+  ensureConfiguredBindingRouteReady as ensureConfiguredBindingRouteReadyImpl,
+  lookupRuntimeConversationBindingRoute as lookupRuntimeConversationBindingRouteImpl,
+  resolveConfiguredBindingRoute as resolveConfiguredBindingRouteImpl,
+  touchRuntimeConversationBindingRoute as touchRuntimeConversationBindingRouteImpl,
+} from "openclaw/plugin-sdk/conversation-binding-runtime";
 // Slack plugin module implements slash dispatch behavior.
 import {
   recordInboundSessionMetaSafe as recordInboundSessionMetaSafeImpl,
@@ -25,6 +31,14 @@ type ResolveMarkdownTableMode =
   typeof import("openclaw/plugin-sdk/markdown-table-runtime").resolveMarkdownTableMode;
 type ResolveAgentRoute = typeof import("openclaw/plugin-sdk/routing").resolveAgentRoute;
 type DeliverSlackSlashReplies = typeof import("./replies.js").deliverSlackSlashReplies;
+type EnsureConfiguredBindingRouteReady =
+  typeof import("openclaw/plugin-sdk/conversation-binding-runtime").ensureConfiguredBindingRouteReady;
+type ResolveConfiguredBindingRoute =
+  typeof import("openclaw/plugin-sdk/conversation-binding-runtime").resolveConfiguredBindingRoute;
+type LookupRuntimeConversationBindingRoute =
+  typeof import("openclaw/plugin-sdk/conversation-binding-runtime").lookupRuntimeConversationBindingRoute;
+type TouchRuntimeConversationBindingRoute =
+  typeof import("openclaw/plugin-sdk/conversation-binding-runtime").touchRuntimeConversationBindingRoute;
 
 export function resolveChunkMode(
   ...args: Parameters<ResolveChunkMode>
@@ -66,6 +80,30 @@ export function resolveAgentRoute(
   ...args: Parameters<ResolveAgentRoute>
 ): ReturnType<ResolveAgentRoute> {
   return resolveAgentRouteImpl(...args);
+}
+
+export function ensureConfiguredBindingRouteReady(
+  ...args: Parameters<EnsureConfiguredBindingRouteReady>
+): ReturnType<EnsureConfiguredBindingRouteReady> {
+  return ensureConfiguredBindingRouteReadyImpl(...args);
+}
+
+export function resolveConfiguredBindingRoute(
+  ...args: Parameters<ResolveConfiguredBindingRoute>
+): ReturnType<ResolveConfiguredBindingRoute> {
+  return resolveConfiguredBindingRouteImpl(...args);
+}
+
+export function lookupRuntimeConversationBindingRoute(
+  ...args: Parameters<LookupRuntimeConversationBindingRoute>
+): ReturnType<LookupRuntimeConversationBindingRoute> {
+  return lookupRuntimeConversationBindingRouteImpl(...args);
+}
+
+export function touchRuntimeConversationBindingRoute(
+  ...args: Parameters<TouchRuntimeConversationBindingRoute>
+): ReturnType<TouchRuntimeConversationBindingRoute> {
+  return touchRuntimeConversationBindingRouteImpl(...args);
 }
 
 export function deliverSlackSlashReplies(

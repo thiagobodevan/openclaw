@@ -1,5 +1,6 @@
 // Voice Call tests cover webhook plugin behavior.
 import { request, type IncomingMessage } from "node:http";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { RealtimeTranscriptionProviderPlugin } from "openclaw/plugin-sdk/realtime-transcription";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -7,6 +8,7 @@ import {
   type VoiceCallConfig,
   type VoiceCallConfigInput,
 } from "./config.js";
+import type { CoreConfig } from "./core-bridge.js";
 import type { CallManager } from "./manager.js";
 import type { VoiceCallProvider } from "./providers/base.js";
 import { PlivoProvider } from "./providers/plivo.js";
@@ -104,6 +106,14 @@ const createConfig = (overrides: VoiceCallConfigInput = {}): VoiceCallConfig => 
   });
   parsed.serve.port = merged.serve.port;
   return parsed;
+};
+
+const personalCoreConfig: OpenClawConfig & CoreConfig = {
+  agents: { list: [{ id: "main", default: true }] },
+};
+
+const serviceCoreConfig: OpenClawConfig & CoreConfig = {
+  agents: { list: [{ id: "personal", default: true }, { id: "voice-service" }] },
 };
 
 const createCall = (startedAt: number): CallRecord => ({
@@ -1166,6 +1176,7 @@ describe("VoiceCallWebhookServer replay handling", () => {
     const config = createConfig({
       provider: "twilio",
       inboundPolicy: "open",
+      agentId: "voice-service",
       realtime: {
         enabled: true,
         streamPath: "/voice/stream/realtime",
@@ -1175,7 +1186,13 @@ describe("VoiceCallWebhookServer replay handling", () => {
         providers: {},
       },
     });
-    const server = new VoiceCallWebhookServer(config, manager, twilioProvider);
+    const server = new VoiceCallWebhookServer(
+      config,
+      manager,
+      twilioProvider,
+      serviceCoreConfig,
+      serviceCoreConfig,
+    );
     server.setRealtimeHandler({
       buildTwiMLPayload,
       getStreamPathPattern: () => "/voice/stream/realtime",
@@ -1325,7 +1342,7 @@ describe("VoiceCallWebhookServer replay handling", () => {
     }
   });
 
-  it("creates a realtime stream only for allowlisted inbound callers", async () => {
+  it("creates a realtime stream for allowlisted callers on a configured service agent", async () => {
     const buildTwiMLPayload = vi.fn(() => ({
       statusCode: 200,
       headers: { "Content-Type": "text/xml" },
@@ -1341,6 +1358,7 @@ describe("VoiceCallWebhookServer replay handling", () => {
       provider: "twilio",
       inboundPolicy: "allowlist",
       allowFrom: ["+15550002222"],
+      agentId: "voice-service",
       realtime: {
         enabled: true,
         streamPath: "/voice/stream/realtime",
@@ -1350,7 +1368,13 @@ describe("VoiceCallWebhookServer replay handling", () => {
         providers: {},
       },
     });
-    const server = new VoiceCallWebhookServer(config, manager, twilioProvider);
+    const server = new VoiceCallWebhookServer(
+      config,
+      manager,
+      twilioProvider,
+      serviceCoreConfig,
+      serviceCoreConfig,
+    );
     server.setRealtimeHandler({
       buildTwiMLPayload,
       getStreamPathPattern: () => "/voice/stream/realtime",

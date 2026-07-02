@@ -3,6 +3,7 @@ import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 import { normalizeSmsPhoneNumber } from "./phone.js";
 import { sendSmsTextChunks } from "./send.js";
 import type { ResolvedSmsAccount, SmsInboundMessage } from "./types.js";
@@ -91,6 +92,35 @@ export async function dispatchSmsInboundEvent(params: {
   log?: SmsLog;
 }): Promise<void> {
   const from = normalizeSmsPhoneNumber(params.msg.from);
+  const route = params.channelRuntime.routing.resolveAgentRoute({
+    cfg: params.cfg,
+    channel: CHANNEL_ID,
+    accountId: params.account.accountId,
+    peer: {
+      kind: "direct",
+      id: from,
+    },
+  });
+  const identityDecision = resolveConversationIdentityAdmission({
+    cfg: params.cfg,
+    ctx: {
+      AgentId: route.agentId,
+      AgentRouteMatchedBy: route.matchedBy,
+      SessionKey: route.sessionKey,
+      AccountId: route.accountId,
+      ChatType: "direct",
+      SenderId: from,
+      From: `sms:${from}`,
+      To: params.msg.to,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+      CommandAuthorized: false,
+    },
+  });
+  if (!identityDecision.allowed) {
+    params.log?.warn?.(`SMS sender ${from} is not admitted (${identityDecision.reason})`);
+    return;
+  }
   const auth = await authorizeSmsSender({
     cfg: params.cfg,
     account: params.account,
@@ -111,15 +141,6 @@ export async function dispatchSmsInboundEvent(params: {
     return;
   }
 
-  const route = params.channelRuntime.routing.resolveAgentRoute({
-    cfg: params.cfg,
-    channel: CHANNEL_ID,
-    accountId: params.account.accountId,
-    peer: {
-      kind: "direct",
-      id: from,
-    },
-  });
   const sessionKey = route.sessionKey;
 
   await params.channelRuntime.inbound.run({
@@ -153,6 +174,7 @@ export async function dispatchSmsInboundEvent(params: {
           route: {
             agentId: route.agentId,
             accountId: params.account.accountId,
+            matchedBy: route.matchedBy,
             routeSessionKey: sessionKey,
             dispatchSessionKey: sessionKey,
           },
@@ -186,6 +208,7 @@ export async function dispatchSmsInboundEvent(params: {
           recordInboundSession: params.channelRuntime.session.recordInboundSession,
           dispatchReplyWithBufferedBlockDispatcher:
             params.channelRuntime.reply.dispatchReplyWithBufferedBlockDispatcher,
+          replyOptions: { identityContractVersion: 1 },
           delivery: {
             durable: () => ({
               to: from,

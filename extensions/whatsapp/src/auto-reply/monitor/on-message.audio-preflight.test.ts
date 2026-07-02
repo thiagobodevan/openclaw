@@ -8,6 +8,7 @@ const processMessageMock = vi.fn();
 const maybeBroadcastMessageMock = vi.fn();
 const createStatusReactionControllerMock = vi.fn();
 const updateLastRouteInBackgroundMock = vi.fn();
+const resolveConversationIdentityModeMock = vi.hoisted(() => vi.fn());
 const statusReactionController = {
   setQueued: vi.fn(async () => {
     events.push("status-queued");
@@ -87,6 +88,8 @@ vi.mock("../../text-runtime.js", () => ({
 
 vi.mock("openclaw/plugin-sdk/routing", () => ({
   buildGroupHistoryKey: () => "group-key",
+  resolveConversationIdentityMode: (...args: unknown[]) =>
+    resolveConversationIdentityModeMock(...args),
   resolveAgentRoute: () => ({
     agentId: "main",
     accountId: "default",
@@ -225,6 +228,8 @@ describe("createWebOnMessageHandler audio preflight", () => {
     Object.values(statusReactionController).forEach((mock) => mock.mockClear());
     ackReactionHandle.remove.mockClear();
     updateLastRouteInBackgroundMock.mockReset();
+    resolveConversationIdentityModeMock.mockReset();
+    resolveConversationIdentityModeMock.mockReturnValue({ allowed: true });
     applyGroupGatingMock.mockReset();
     applyGroupGatingMock.mockResolvedValue({ shouldProcess: true });
   });
@@ -276,6 +281,80 @@ describe("createWebOnMessageHandler audio preflight", () => {
     expect(maybeSendAckReactionMock).not.toHaveBeenCalled();
     expect(updateLastRouteInBackgroundMock).not.toHaveBeenCalled();
     expect(processMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("denies conversation identity before audio preflight", async () => {
+    resolveConversationIdentityModeMock.mockReturnValue({
+      allowed: false,
+      reason: "untrusted_direct",
+    });
+    const handler = makeHandler();
+
+    await handler(makeAudioMsg());
+
+    expect(transcribeFirstAudioMock).not.toHaveBeenCalled();
+    expect(maybeSendAckReactionMock).not.toHaveBeenCalled();
+    expect(processMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("carries pairing-store approval into personal identity admission", async () => {
+    const handler = makeHandler();
+
+    await handler(
+      createTestWebAudioInboundMessage({
+        admission: { sender: { isOwner: true } },
+      }),
+    );
+
+    expect(resolveConversationIdentityModeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ senderIsOwner: true }),
+    );
+  });
+
+  it("does not treat wildcard command ownership as personal identity", async () => {
+    const handler = makeHandler({
+      cfg: {
+        agents: { list: [{ id: "main", default: true }] },
+        commands: { ownerAllowFrom: ["*"] },
+        channels: { whatsapp: { ackReaction: { enabled: true } } },
+      } as never,
+    });
+    const msg = createTestWebAudioInboundMessage({
+      admission: {
+        sender: { isOwner: false },
+        senderAccess: {
+          allowed: true,
+          decision: "allow",
+          reasonCode: "dm_policy_open",
+        },
+      },
+    });
+
+    await handler(msg);
+
+    expect(resolveConversationIdentityModeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ senderIsOwner: false }),
+    );
+  });
+
+  it("does not treat a coarse allowlisted reason as personal owner proof", async () => {
+    const handler = makeHandler();
+    const msg = createTestWebAudioInboundMessage({
+      admission: {
+        sender: { isOwner: false },
+        senderAccess: {
+          allowed: true,
+          decision: "allow",
+          reasonCode: "dm_policy_allowlisted",
+        },
+      },
+    });
+
+    await handler(msg);
+
+    expect(resolveConversationIdentityModeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ senderIsOwner: false }),
+    );
   });
 
   it("skips early DM ack/preflight for legacy audio without explicit access proof", async () => {

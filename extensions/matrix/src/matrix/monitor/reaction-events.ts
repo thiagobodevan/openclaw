@@ -1,10 +1,12 @@
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
+import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
 // Matrix plugin module implements reaction events behavior.
 import { getSessionBindingService } from "openclaw/plugin-sdk/session-binding-runtime";
 import {
   resolveMatrixApprovalReactionTargetWithPersistence,
   unregisterMatrixApprovalReactionTarget,
 } from "../../approval-reactions.js";
+import { ensureConfiguredAcpBindingReady } from "../../runtime-api.js";
 import type { CoreConfig } from "../../types.js";
 import { resolveMatrixAccountConfig } from "../account-config.js";
 import { extractMatrixReactionAnnotation } from "../reaction-common.js";
@@ -23,6 +25,61 @@ const loadExecApprovalResolver = createLazyRuntimeModule(
 );
 
 export type MatrixReactionNotificationMode = "off" | "own";
+
+async function resolveAdmittedMatrixReactionRoute(params: {
+  cfg: CoreConfig;
+  core: PluginRuntime;
+  accountId: string;
+  roomId: string;
+  senderId: string;
+  isDirectMessage: boolean;
+  dmSessionScope?: "per-user" | "per-room";
+  threadId?: string;
+  eventTs?: number;
+  preparedRoute?: ReturnType<typeof resolveMatrixInboundRoute>;
+}) {
+  const resolved =
+    params.preparedRoute ??
+    resolveMatrixInboundRoute({
+      cfg: params.cfg,
+      accountId: params.accountId,
+      roomId: params.roomId,
+      senderId: params.senderId,
+      isDirectMessage: params.isDirectMessage,
+      dmSessionScope: params.dmSessionScope,
+      threadId: params.threadId,
+      eventTs: params.eventTs,
+      resolveAgentRoute: params.core.channel.routing.resolveAgentRoute,
+    });
+  const identity = resolveConversationIdentityAdmission({
+    cfg: params.cfg,
+    ctx: {
+      AgentId: resolved.route.agentId,
+      AgentRouteMatchedBy: resolved.route.matchedBy,
+      SessionKey: resolved.route.sessionKey,
+      AccountId: resolved.route.accountId,
+      ChatType: params.isDirectMessage ? "direct" : "channel",
+      ChatId: params.isDirectMessage ? undefined : params.roomId,
+      SenderId: params.senderId,
+      Provider: "matrix",
+      Surface: "matrix",
+      CommandAuthorized: true,
+    },
+  });
+  if (!identity.allowed) {
+    return null;
+  }
+  if (resolved.configuredBinding) {
+    const readiness = await ensureConfiguredAcpBindingReady({
+      cfg: params.cfg,
+      configuredBinding: resolved.configuredBinding,
+    });
+    if (!readiness.ok) {
+      return null;
+    }
+  }
+  return resolved;
+}
 
 export function resolveMatrixReactionNotificationMode(params: {
   cfg: CoreConfig;
@@ -94,6 +151,7 @@ export async function handleInboundMatrixReaction(params: {
   senderLabel: string;
   selfUserId: string;
   isDirectMessage: boolean;
+  preparedRoute?: ReturnType<typeof resolveMatrixInboundRoute>;
   logVerboseMessage: (message: string) => void;
 }): Promise<void> {
   const reaction = extractMatrixReactionAnnotation(params.event.content);
@@ -129,6 +187,25 @@ export async function handleInboundMatrixReaction(params: {
     return;
   }
 
+  const accountConfig = resolveMatrixAccountConfig({
+    cfg: params.cfg,
+    accountId: params.accountId,
+  });
+  const initialRoute = await resolveAdmittedMatrixReactionRoute({
+    cfg: params.cfg,
+    core: params.core,
+    accountId: params.accountId,
+    roomId: params.roomId,
+    senderId: params.senderId,
+    isDirectMessage: params.isDirectMessage,
+    dmSessionScope: accountConfig.dm?.sessionScope ?? "per-user",
+    eventTs: params.event.origin_server_ts,
+    preparedRoute: params.preparedRoute,
+  });
+  if (!initialRoute) {
+    return;
+  }
+
   const targetEvent = await params.client
     .getEvent(params.roomId, reaction.eventId)
     .catch((err: unknown) => {
@@ -156,10 +233,6 @@ export async function handleInboundMatrixReaction(params: {
         content: targetContent,
       })
     : undefined;
-  const accountConfig = resolveMatrixAccountConfig({
-    cfg: params.cfg,
-    accountId: params.accountId,
-  });
   const thread = resolveMatrixThreadRouting({
     isDirectMessage: params.isDirectMessage,
     threadReplies: accountConfig.threadReplies ?? "inbound",
@@ -167,17 +240,23 @@ export async function handleInboundMatrixReaction(params: {
     messageId: reaction.eventId,
     threadRootId,
   });
-  const { route, runtimeBindingId } = resolveMatrixInboundRoute({
-    cfg: params.cfg,
-    accountId: params.accountId,
-    roomId: params.roomId,
-    senderId: params.senderId,
-    isDirectMessage: params.isDirectMessage,
-    dmSessionScope: accountConfig.dm?.sessionScope ?? "per-user",
-    threadId: thread.threadId,
-    eventTs: params.event.origin_server_ts,
-    resolveAgentRoute: params.core.channel.routing.resolveAgentRoute,
-  });
+  const exactRoute = thread.threadId
+    ? await resolveAdmittedMatrixReactionRoute({
+        cfg: params.cfg,
+        core: params.core,
+        accountId: params.accountId,
+        roomId: params.roomId,
+        senderId: params.senderId,
+        isDirectMessage: params.isDirectMessage,
+        dmSessionScope: accountConfig.dm?.sessionScope ?? "per-user",
+        threadId: thread.threadId,
+        eventTs: params.event.origin_server_ts,
+      })
+    : initialRoute;
+  if (!exactRoute) {
+    return;
+  }
+  const { route, runtimeBindingId } = exactRoute;
   if (runtimeBindingId) {
     getSessionBindingService().touch(runtimeBindingId, params.event.origin_server_ts);
   }
@@ -185,6 +264,7 @@ export async function handleInboundMatrixReaction(params: {
   params.core.system.enqueueSystemEvent(text, {
     sessionKey: route.sessionKey,
     contextKey: `matrix:reaction:add:${params.roomId}:${reaction.eventId}:${params.senderId}:${reaction.key}`,
+    actor: { channel: "matrix", accountId: params.accountId, senderId: params.senderId },
   });
   params.logVerboseMessage(
     `matrix: reaction event enqueued room=${params.roomId} target=${reaction.eventId} sender=${params.senderId} emoji=${reaction.key}`,

@@ -9,7 +9,7 @@ import { keepHttpServerTaskAlive, waitUntilAbort } from "openclaw/plugin-sdk/cha
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import { createClaimableDedupe, type ClaimableDedupe } from "openclaw/plugin-sdk/persistent-dedupe";
 import { RAFT_CHANNEL_ID, type ResolvedRaftAccount } from "./accounts.js";
-import { dispatchRaftWake } from "./inbound.js";
+import { dispatchRaftWake, resolveRaftServiceRoute } from "./inbound.js";
 
 const BRIDGE_HOST = "127.0.0.1";
 const ACTIVITY_DRAIN_PATH = "/activity/drain";
@@ -221,6 +221,7 @@ export async function startRaftGatewayAccount(
   if (!ctx.channelRuntime) {
     throw new Error("Raft requires OpenClaw channel runtime support. Update OpenClaw and retry.");
   }
+  const serviceRoute = resolveRaftServiceRoute(ctx);
 
   const wakeQueue = new KeyedAsyncQueue();
   const wakeDedupe =
@@ -304,7 +305,7 @@ export async function startRaftGatewayAccount(
           throw new WakeRequestError(503, "Raft wake delivery is retrying.");
         }
         try {
-          await dispatchRaftWake({ ctx });
+          await dispatchRaftWake({ ctx, route: serviceRoute });
         } catch (error) {
           wakeDedupe.release(dedupeKey, { namespace: ctx.accountId, error });
           throw error;

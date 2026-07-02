@@ -134,6 +134,20 @@ export function resolveRuntimeConversationBindingRoute(
     route: ResolvedAgentRoute;
   } & ConfiguredBindingRouteConversationInput,
 ): RuntimeConversationBindingRouteResult {
+  const result = lookupRuntimeConversationBindingRoute(params);
+  touchRuntimeConversationBindingRoute(result);
+  return result;
+}
+
+/**
+ * Resolves a persisted runtime conversation binding without renewing its lease.
+ * Callers must touch only after sender and conversation admission succeeds.
+ */
+export function lookupRuntimeConversationBindingRoute(
+  params: {
+    route: ResolvedAgentRoute;
+  } & ConfiguredBindingRouteConversationInput,
+): RuntimeConversationBindingRouteResult {
   const bindingRecord = getSessionBindingService().resolveByConversation(
     resolveConfiguredBindingConversationRef(params),
   );
@@ -156,7 +170,6 @@ export function resolveRuntimeConversationBindingRoute(
     };
   }
 
-  getSessionBindingService().touch(bindingRecord.bindingId);
   if (isPluginOwnedRuntimeBindingRecord(bindingRecord)) {
     // Plugin-owned binding records are observed but not route-rewritten by core; the owning
     // plugin is responsible for its runtime target handoff.
@@ -182,6 +195,15 @@ export function resolveRuntimeConversationBindingRoute(
       matchedBy: "binding.channel",
     },
   };
+}
+
+/** Renews a resolved runtime binding after the inbound event is admitted. */
+export function touchRuntimeConversationBindingRoute(
+  result: Pick<RuntimeConversationBindingRouteResult, "bindingRecord">,
+): void {
+  if (result.bindingRecord) {
+    getSessionBindingService().touch(result.bindingRecord.bindingId);
+  }
 }
 
 /**

@@ -144,6 +144,17 @@ export function resolveDiscordCommandOwnerAllowFrom(cfg: OpenClawConfig): string
   return entries.length > 0 ? entries : undefined;
 }
 
+export function resolveDiscordStableSenderIsOwner(params: {
+  cfg: OpenClawConfig;
+  providerAllowFrom?: string[];
+  sender: { id: string; name?: string; tag?: string };
+}): boolean {
+  const commandOwners = resolveDiscordCommandOwnerAllowFrom(params.cfg);
+  const ownerAllowFrom = commandOwners?.length ? commandOwners : params.providerAllowFrom;
+  const stableOwners = normalizeDiscordAllowList(ownerAllowFrom, ["discord:", "user:", "pk:"]);
+  return stableOwners?.ids.has(params.sender.id) === true;
+}
+
 export async function resolveDiscordGuildNativeCommandAuthorized(params: {
   cfg: OpenClawConfig;
   accountId: string;

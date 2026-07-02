@@ -72,6 +72,7 @@ describe("CallManager verification on restore", () => {
     providerResult?: FakeProvider["getCallStatusResult"];
     configureProvider?: (provider: FakeProvider) => void;
     configOverrides?: Partial<{ maxDurationSeconds: number }>;
+    validateInboundIdentity?: ConstructorParameters<typeof CallManager>[4];
   }) {
     const storePath = createTestStorePath();
     const call = makePersistedCall(params?.callOverrides);
@@ -89,7 +90,13 @@ describe("CallManager verification on restore", () => {
       fromNumber: "+15550000000",
       ...params?.configOverrides,
     });
-    const manager = new CallManager(config, storePath);
+    const manager = new CallManager(
+      config,
+      storePath,
+      undefined,
+      undefined,
+      params?.validateInboundIdentity,
+    );
     await manager.initialize(provider, "https://example.com/voice/webhook");
 
     return { call, manager, provider, storePath };
@@ -110,6 +117,36 @@ describe("CallManager verification on restore", () => {
 
     const activeCall = requireSingleActiveCall(manager);
     expect(activeCall.callId).toBe(call.callId);
+  });
+
+  it("hangs up restored inbound calls whose admitted agent was removed", async () => {
+    const getCallStatus = vi.fn();
+    const { manager, provider, storePath } = await initializeManager({
+      callOverrides: {
+        direction: "inbound",
+        inboundIdentity: {
+          agentId: "removed-service",
+          routeMatchedBy: "config.agent",
+          chatType: "direct",
+          senderId: "+15550000001",
+          senderE164: "+15550000001",
+          senderIsOwner: false,
+          responsePolicy: { model: null, systemPrompt: null, timeoutMs: 30000 },
+        },
+      },
+      configureProvider: (provider) => {
+        provider.getCallStatus = getCallStatus;
+      },
+      validateInboundIdentity: () => false,
+    });
+
+    expect(manager.getActiveCalls()).toHaveLength(0);
+    expect(getCallStatus).not.toHaveBeenCalled();
+    expect(requireSingleHangupCall(provider)).toMatchObject({
+      reason: "hangup-bot",
+    });
+    await flushPendingCallRecordWritesForTest();
+    expect(loadActiveCallsFromStore(storePath).activeCalls.size).toBe(0);
   });
 
   it("keeps calls when provider returns unknown (transient error)", async () => {

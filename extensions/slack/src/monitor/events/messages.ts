@@ -190,9 +190,10 @@ export function registerSlackMessageEvents(params: {
       const subtypeHandler = resolveSlackMessageSubtypeHandler(message);
       if (subtypeHandler) {
         const channelId = subtypeHandler.resolveChannelId(message);
+        const senderId = subtypeHandler.resolveSenderId(message);
         const ingressContext = await authorizeAndResolveSlackSystemEventContext({
           ctx,
-          senderId: subtypeHandler.resolveSenderId(message),
+          senderId,
           channelId,
           channelType: subtypeHandler.resolveChannelType(message),
           eventKind: subtypeHandler.eventKind,
@@ -203,6 +204,7 @@ export function registerSlackMessageEvents(params: {
         enqueueSystemEvent(subtypeHandler.describe(ingressContext.channelLabel), {
           sessionKey: ingressContext.sessionKey,
           contextKey: subtypeHandler.contextKey(message),
+          actor: { channel: "slack", accountId: ctx.accountId, senderId: senderId ?? "" },
         });
         return;
       }

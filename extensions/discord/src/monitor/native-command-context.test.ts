@@ -9,6 +9,7 @@ describe("buildDiscordNativeCommandContext", () => {
       commandArgs: {},
       sessionKey: "agent:codex:discord:slash:user-1",
       commandTargetSessionKey: "agent:codex:discord:direct:user-1",
+      routeMatchedBy: "binding.peer",
       accountId: "default",
       interactionId: "interaction-1",
       channelId: "dm-1",
@@ -35,6 +36,7 @@ describe("buildDiscordNativeCommandContext", () => {
     expect(ctx.ConversationLabel).toBe("Tester");
     expect(ctx.SessionKey).toBe("agent:codex:discord:slash:user-1");
     expect(ctx.CommandTargetSessionKey).toBe("agent:codex:discord:direct:user-1");
+    expect(ctx.AgentRouteMatchedBy).toBe("binding.peer");
     expect(ctx.OriginatingTo).toBe("user:user-1");
     expect(ctx.UntrustedContext).toBeUndefined();
     expect(ctx.UntrustedStructuredContext).toBeUndefined();
@@ -48,6 +50,7 @@ describe("buildDiscordNativeCommandContext", () => {
       commandArgs: { values: { model: "gpt-5.2" } },
       sessionKey: "agent:codex:discord:slash:user-1",
       commandTargetSessionKey: "agent:codex:discord:channel:chan-1",
+      routeMatchedBy: "binding.channel",
       accountId: "default",
       interactionId: "interaction-1",
       channelId: "chan-1",

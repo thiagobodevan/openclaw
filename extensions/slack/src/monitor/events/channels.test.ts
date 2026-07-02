@@ -19,10 +19,14 @@ type SlackChannelHandler = (args: {
 function createChannelContext(params?: {
   trackEvent?: () => void;
   shouldDropMismatchedSlackEvent?: (body: unknown) => boolean;
+  resolveRouteReady?: () => Promise<null>;
 }) {
-  const harness = createSlackSystemEventTestHarness();
+  const harness = createSlackSystemEventTestHarness({ channelType: "channel" });
   if (params?.shouldDropMismatchedSlackEvent) {
     harness.ctx.shouldDropMismatchedSlackEvent = params.shouldDropMismatchedSlackEvent;
+  }
+  if (params?.resolveRouteReady) {
+    harness.ctx.resolveSlackSystemEventRouteReady = params.resolveRouteReady;
   }
   registerSlackChannelEvents({ ctx: harness.ctx, trackEvent: params?.trackEvent });
   return {
@@ -80,8 +84,27 @@ describe("registerSlackChannelEvents", () => {
 
     expect(trackEvent).toHaveBeenCalledTimes(1);
     expect(enqueueSystemEventMock).toHaveBeenCalledWith("Slack channel created: #general.", {
-      sessionKey: "agent:main:main",
+      sessionKey: "agent:service:slack:channel:c1",
       contextKey: "slack:channel:created:C1",
     });
+  });
+
+  it("does not enqueue lifecycle events without an admitted service route", async () => {
+    const resolveRouteReady = vi.fn(async () => null);
+    const { getCreatedHandler } = createChannelContext({ resolveRouteReady });
+    const createdHandler = requireChannelHandler(getCreatedHandler());
+
+    await createdHandler({
+      event: {
+        channel: { id: "C1", name: "general" },
+      },
+      body: {},
+    });
+
+    expect(resolveRouteReady).toHaveBeenCalledWith({
+      channelId: "C1",
+      channelType: "channel",
+    });
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
   });
 });

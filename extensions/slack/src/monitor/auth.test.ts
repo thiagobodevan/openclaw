@@ -8,6 +8,7 @@ let authorizeSlackSystemEventSender: typeof import("./auth.js").authorizeSlackSy
 let clearSlackAllowFromCacheForTest: typeof import("./auth.js").clearSlackAllowFromCacheForTest;
 let resolveSlackEffectiveAllowFrom: typeof import("./auth.js").resolveSlackEffectiveAllowFrom;
 let resolveSlackCommandIngress: typeof import("./auth.js").resolveSlackCommandIngress;
+let resolveSlackSenderIsOwner: typeof import("./auth.js").resolveSlackSenderIsOwner;
 
 vi.mock("openclaw/plugin-sdk/channel-ingress-runtime", async () => {
   const actual = await vi.importActual<
@@ -61,6 +62,7 @@ describe("resolveSlackEffectiveAllowFrom", () => {
       authorizeSlackSystemEventSender,
       clearSlackAllowFromCacheForTest,
       resolveSlackEffectiveAllowFrom,
+      resolveSlackSenderIsOwner,
     } = await import("./auth.js"));
   });
 
@@ -106,6 +108,20 @@ describe("resolveSlackEffectiveAllowFrom", () => {
 
     expect(effective).toEqual(["u1"]);
     expect(readChannelIngressStoreAllowFromForDmPolicyMock).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a command-owner wildcard as personal identity ownership", () => {
+    const ctx = makeSlackCtx(["U_OWNER"]);
+    ctx.cfg = { commands: { ownerAllowFrom: ["*"] } } as never;
+
+    expect(resolveSlackSenderIsOwner(ctx, "U_OWNER")).toBe(false);
+  });
+
+  it("treats an explicit enterprise member id as personal identity ownership", () => {
+    const ctx = makeSlackCtx(["slack:W_OWNER"]);
+    ctx.cfg = {} as never;
+
+    expect(resolveSlackSenderIsOwner(ctx, "W_OWNER")).toBe(true);
   });
 });
 

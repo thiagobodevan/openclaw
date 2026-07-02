@@ -26,11 +26,14 @@ export async function monitorWebChannelWithCapture(resolver: unknown): Promise<{
 
 export async function sendWebDirectInboundAndCollectSessionKeys(): Promise<{
   seen: string[];
+  routeMatches: string[];
   resolver: ReturnType<typeof vi.fn>;
 }> {
   const seen: string[] = [];
-  const resolver = vi.fn(async (ctx: { SessionKey?: unknown }) => {
+  const routeMatches: string[] = [];
+  const resolver = vi.fn(async (ctx: { SessionKey?: unknown; AgentRouteMatchedBy?: unknown }) => {
     seen.push(String(ctx.SessionKey));
+    routeMatches.push(String(ctx.AgentRouteMatchedBy));
     return { text: "ok" };
   });
 
@@ -44,5 +47,5 @@ export async function sendWebDirectInboundAndCollectSessionKeys(): Promise<{
     body: "hello",
   });
 
-  return { seen, resolver };
+  return { seen, routeMatches, resolver };
 }

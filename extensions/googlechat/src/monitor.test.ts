@@ -13,6 +13,7 @@ const apiMocks = vi.hoisted(() => ({
 
 const accessMocks = vi.hoisted(() => ({
   applyGoogleChatInboundAccessPolicy: vi.fn(),
+  resolveGoogleChatStableSenderIsOwner: vi.fn(),
 }));
 
 vi.mock("./api.js", () => ({
@@ -22,20 +23,30 @@ vi.mock("./api.js", () => ({
 
 vi.mock("./monitor-access.js", () => ({
   applyGoogleChatInboundAccessPolicy: accessMocks.applyGoogleChatInboundAccessPolicy,
+  resolveGoogleChatStableSenderIsOwner: accessMocks.resolveGoogleChatStableSenderIsOwner,
 }));
 
 beforeEach(() => {
   apiMocks.downloadGoogleChatMedia.mockReset();
   apiMocks.sendGoogleChatMessage.mockReset();
   accessMocks.applyGoogleChatInboundAccessPolicy.mockReset();
+  accessMocks.resolveGoogleChatStableSenderIsOwner.mockReset();
 });
 
-function createInboundClassificationHarness() {
-  const resolveAgentRoute = vi.fn(() => ({
+function createInboundClassificationHarness(
+  route: {
+    agentId: string;
+    accountId: string;
+    sessionKey: string;
+    matchedBy: "default" | "binding.account";
+  } = {
     agentId: "agent-1",
     accountId: "work",
     sessionKey: "session-1",
-  }));
+    matchedBy: "binding.account",
+  },
+) {
+  const resolveAgentRoute = vi.fn(() => route);
   const buildContext = vi.fn((payload: unknown) => payload);
   const runTurn = vi.fn();
   const core = {
@@ -253,6 +264,52 @@ describe("googlechat monitor inbound space classification", () => {
     );
     expect(runTurn).toHaveBeenCalledOnce();
   });
+
+  it("denies an unbound shared attachment before media download or typing", async () => {
+    const { core, runTurn } = createInboundClassificationHarness({
+      agentId: "main",
+      accountId: "work",
+      sessionKey: "agent:main:googlechat:group:spaces/EXTERNAL",
+      matchedBy: "default",
+    });
+    accessMocks.applyGoogleChatInboundAccessPolicy.mockResolvedValue({
+      ok: true,
+      commandAuthorized: undefined,
+      effectiveWasMentioned: undefined,
+      groupBotLoopProtection: undefined,
+      groupSystemPrompt: undefined,
+    });
+
+    await testing.processMessageWithPipeline({
+      event: {
+        type: "MESSAGE",
+        space: { name: "spaces/EXTERNAL", spaceType: "SPACE" },
+        message: {
+          name: "spaces/EXTERNAL/messages/1",
+          sender: { name: "users/guest", displayName: "Guest", type: "HUMAN" },
+          attachment: [
+            {
+              contentName: "private.txt",
+              attachmentDataRef: { resourceName: "media/private" },
+            },
+          ],
+        },
+      },
+      account: {
+        accountId: "work",
+        config: {},
+        credentialSource: "inline",
+      } as ResolvedGoogleChatAccount,
+      config: { agents: { list: [{ id: "main", default: true }] } },
+      runtime: { error: vi.fn(), log: vi.fn() },
+      core,
+      mediaMaxMb: 10,
+    });
+
+    expect(apiMocks.downloadGoogleChatMedia).not.toHaveBeenCalled();
+    expect(apiMocks.sendGoogleChatMessage).not.toHaveBeenCalled();
+    expect(runTurn).not.toHaveBeenCalled();
+  });
 });
 
 describe("googlechat monitor sender bot status", () => {
@@ -337,6 +394,7 @@ describe("googlechat monitor direct messages", () => {
             agentId: "agent-1",
             accountId: "work",
             sessionKey: "session-1",
+            matchedBy: "binding.account",
           }),
         },
         session: {
@@ -406,6 +464,7 @@ describe("googlechat monitor direct messages", () => {
             agentId: "agent-1",
             accountId: "work",
             sessionKey: "session-1",
+            matchedBy: "binding.account",
           }),
         },
         session: {
@@ -492,6 +551,7 @@ describe("googlechat monitor direct messages", () => {
             agentId: "agent-1",
             accountId: "work",
             sessionKey: "session-1",
+            matchedBy: "binding.account",
           }),
         },
         session: {

@@ -71,15 +71,24 @@ const emptyAllowlist: QQBotInboundAccess["state"]["allowlists"]["dm"] = {
   },
 };
 
-function makeRuntime(): GatewayPluginRuntime {
+function makeRuntime(
+  route: {
+    agentId?: string;
+    sessionKey: string;
+    accountId: string;
+    matchedBy: "default" | "binding.channel";
+  } = {
+    agentId: "main",
+    sessionKey: "agent:main:qqbot:direct:user-openid",
+    accountId: "qq-main",
+    matchedBy: "binding.channel",
+  },
+): GatewayPluginRuntime {
   return {
     channel: {
       activity: { record: vi.fn() },
       routing: {
-        resolveAgentRoute: vi.fn(() => ({
-          sessionKey: "qqbot:c2c:user-openid",
-          accountId: "qq-main",
-        })),
+        resolveAgentRoute: vi.fn(() => route),
       },
       reply: {
         dispatchReplyWithBufferedBlockDispatcher: vi.fn(),
@@ -137,7 +146,9 @@ function makeEvent(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
 function makeDeps(overrides: Partial<InboundPipelineDeps> = {}): InboundPipelineDeps {
   return {
     account,
-    cfg: {},
+    cfg: {
+      agents: { list: [{ id: "personal", default: true }, { id: "main" }] },
+    },
     log: { info: vi.fn(), error: vi.fn(), debug: vi.fn() },
     runtime: makeRuntime(),
     startTyping: vi.fn(async () => ({ keepAlive: null })),
@@ -296,5 +307,27 @@ describe("buildInboundContext bot self-echo suppression", () => {
     expect(inbound.blocked).toBe(false);
     expect(deps.startTyping).toHaveBeenCalledTimes(1);
     expect(processAttachmentsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("denies an unbound shared route before typing or attachment processing", async () => {
+    const deps = makeDeps({
+      cfg: { agents: { list: [{ id: "personal", default: true }] } },
+      runtime: makeRuntime({
+        agentId: "personal",
+        sessionKey: "agent:personal:qqbot:group:group-1",
+        accountId: "qq-main",
+        matchedBy: "default",
+      }),
+    });
+
+    const inbound = await buildInboundContext(
+      makeEvent({ type: "group", groupOpenid: "group-1" }),
+      deps,
+    );
+
+    expect(inbound.blocked).toBe(true);
+    expect(inbound.blockReason).toBe("unbound_shared");
+    expect(deps.startTyping).not.toHaveBeenCalled();
+    expect(processAttachmentsMock).not.toHaveBeenCalled();
   });
 });

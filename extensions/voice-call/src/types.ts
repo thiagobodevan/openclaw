@@ -137,6 +137,22 @@ export type NormalizedEvent = z.infer<typeof NormalizedEventSchema>;
 
 const CallDirectionSchema = z.enum(["outbound", "inbound"]);
 
+export const VoiceCallInboundIdentitySchema = z.object({
+  agentId: z.string(),
+  routeMatchedBy: z.literal("config.agent"),
+  chatType: z.literal("direct"),
+  senderId: z.string().optional(),
+  senderE164: z.string().optional(),
+  senderIsOwner: z.literal(false),
+  /** Admission-time agent response policy; prevents number reassignment from mixing identities. */
+  responsePolicy: z.object({
+    model: z.string().nullable(),
+    systemPrompt: z.string().nullable(),
+    timeoutMs: z.number().int().positive(),
+  }),
+});
+export type VoiceCallInboundIdentity = z.infer<typeof VoiceCallInboundIdentitySchema>;
+
 // -----------------------------------------------------------------------------
 // Call Record
 // -----------------------------------------------------------------------------
@@ -164,6 +180,8 @@ export const CallRecordSchema = z.object({
   endReason: EndReasonSchema.optional(),
   transcript: z.array(TranscriptEntrySchema).default([]),
   processedEventIds: z.array(z.string()).default([]),
+  /** Trusted conversation facts captured when an inbound call is admitted. */
+  inboundIdentity: VoiceCallInboundIdentitySchema.optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 export type CallRecord = z.infer<typeof CallRecordSchema>;

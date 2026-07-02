@@ -105,6 +105,7 @@ describe("parseSlackModalPrivateMetadata", () => {
           sessionKey: "agent:main:slack:channel:C1",
           channelId: "D123",
           channelType: "im",
+          threadTs: "1712345678.123456",
           userId: "U123",
           pluginInteractiveData: "dean.contract:confirm",
           ignored: "x",
@@ -114,6 +115,7 @@ describe("parseSlackModalPrivateMetadata", () => {
       sessionKey: "agent:main:slack:channel:C1",
       channelId: "D123",
       channelType: "im",
+      threadTs: "1712345678.123456",
       userId: "U123",
       pluginInteractiveData: "dean.contract:confirm",
     });
@@ -128,6 +130,7 @@ describe("encodeSlackModalPrivateMetadata", () => {
           sessionKey: "agent:main:slack:channel:C1",
           channelId: "",
           channelType: "im",
+          threadTs: "1712345678.123456",
           userId: "U123",
           pluginInteractiveData: "dean.contract:confirm",
         }),
@@ -135,6 +138,7 @@ describe("encodeSlackModalPrivateMetadata", () => {
     ).toEqual({
       sessionKey: "agent:main:slack:channel:C1",
       channelType: "im",
+      threadTs: "1712345678.123456",
       userId: "U123",
       pluginInteractiveData: "dean.contract:confirm",
     });

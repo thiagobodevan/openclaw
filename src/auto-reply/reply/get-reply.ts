@@ -26,6 +26,7 @@ import {
   buildAgentHookContextChannelFields,
   buildAgentHookContextIdentityFields,
 } from "../../plugins/hook-agent-context.js";
+import { EXTERNAL_CONVERSATION_IDENTITY_DENIAL } from "../../routing/conversation-identity.js";
 import { defaultRuntime } from "../../runtime.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { resolveCommandTurnTargetSessionKey } from "../command-turn-context.js";
@@ -35,6 +36,10 @@ import type { ReplyPayload } from "../reply-payload.js";
 import type { MsgContext } from "../templating.js";
 import { normalizeThinkLevel, normalizeVerboseLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
+import {
+  resolveConversationIdentityAdmission,
+  resolveConversationIdentityContractVersion,
+} from "./conversation-identity-admission.js";
 import { resolveDefaultModel } from "./directive-handling.defaults.js";
 import { clearInlineDirectives } from "./get-reply-directives-utils.js";
 import { resolveReplyDirectives } from "./get-reply-directives.js";
@@ -281,6 +286,18 @@ export async function getReplyFromConfig(
       };
     },
   );
+  const internalOpts = opts as RuntimeInternalGetReplyOptions | undefined;
+  const identityContractVersion = resolveConversationIdentityContractVersion(
+    (internalOpts as { identityContractVersion?: unknown } | undefined)?.identityContractVersion,
+  );
+  const enforceConversationIdentity = identityContractVersion === 1;
+  const conversationIdentity = enforceConversationIdentity
+    ? (internalOpts?.conversationIdentityDecision ??
+      resolveConversationIdentityAdmission({ ctx: finalized, cfg }))
+    : undefined;
+  if (conversationIdentity && !conversationIdentity.allowed) {
+    return { text: EXTERNAL_CONVERSATION_IDENTITY_DENIAL };
+  }
   const traceAttributes = resolverTiming.measureSync("reply.resolve_trace_context", () => ({
     surface: normalizeOptionalString(finalized.Surface ?? finalized.Provider) ?? "unknown",
     hasSessionKey: Boolean(agentSessionKey),

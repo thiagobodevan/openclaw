@@ -5,6 +5,7 @@ export const AGENT_SELECT_KEY = "agentsel";
 export {
   ackComponentInteraction,
   resolveAgentComponentRoute,
+  resolveAgentComponentRouteReady,
   resolveComponentInteractionContext,
   resolveDiscordChannelContext,
 } from "./agent-components-context.js";

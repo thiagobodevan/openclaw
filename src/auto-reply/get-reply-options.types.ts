@@ -62,6 +62,8 @@ type ReasoningStreamPayload = Pick<
 
 /** Reply generation options shared by auto-reply, webchat, channels, and tests. */
 export type GetReplyOptions = {
+  /** Opts into fail-closed conversation identity admission for current runtimes. */
+  identityContractVersion?: 1;
   /** Override run id for agent events (defaults to random UUID). */
   runId?: string;
   /** Stable provider prompt-cache affinity key; distinct from run id/idempotency. */

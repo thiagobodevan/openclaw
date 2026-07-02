@@ -60,6 +60,7 @@ function createRuntimeHarness() {
           agentId: "agent-nostr",
           accountId,
           sessionKey: `nostr:${peer.id}`,
+          matchedBy: "binding.peer",
         })),
       },
       session: {
@@ -154,6 +155,40 @@ describe("nostr inbound gateway path", () => {
     ).resolves.toBe("pairing");
     expect(sendPairingReply).toHaveBeenCalledTimes(1);
     expect(mockCallArg(sendPairingReply)).toContain("Pairing code:");
+
+    await cleanup.stop();
+  });
+
+  it("does not treat a pairing-store sender as the personal owner", async () => {
+    const { harness, cleanup } = await startGatewayHarness({
+      account: buildResolvedNostrAccount({
+        config: { dmPolicy: "pairing", allowFrom: [] },
+      }),
+      cfg: { agents: { list: [{ id: "main", default: true }] } } as never,
+    });
+    vi.mocked(harness.runtime.channel.routing.resolveAgentRoute).mockReturnValue({
+      agentId: "main",
+      accountId: "default",
+      sessionKey: "agent:main:nostr:direct:unknown",
+      mainSessionKey: "agent:main:main",
+      matchedBy: "default",
+    } as never);
+    vi.mocked(harness.runtime.channel.pairing.readAllowFromStore).mockResolvedValue([
+      "unknown-sender",
+    ]);
+    const options = mockCallArg(mocks.startNostrBus) as {
+      authorizeSender: (params: {
+        senderPubkey: string;
+        reply: (text: string) => Promise<void>;
+      }) => Promise<string>;
+    };
+    const sendPairingReply = vi.fn(async () => {});
+
+    await expect(
+      options.authorizeSender({ senderPubkey: "unknown-sender", reply: sendPairingReply }),
+    ).resolves.toBe("block");
+    expect(sendPairingReply).not.toHaveBeenCalled();
+    expect(harness.runtime.channel.pairing.upsertPairingRequest).not.toHaveBeenCalled();
 
     await cleanup.stop();
   });
