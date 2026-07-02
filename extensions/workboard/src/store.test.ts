@@ -5,6 +5,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { MAX_DATE_TIMESTAMP_MS } from "openclaw/plugin-sdk/number-runtime";
 import { describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { createWorkboardSqliteStores } from "./sqlite-store.js";
 import {
   WorkboardStore,
@@ -14,6 +15,8 @@ import {
   type PersistedWorkboardNotificationSubscription,
   type WorkboardKeyedStore,
 } from "./store.js";
+
+const tempDirs = useAutoCleanupTempDirTracker();
 
 function createMemoryStore<T = PersistedWorkboardCard>(options?: {
   beforeRegister?: (key: string, value: T) => Promise<void> | void;
@@ -148,7 +151,7 @@ describe("WorkboardStore", () => {
   });
 
   it("notifies when another sqlite connection commits", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-workboard-external-"));
+    const dir = tempDirs.make("openclaw-workboard-external-");
     const dbPath = path.join(dir, "workboard.sqlite");
     const readerStores = createWorkboardSqliteStores({ dbPath });
     const writerStores = createWorkboardSqliteStores({ dbPath });
@@ -187,7 +190,7 @@ describe("WorkboardStore", () => {
   });
 
   it("announces an epoch when external state predates a hot-reloaded store", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-workboard-reload-"));
+    const dir = tempDirs.make("openclaw-workboard-reload-");
     const dbPath = path.join(dir, "workboard.sqlite");
     const writerStores = createWorkboardSqliteStores({ dbPath });
     let readerStores: ReturnType<typeof createWorkboardSqliteStores> | undefined;
