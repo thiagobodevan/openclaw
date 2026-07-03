@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveClawHubRepoPath, syncClawHubDocsTree } from "./docs-sync-publish.mjs";
+import { toPosixPathSeparators } from "./lib/path-normalization.mjs";
 import { createPnpmRunnerSpawnSpec } from "./pnpm-runner.mjs";
 
 const ROOT = process.cwd();
@@ -42,11 +43,6 @@ function walk(dir) {
     }
   }
   return out;
-}
-
-/** @param {string} p */
-function normalizeSlashes(p) {
-  return p.replace(/\\/g, "/");
 }
 
 /**
@@ -97,18 +93,20 @@ function buildAuditIndex(docsDir = DOCS_DIR, options = {}) {
   const docsConfig = JSON.parse(fs.readFileSync(docsJsonPath, "utf8"));
   const redirects = createRedirectMap(docsConfig);
   const allFiles = walk(docsDir);
-  const relAllFiles = new Set(allFiles.map((abs) => normalizeSlashes(path.relative(docsDir, abs))));
+  const relAllFiles = new Set(
+    allFiles.map((abs) => toPosixPathSeparators(path.relative(docsDir, abs))),
+  );
   const markdownFiles = allFiles.filter((abs) => {
     if (!/\.(md|mdx)$/i.test(abs)) {
       return false;
     }
-    const rel = normalizeSlashes(path.relative(docsDir, abs));
+    const rel = toPosixPathSeparators(path.relative(docsDir, abs));
     return !isGeneratedTranslatedDoc(rel);
   });
   const routes = new Set();
 
   for (const abs of markdownFiles) {
-    const rel = normalizeSlashes(path.relative(docsDir, abs));
+    const rel = toPosixPathSeparators(path.relative(docsDir, abs));
     const text = fs.readFileSync(abs, "utf8");
     const slug = rel.replace(/\.(md|mdx)$/i, "");
     addRoute(routes, slug);
@@ -429,8 +427,8 @@ export function auditDocsLinks(options = {}) {
   let checked = 0;
 
   for (const abs of index.markdownFiles) {
-    const rel = normalizeSlashes(path.relative(index.docsDir, abs));
-    const baseDir = normalizeSlashes(path.dirname(rel));
+    const rel = toPosixPathSeparators(path.relative(index.docsDir, abs));
+    const baseDir = toPosixPathSeparators(path.dirname(rel));
     const rawText = fs.readFileSync(abs, "utf8");
     const lines = rawText.split("\n");
 
@@ -490,7 +488,7 @@ export function auditDocsLinks(options = {}) {
           continue;
         }
 
-        const normalizedRel = normalizeSlashes(path.normalize(path.join(baseDir, clean)));
+        const normalizedRel = toPosixPathSeparators(path.normalize(path.join(baseDir, clean)));
 
         if (/\.[a-zA-Z0-9]+$/.test(normalizedRel)) {
           if (!index.relAllFiles.has(normalizedRel)) {

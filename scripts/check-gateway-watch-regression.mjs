@@ -14,6 +14,7 @@ import {
   writeBuildStamp,
   writeRuntimePostBuildStamp,
 } from "./lib/local-build-metadata.mjs";
+import { toPosixPathSeparators } from "./lib/path-normalization.mjs";
 import { resolveBuildRequirement } from "./run-node.mjs";
 
 const DEFAULTS = {
@@ -182,10 +183,6 @@ function lstatIfExists(targetPath) {
   }
 }
 
-function normalizePath(filePath) {
-  return filePath.replaceAll("\\", "/");
-}
-
 function listTreeEntries(rootName) {
   const rootPath = path.join(process.cwd(), rootName);
   if (!fs.existsSync(rootPath)) {
@@ -210,7 +207,7 @@ function listTreeEntries(rootName) {
     }
     for (const dirent of dirents) {
       const fullPath = path.join(current, dirent.name);
-      const relativePath = normalizePath(path.relative(process.cwd(), fullPath));
+      const relativePath = toPosixPathSeparators(path.relative(process.cwd(), fullPath));
       entries.push(relativePath);
       if (dirent.isDirectory()) {
         queue.push(fullPath);

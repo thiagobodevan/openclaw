@@ -4,6 +4,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { toPosixPathSeparators } from "./lib/path-normalization.mjs";
 
 const ROOT = process.cwd();
 const DOCS_DIR = join(ROOT, "docs");
@@ -29,16 +30,12 @@ if (!statSync(DOCS_DIR).isDirectory()) {
   process.exit(1);
 }
 
-function normalizeSlashes(value) {
-  return value.replace(/\\/gu, "/");
-}
-
 function isMarkdownFile(name) {
   return MARKDOWN_EXTENSIONS.test(name);
 }
 
 function shouldSkipFile(relativePath) {
-  const parts = normalizeSlashes(relativePath).split("/");
+  const parts = toPosixPathSeparators(relativePath).split("/");
   if (parts.some((part) => part.startsWith("."))) {
     return true;
   }
@@ -66,7 +63,7 @@ function walkMarkdownFiles(dir, base = dir) {
     if (!entry.isFile() || !isMarkdownFile(entry.name) || shouldSkipFile(relativePath)) {
       continue;
     }
-    files.push(normalizeSlashes(relativePath));
+    files.push(toPosixPathSeparators(relativePath));
   }
   return files.toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
@@ -196,7 +193,7 @@ function main() {
   }
 
   writeFileSync(OUTPUT_PATH, content, "utf8");
-  console.log(`docs:map: wrote ${normalizeSlashes(relative(ROOT, OUTPUT_PATH))}.`);
+  console.log(`docs:map: wrote ${toPosixPathSeparators(relative(ROOT, OUTPUT_PATH))}.`);
 }
 
 const isMain = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;

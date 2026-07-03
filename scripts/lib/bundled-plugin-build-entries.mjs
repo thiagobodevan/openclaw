@@ -8,6 +8,7 @@ import {
   bundledPluginFile,
 } from "./bundled-plugin-paths.mjs";
 import { shouldBuildBundledCluster } from "./optional-bundled-clusters.mjs";
+import { toPosixPathSeparators } from "./path-normalization.mjs";
 
 const TOP_LEVEL_PUBLIC_SURFACE_EXTENSIONS = new Set([".ts", ".js", ".mts", ".cts", ".mjs", ".cjs"]);
 /** Bundled plugin directories built with core but not packaged as standalone npm plugins. */
@@ -16,8 +17,6 @@ const EXCLUDED_CORE_BUNDLED_PLUGIN_DIRS = new Set(["qqbot", "whatsapp"]);
 const BUNDLED_PLUGIN_BUILD_IDS_ENV = "OPENCLAW_BUNDLED_PLUGIN_BUILD_IDS";
 const TOP_LEVEL_PRIVATE_TEST_SURFACE_RE =
   /(?:^|[._-])(?:test|spec|test-support|test-helpers|test-fixtures|test-harness|mock-setup)(?:[._-]|$)/u;
-const toPosixPath = (value) => value.replaceAll("\\", "/");
-
 function parseBundledPluginBuildIdFilter(env = process.env) {
   const raw = env[BUNDLED_PLUGIN_BUILD_IDS_ENV];
   if (typeof raw !== "string" || raw.trim() === "") {
@@ -146,7 +145,7 @@ function collectTrackedBundledPluginFiles(cwd) {
 
   const filesByPlugin = new Map();
   for (const rawLine of result.stdout.split("\n")) {
-    const line = toPosixPath(rawLine.trim());
+    const line = toPosixPathSeparators(rawLine.trim());
     const match = new RegExp(`^${BUNDLED_PLUGIN_ROOT_DIR}/([^/]+)/(.+)$`).exec(line);
     if (!match) {
       continue;
@@ -260,7 +259,10 @@ export function listBundledPluginBuildEntries(params = {}) {
       sourceEntries.map((entry) => {
         const normalizedEntry = entry.replace(/^\.\//, "");
         const entryKey = bundledPluginFile(id, normalizedEntry.replace(/\.[^.]+$/u, ""));
-        return [entryKey, toPosixPath(path.join(BUNDLED_PLUGIN_ROOT_DIR, id, normalizedEntry))];
+        return [
+          entryKey,
+          toPosixPathSeparators(path.join(BUNDLED_PLUGIN_ROOT_DIR, id, normalizedEntry)),
+        ];
       }),
     ),
   );

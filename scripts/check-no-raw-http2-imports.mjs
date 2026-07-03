@@ -1,6 +1,7 @@
 // Rejects raw Node http2 imports in source and extension code.
 import fs from "node:fs";
 import path from "node:path";
+import { toPosixPathSeparators } from "./lib/path-normalization.mjs";
 const SOURCE_ROOTS = ["src", "extensions"];
 const DEFAULT_SKIPPED_DIR_NAMES = new Set(["node_modules", "dist", "coverage", ".generated"]);
 
@@ -44,10 +45,6 @@ function collectFilesSync(rootDir, options) {
   return files;
 }
 
-function toPosixPath(filePath) {
-  return filePath.replaceAll("\\", "/");
-}
-
 const FORBIDDEN_HTTP2_MODULES = new Set(["node:http2", "http2"]);
 const ALLOWED_PRODUCTION_FILES = new Set(["src/infra/push-apns-http2.ts"]);
 
@@ -63,7 +60,7 @@ function lineNumberForOffset(content, offset) {
 }
 
 function collectHttp2ImportOffenders(filePath) {
-  const relativePath = toPosixPath(path.relative(process.cwd(), filePath));
+  const relativePath = toPosixPathSeparators(path.relative(process.cwd(), filePath));
   if (ALLOWED_PRODUCTION_FILES.has(relativePath) || isTestFile(relativePath)) {
     return [];
   }
