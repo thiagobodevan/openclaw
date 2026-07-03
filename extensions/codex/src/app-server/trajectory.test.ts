@@ -3,10 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { afterEach, describe, expect, it } from "vitest";
-import { loadSqliteTrajectoryRuntimeEvents } from "../../../../src/trajectory/runtime-store.sqlite.js";
-import { createTrajectoryRuntimeRecorder } from "../../../../src/trajectory/runtime.js";
 import {
+  appendSqliteTrajectoryRuntimeEvents,
+  loadSqliteTrajectoryRuntimeEvents,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  type CodexHostTrajectoryRecorder,
   createCodexTrajectoryRecorder,
   recordCodexTrajectoryCompletion,
   recordCodexTrajectoryContext,
@@ -38,6 +41,23 @@ function expectTrajectoryRecorder(
   }
   expect(typeof recorder.recordEvent).toBe("function");
   return recorder;
+}
+
+function createSqliteHostTrajectoryRecorder(params: {
+  agentId: string;
+  sessionId: string;
+  storePath: string;
+}): CodexHostTrajectoryRecorder {
+  const events: Array<{ data?: Record<string, unknown>; type: string }> = [];
+  return {
+    recordEvent: (type, data) => {
+      events.push(data === undefined ? { type } : { type, data });
+    },
+    flush: async () => {
+      appendSqliteTrajectoryRuntimeEvents(params, events);
+      events.length = 0;
+    },
+  };
 }
 
 describe("Codex trajectory recorder", () => {
@@ -104,19 +124,11 @@ describe("Codex trajectory recorder", () => {
         updatedAt: 10,
       },
     });
-    const hostRecorder = createTrajectoryRuntimeRecorder({
-      env: {},
-      modelApi: "responses",
-      modelId: "gpt-5.4",
-      provider: "openai",
-      sessionFile: trajectorySessionFile,
+    const hostRecorder = createSqliteHostTrajectoryRecorder({
+      agentId: "main",
       sessionId: "session-1",
-      sessionKey: "agent:main:session-1",
-      workspaceDir: tmpDir,
+      storePath,
     });
-    if (!hostRecorder) {
-      throw new Error("Expected host trajectory recorder");
-    }
     const recorder = createCodexTrajectoryRecorder({
       cwd: tmpDir,
       attempt: {

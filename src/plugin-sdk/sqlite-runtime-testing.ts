@@ -17,6 +17,11 @@ export async function appendSqliteSessionTranscriptEventForTest(
 
 export { formatSqliteSessionFileMarker } from "../config/sessions/sqlite-marker.js";
 export {
+  appendSqliteTrajectoryRuntimeEvents,
+  loadSqliteTrajectoryRuntimeEvents,
+  type SqliteTrajectoryRuntimeScope,
+} from "../trajectory/runtime-store.sqlite.js";
+export {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";

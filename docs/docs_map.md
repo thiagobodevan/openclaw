@@ -9706,7 +9706,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Access
   - H2: What gets recorded
   - H2: Bundle files
-  - H2: Capture location
+  - H2: Capture storage
   - H2: Disable capture
   - H2: Tune flush timeout
   - H2: Privacy and limits
