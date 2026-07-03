@@ -140,6 +140,14 @@ export interface Sessions {
   updated_at: number;
 }
 
+export interface TrajectoryRuntimeEvents {
+  created_at: number;
+  event_json: string;
+  run_id: string | null;
+  seq: number;
+  session_id: string;
+}
+
 export interface TranscriptEventIdentities {
   created_at: number;
   event_id: string;
@@ -172,6 +180,7 @@ export interface DB {
   session_entries: SessionEntries;
   session_routes: SessionRoutes;
   sessions: Sessions;
+  trajectory_runtime_events: TrajectoryRuntimeEvents;
   transcript_event_identities: TranscriptEventIdentities;
   transcript_events: TranscriptEvents;
 }

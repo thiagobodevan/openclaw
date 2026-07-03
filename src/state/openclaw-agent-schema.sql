@@ -123,6 +123,20 @@ CREATE TABLE IF NOT EXISTS transcript_events (
   FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS trajectory_runtime_events (
+  session_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  run_id TEXT,
+  event_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, seq),
+  FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_trajectory_runtime_run
+  ON trajectory_runtime_events(session_id, run_id, seq)
+  WHERE run_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS transcript_event_identities (
   session_id TEXT NOT NULL,
   event_id TEXT NOT NULL,

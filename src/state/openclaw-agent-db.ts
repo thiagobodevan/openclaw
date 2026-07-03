@@ -38,7 +38,7 @@ export { resolveOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
  * per pathname, protected with private file modes, and registered in the shared
  * OpenClaw state database for discovery and maintenance.
  */
-const OPENCLAW_AGENT_SCHEMA_VERSION = 3;
+const OPENCLAW_AGENT_SCHEMA_VERSION = 4;
 const OPENCLAW_AGENT_DB_DIR_MODE = 0o700;
 const OPENCLAW_AGENT_DB_FILE_MODE = 0o600;
 

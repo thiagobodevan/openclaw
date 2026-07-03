@@ -130,7 +130,7 @@ describe("openclaw agent database", () => {
     expect(registered).toMatchObject({
       agentId: "worker-1",
       path: database.path,
-      schemaVersion: 3,
+      schemaVersion: 4,
     });
     expect(registered?.sizeBytes).toBeGreaterThan(0);
   });
@@ -410,7 +410,7 @@ describe("openclaw agent database", () => {
     );
     expect(readSqliteNumberPragma(database.db, "foreign_keys")).toBe(1);
     expect(readSqliteNumberPragma(database.db, "synchronous")).toBe(1);
-    expect(readSqliteNumberPragma(database.db, "user_version")).toBe(3);
+    expect(readSqliteNumberPragma(database.db, "user_version")).toBe(4);
     expect(readSqliteNumberPragma(database.db, "wal_autocheckpoint")).toBe(1000);
     const journalMode = database.db.prepare("PRAGMA journal_mode").get() as
       | { journal_mode?: string }
@@ -433,7 +433,7 @@ describe("openclaw agent database", () => {
       ),
     ).toEqual({
       role: "agent",
-      schema_version: 3,
+      schema_version: 4,
       agent_id: "worker-1",
     });
   });
@@ -528,7 +528,7 @@ describe("openclaw agent database", () => {
       env: { OPENCLAW_STATE_DIR: stateDir },
     });
 
-    expect(readSqliteNumberPragma(database.db, "user_version")).toBe(3);
+    expect(readSqliteNumberPragma(database.db, "user_version")).toBe(4);
     const session = database.db
       .prepare(
         `
@@ -608,7 +608,7 @@ describe("openclaw agent database", () => {
     fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     const { DatabaseSync } = requireNodeSqlite();
     const db = new DatabaseSync(databasePath);
-    db.exec("PRAGMA user_version = 4;");
+    db.exec("PRAGMA user_version = 5;");
     db.close();
 
     expect(() =>
@@ -616,6 +616,6 @@ describe("openclaw agent database", () => {
         agentId: "worker-1",
         env: { OPENCLAW_STATE_DIR: stateDir },
       }),
-    ).toThrow(/newer schema version 4/);
+    ).toThrow(/newer schema version 5/);
   });
 });
