@@ -10,7 +10,6 @@ export {
   ensureDir,
   escapeRegExp,
   normalizeE164,
-  pathExists,
   resolveConfigDir,
   resolveHomeDir,
   resolveUserPath,
@@ -21,5 +20,6 @@ export {
   sliceUtf16Safe,
   truncateUtf16Safe,
 } from "../utils.js";
+export { pathExists } from "../infra/fs-safe.js";
 export { fetchWithTimeout } from "../utils/fetch-timeout.js";
 export { withTimeout } from "../utils/with-timeout.js";

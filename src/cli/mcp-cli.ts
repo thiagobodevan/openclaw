@@ -31,6 +31,7 @@ import {
 } from "../config/mcp-config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { pathIsDirectory, pathIsFile } from "../infra/fs-safe-advanced.js";
 import { serveOpenClawChannelMcp } from "../mcp/channel-server.js";
 import { defaultRuntime } from "../runtime.js";
 import { formatCliCommand } from "./command-format.js";
@@ -218,24 +219,6 @@ function resolveConfiguredPath(filePath: string, cwd: unknown): string {
   return path.resolve(base, filePath);
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function directoryExists(filePath: string): Promise<boolean> {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 async function isExecutable(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath, process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK);
@@ -322,7 +305,7 @@ async function collectMcpDoctorIssues(params: {
           issue("error", `stdio command not found or not executable: ${resolved.command}`),
         );
       }
-      if (resolved.cwd && !(await directoryExists(resolved.cwd))) {
+      if (resolved.cwd && !(await pathIsDirectory(resolved.cwd))) {
         issues.push(issue("error", `stdio cwd does not exist: ${resolved.cwd}`));
       }
     }
@@ -352,7 +335,7 @@ async function collectMcpDoctorIssues(params: {
       }
       if (
         resolved.clientCert &&
-        !(await fileExists(resolveConfiguredPath(resolved.clientCert, "")))
+        !(await pathIsFile(resolveConfiguredPath(resolved.clientCert, "")))
       ) {
         issues.push(
           issue("error", `client certificate file does not exist: ${resolved.clientCert}`),
@@ -360,7 +343,7 @@ async function collectMcpDoctorIssues(params: {
       }
       if (
         resolved.clientKey &&
-        !(await fileExists(resolveConfiguredPath(resolved.clientKey, "")))
+        !(await pathIsFile(resolveConfiguredPath(resolved.clientKey, "")))
       ) {
         issues.push(issue("error", `client key file does not exist: ${resolved.clientKey}`));
       }

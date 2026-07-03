@@ -2,7 +2,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathExists as fsSafePathExists } from "./infra/fs-safe.js";
 import {
   resolveEffectiveHomeDir,
   resolveHomeRelativePath,
@@ -176,10 +175,4 @@ export let CONFIG_DIR = resolveConfigDir();
 export function pinConfigDir(env: NodeJS.ProcessEnv = process.env): string {
   CONFIG_DIR = resolveConfigDir(env);
   return CONFIG_DIR;
-}
-/**
- * Check if a file or directory exists at the given path.
- */
-export async function pathExists(targetPath: string): Promise<boolean> {
-  return await fsSafePathExists(targetPath);
 }

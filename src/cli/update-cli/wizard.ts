@@ -5,6 +5,7 @@ import { selectStyled } from "../../../packages/terminal-core/src/prompt-select-
 import { stylePromptMessage } from "../../../packages/terminal-core/src/prompt-style.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import { readConfigFileSnapshot } from "../../config/config.js";
+import { pathExists } from "../../infra/fs-safe.js";
 import {
   formatUpdateChannelLabel,
   normalizeUpdateChannel,
@@ -12,7 +13,6 @@ import {
 } from "../../infra/update-channels.js";
 import { checkUpdateStatus } from "../../infra/update-check.js";
 import { defaultRuntime } from "../../runtime.js";
-import { pathExists } from "../../utils.js";
 import {
   isEmptyDir,
   isGitCheckout,

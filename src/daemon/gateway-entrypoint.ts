@@ -1,6 +1,6 @@
 /** Resolves gateway dist entrypoints used by installed daemon command lines. */
 import path from "node:path";
-import { pathExists } from "../utils.js";
+import { pathExists } from "../infra/fs-safe.js";
 
 const GATEWAY_DIST_ENTRYPOINT_BASENAMES = [
   "index.js",

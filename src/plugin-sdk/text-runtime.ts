@@ -52,7 +52,6 @@ export {
   escapeRegExp,
   isRecord,
   normalizeE164,
-  pathExists,
   resolveConfigDir,
   resolveHomeDir,
   resolveUserPath,
@@ -63,3 +62,4 @@ export {
   sliceUtf16Safe,
   truncateUtf16Safe,
 } from "../utils.js";
+export { pathExists } from "../infra/fs-safe.js";

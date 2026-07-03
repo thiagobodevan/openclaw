@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists } from "../infra/fs-safe.js";
+import { writeTextAtomic } from "../infra/json-files.js";
 import type {
   MigrationApplyResult,
   MigrationItem,
@@ -212,11 +213,21 @@ export async function writeMigrationReport(
   if (!result.reportDir) {
     return;
   }
-  await fs.mkdir(result.reportDir, { recursive: true });
-  await fs.writeFile(
+  const fileMode = 0o666 & ~process.umask();
+  // Atomic replacement chmods the parent, so retain report-directory hardening on reruns.
+  const dirMode = await fs.stat(result.reportDir).then(
+    (stat) => stat.mode & 0o7777,
+    (error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        return 0o777 & ~process.umask();
+      }
+      throw error;
+    },
+  );
+  await writeTextAtomic(
     path.join(result.reportDir, "report.json"),
     `${JSON.stringify(redactMigrationPlan(result), null, 2)}\n`,
-    "utf8",
+    { dirMode, mode: fileMode, preserveExistingMode: true, tempPrefix: "report.json" },
   );
   const lines = [
     `# ${opts.title ?? "Migration Report"}`,
@@ -234,5 +245,10 @@ export async function writeMigrationReport(
       (item) => `- ${item.status}: ${item.id}${item.reason ? ` (${item.reason})` : ""}`,
     ),
   ].filter((line): line is string => typeof line === "string");
-  await fs.writeFile(path.join(result.reportDir, "summary.md"), `${lines.join("\n")}\n`, "utf8");
+  await writeTextAtomic(path.join(result.reportDir, "summary.md"), `${lines.join("\n")}\n`, {
+    dirMode,
+    mode: fileMode,
+    preserveExistingMode: true,
+    tempPrefix: "summary.md",
+  });
 }

@@ -10,10 +10,11 @@ import {
   withRealpathSymlinkRebindRace,
 } from "../test-utils/symlink-rebind-race.js";
 import { createTrackedTempDirs } from "../test-utils/tracked-temp-dirs.js";
+import { pathIsDirectory, pathIsFile } from "./fs-safe-advanced.js";
 import {
-  resolveOpenedFileRealPathForHandle,
   FsSafeError,
   readLocalFileSafely,
+  resolveOpenedFileRealPathForHandle,
   root as openRoot,
   writeExternalFileWithinRoot,
 } from "./fs-safe.js";
@@ -121,6 +122,27 @@ async function setupSymlinkWriteRaceFixture(options?: { seedInsideTarget?: boole
 }
 
 describe("fs-safe", () => {
+  it("checks file and directory types with stat symlink semantics", async () => {
+    const dir = await tempDirs.make("openclaw-fs-safe-types-");
+    const file = path.join(dir, "payload.txt");
+    const fileLink = path.join(dir, "payload-link.txt");
+    const dirLink = path.join(dir, "dir-link");
+    const brokenLink = path.join(dir, "broken-link");
+    await fs.writeFile(file, "hello");
+    await fs.symlink(file, fileLink);
+    await fs.symlink(dir, dirLink, process.platform === "win32" ? "junction" : "dir");
+    await fs.symlink(path.join(dir, "missing"), brokenLink);
+
+    await expect(pathIsFile(file)).resolves.toBe(true);
+    await expect(pathIsFile(fileLink)).resolves.toBe(true);
+    await expect(pathIsFile(dir)).resolves.toBe(false);
+    await expect(pathIsDirectory(dir)).resolves.toBe(true);
+    await expect(pathIsDirectory(dirLink)).resolves.toBe(true);
+    await expect(pathIsDirectory(file)).resolves.toBe(false);
+    await expect(pathIsFile(brokenLink)).resolves.toBe(false);
+    await expect(pathIsDirectory(path.join(dir, "missing"))).resolves.toBe(false);
+  });
+
   it("reads a local file safely", async () => {
     const dir = await tempDirs.make("openclaw-fs-safe-");
     const file = path.join(dir, "payload.txt");

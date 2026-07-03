@@ -7,7 +7,8 @@ import {
   resolveOAuthDir,
   resolveStateDir,
 } from "../config/config.js";
-import { pathExists, shortenHomePath } from "../utils.js";
+import { pathExists } from "../infra/fs-safe.js";
+import { shortenHomePath } from "../utils.js";
 import { buildCleanupPlan, isPathWithin } from "./cleanup-utils.js";
 
 export type BackupAssetKind = "state" | "config" | "credentials" | "workspace";

@@ -7,7 +7,7 @@ import {
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import { resolveStateDir } from "../config/paths.js";
-import { pathExists } from "../utils.js";
+import { pathExists } from "../infra/fs-safe.js";
 
 export const COMPLETION_SHELLS = ["zsh", "bash", "powershell", "fish"] as const;
 export type CompletionShell = (typeof COMPLETION_SHELLS)[number];

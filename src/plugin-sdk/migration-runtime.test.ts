@@ -158,6 +158,43 @@ describe("copyMigrationFileItem", () => {
 });
 
 describe("writeMigrationReport", () => {
+  it("preserves hardened report permissions on reruns", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-migration-report-mode-"));
+    try {
+      const reportDir = path.join(root, "report");
+      const reportPath = path.join(reportDir, "report.json");
+      const summaryPath = path.join(reportDir, "summary.md");
+      await fs.mkdir(reportDir, { mode: 0o700 });
+      await fs.writeFile(reportPath, "{}\n", { mode: 0o600 });
+      await fs.writeFile(summaryPath, "old\n", { mode: 0o600 });
+
+      await writeMigrationReport({
+        providerId: "hermes",
+        source: path.join(root, "hermes"),
+        summary: {
+          total: 0,
+          planned: 0,
+          migrated: 0,
+          skipped: 0,
+          conflicts: 0,
+          errors: 0,
+          sensitive: 0,
+        },
+        items: [],
+        reportDir,
+      });
+
+      expect((await fs.stat(reportDir)).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(reportPath)).mode & 0o777).toBe(0o600);
+      expect((await fs.stat(summaryPath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("redacts nested secret-looking config values in JSON reports", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-migration-report-"));
     const reportDir = path.join(root, "report");

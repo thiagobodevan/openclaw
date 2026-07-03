@@ -6,6 +6,7 @@ import type { ContentBlock, SessionUpdate } from "@agentclientprotocol/sdk";
 import { resolveIntegerOption } from "@openclaw/acp-core/numeric-options";
 import { resolveStateDir } from "../config/paths.js";
 import { withFileLock } from "../infra/file-lock.js";
+import { pathExists } from "../infra/fs-safe.js";
 import { readJsonFile } from "../infra/json-files.js";
 import {
   openOpenClawStateDatabase,
@@ -446,20 +447,11 @@ export function resolveDefaultAcpEventLedgerPath(env: NodeJS.ProcessEnv = proces
   return path.join(resolveStateDir(env), "acp", "event-ledger.json");
 }
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Migrates a legacy file ledger into the SQLite state database, preserving replay order. */
 export async function migrateFileAcpEventLedgerToSqlite(
   params: { filePath: string; archiveSource?: boolean } & OpenClawStateDatabaseOptions,
 ): Promise<{ importedSessions: number; importedEvents: number; archived?: boolean }> {
-  if (!(await fileExists(params.filePath))) {
+  if (!(await pathExists(params.filePath))) {
     return { importedSessions: 0, importedEvents: 0 };
   }
 
@@ -520,7 +512,7 @@ export async function migrateFileAcpEventLedgerToSqlite(
   }
   const archivePath = `${params.filePath}.migrated`;
   try {
-    if (!(await fileExists(archivePath))) {
+    if (!(await pathExists(archivePath))) {
       await fs.rename(params.filePath, archivePath);
       return { importedSessions, importedEvents, archived: true };
     }

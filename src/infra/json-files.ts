@@ -82,6 +82,7 @@ export type WriteTextAtomicOptions = {
   dirMode?: number;
   trailingNewline?: boolean;
   durable?: boolean;
+  preserveExistingMode?: boolean;
   beforeRename?: WriteTextAtomicBeforeRename;
   /**
    * Prefix for the staged `<prefix>.<pid>.<uuid>.tmp` file. Defaults to the
@@ -104,6 +105,7 @@ export async function writeTextAtomic(
     mode: options?.mode ?? 0o600,
     dirMode: options?.dirMode ?? 0o777 & ~process.umask(),
     copyFallbackOnPermissionError: true,
+    preserveExistingMode: options?.preserveExistingMode,
     syncTempFile: options?.durable !== false,
     syncParentDir: options?.durable !== false,
     ...(options?.beforeRename ? { beforeRename: options.beforeRename } : {}),

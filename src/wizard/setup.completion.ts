@@ -12,7 +12,7 @@ import {
   checkShellCompletionStatus,
   ensureCompletionCacheExists,
 } from "../commands/doctor-completion.js";
-import { pathExists } from "../utils.js";
+import { pathExists } from "../infra/fs-safe.js";
 import { t } from "./i18n/index.js";
 import type { WizardPrompter } from "./prompts.js";
 import type { WizardFlow } from "./setup.types.js";

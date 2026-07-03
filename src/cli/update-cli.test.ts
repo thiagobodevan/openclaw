@@ -220,6 +220,14 @@ vi.mock("../process/exec.js", () => ({
   runCommandWithTimeout: vi.fn(),
 }));
 
+vi.mock("../infra/fs-safe.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../infra/fs-safe.js")>();
+  return {
+    ...actual,
+    pathExists: (...args: unknown[]) => pathExists(...args),
+  };
+});
+
 vi.mock("../utils.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils.js")>();
   return {
@@ -227,7 +235,6 @@ vi.mock("../utils.js", async (importOriginal) => {
     displayString: (input: string) => input,
     isRecord: (value: unknown) =>
       typeof value === "object" && value !== null && !Array.isArray(value),
-    pathExists: (...args: unknown[]) => pathExists(...args),
     resolveConfigDir: () => "/tmp/openclaw-config",
   };
 });
@@ -888,7 +895,12 @@ describe("update-cli", () => {
       error: null,
       url: "ws://127.0.0.1:18789",
     });
-    pathExists.mockResolvedValue(false);
+    pathExists.mockImplementation(async (candidate: string) =>
+      fs.stat(candidate).then(
+        () => true,
+        () => false,
+      ),
+    );
     syncPluginsForUpdateChannel.mockResolvedValue({
       changed: false,
       config: baseConfig,
