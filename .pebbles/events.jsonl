@@ -1743,3 +1743,6 @@
 {"type":"close","timestamp":"2026-07-03T17:32:08.870321Z","issue_id":"oc-08c.6","payload":{}}
 {"type":"status_update","timestamp":"2026-07-03T17:32:24.08313Z","issue_id":"oc-08c.7","payload":{"status":"in_progress"}}
 {"type":"close","timestamp":"2026-07-03T17:34:10.215926Z","issue_id":"oc-08c.7","payload":{}}
+{"type":"comment","timestamp":"2026-07-03T17:36:01.634601Z","issue_id":"oc-08c.8","payload":{"body":"Final proof: focused trajectory/cleanup/doctor/budget test set passed (6 Vitest shards, 142 tests), pnpm tsgo:core passed, pnpm docs:list passed, and git diff --check passed. Autoreview was attempted but blocked before review by the local codex wrapper pointing at a missing vendored binary: /Users/josh/.nvm/versions/node/v22.22.1/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex ENOENT."}}
+{"type":"close","timestamp":"2026-07-03T17:36:05.80934Z","issue_id":"oc-08c.8","payload":{}}
+{"type":"close","timestamp":"2026-07-03T17:36:06.39963Z","issue_id":"oc-08c","payload":{}}
