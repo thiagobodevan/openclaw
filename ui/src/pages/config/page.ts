@@ -420,6 +420,7 @@ function renderConfigPage({ state, navigate, pageId }: ConfigRenderContext) {
     } as ConfigProps);
 
   const config = state.configForm ?? state.configSnapshot?.config ?? {};
+  const translationPageId = pageId === "ai-agents" ? "aiAgents" : pageId;
   const statePrefix =
     pageId === "ai-agents" ? "aiAgents" : pageId === "mcp" ? "infrastructure" : pageId;
   const activeSelection = normalizeConfigSelection(
@@ -524,7 +525,7 @@ function renderConfigPage({ state, navigate, pageId }: ConfigRenderContext) {
             "wizard",
           ]
         : undefined,
-    navRootLabel: pageId === "config" ? undefined : t(`tabs.${pageId}`),
+    navRootLabel: pageId === "config" ? undefined : t(`tabs.${translationPageId}`),
     showModeToggle: pageId === "config",
     settingsLayout: pageId === "config" ? "accordion" : undefined,
     includeVirtualSections: pageId === "communications" || pageId === "appearance",
@@ -672,9 +673,9 @@ function renderConfigPage({ state, navigate, pageId }: ConfigRenderContext) {
         <section class="content-header">
           <div>
             <div class="page-title">
-              ${pageId === "config" ? t("nav.settings") : t(`tabs.${pageId}`)}
+              ${pageId === "config" ? t("nav.settings") : t(`tabs.${translationPageId}`)}
             </div>
-            <div class="page-sub">${t(`subtitles.${pageId}`)}</div>
+            <div class="page-sub">${t(`subtitles.${translationPageId}`)}</div>
           </div>
         </section>
         ${body}

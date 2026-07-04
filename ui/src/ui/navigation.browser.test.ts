@@ -73,6 +73,17 @@ function expectConfirmedGatewayChange(app: ReturnType<typeof mountApp>) {
 }
 
 describe("control UI routing", () => {
+  it("renders localized AI and Agents settings labels", async () => {
+    const app = mountApp("/ai-agents");
+    await waitForRoute("ai-agents");
+    await app.updateComplete;
+
+    expect(expectElement(app, ".page-title", HTMLElement).textContent?.trim()).toBe("AI & Agents");
+    expect(expectElement(app, ".page-sub", HTMLElement).textContent?.trim()).toBe(
+      "Agents, models, skills, tools, memory, session.",
+    );
+  });
+
   it("renders responsive navigation shell, drawer, and collapsed states", async () => {
     const app = mountApp("/chat");
     await app.updateComplete;
