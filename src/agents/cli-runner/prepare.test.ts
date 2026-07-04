@@ -2585,6 +2585,7 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
         inboundEventKind: undefined,
         sourceReplyDeliveryMode: undefined,
         requireExplicitMessageTarget: false,
+        directMcpServers: undefined,
         senderIsOwner: undefined,
       });
       expect(context.systemPrompt).toContain("## Memory Recall");

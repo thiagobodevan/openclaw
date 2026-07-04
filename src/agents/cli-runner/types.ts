@@ -34,6 +34,15 @@ import type {
 import type { FastModeAutoProgressState } from "../fast-mode.js";
 import type { SilentReplyPromptMode } from "../system-prompt.types.js";
 
+export type ClaudeMcpServerToolPolicy = {
+  configuredName: string;
+  safeName: string;
+  include?: string[];
+  exclude?: string[];
+};
+
+export type ClaudeMcpServerToolPolicies = Record<string, ClaudeMcpServerToolPolicy>;
+
 /** Input contract for one CLI-backed agent run. */
 export type RunCliAgentParams = {
   sessionId: string;
@@ -113,6 +122,15 @@ export type RunCliAgentParams = {
   skillsSnapshot?: SkillSnapshot;
   messageChannel?: string;
   messageProvider?: string;
+  chatType?: string;
+  messageTo?: string;
+  messageThreadId?: string | number;
+  groupId?: string | null;
+  groupChannel?: string | null;
+  groupSpace?: string | null;
+  spawnedBy?: string | null;
+  /** Session key used for subagent capability inheritance when it differs from sessionKey. */
+  sandboxSessionKey?: string;
   currentChannelId?: string;
   chatId?: string;
   channelContext?: PluginHookChannelContext;
@@ -122,6 +140,9 @@ export type RunCliAgentParams = {
   agentAccountId?: string;
   /** Sender identity for channel-originated runs when available. */
   senderId?: string | null;
+  senderName?: string | null;
+  senderUsername?: string | null;
+  senderE164?: string | null;
   /** Trusted sender identity bit for channel action auth. */
   senderIsOwner?: boolean;
   /** Device-scoped operator session allowed to review approvals initiated by this run. */
@@ -162,8 +183,11 @@ export type CliPreparedBackend = {
   backend: CliBackendConfig;
   beforeExecution?: () => Promise<void>;
   cleanup?: () => Promise<void>;
+  retainCleanup?: () => () => Promise<void>;
   mcpConfigHash?: string;
   mcpResumeHash?: string;
+  mcpServerToolPolicies?: ClaudeMcpServerToolPolicies;
+  mcpNativeServerNames?: string[];
   env?: Record<string, string>;
 };
 
@@ -215,6 +239,7 @@ export type PreparedCliRunContext = {
   extraSystemPromptHash?: string;
   messageToolPolicyHash?: string;
   promptToolNamesHash?: string;
+  mcpReservedToolNames?: string[];
   cwdHash?: string;
   mcpDeliveryCapture?: true;
 };

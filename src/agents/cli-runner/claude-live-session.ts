@@ -23,6 +23,7 @@ import {
   type ExecSecurity,
 } from "../../infra/exec-approvals.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
+import type { HookContext } from "../agent-tools.before-tool-call.js";
 import {
   CLI_STREAM_JSON_DEFAULT_MAX_TURN_RAW_CHARS,
   createCliJsonlStreamingParser,
@@ -37,7 +38,21 @@ import {
 } from "../cli-output.js";
 import { classifyFailoverReason } from "../embedded-agent-helpers.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
+import {
+  registerNativeHookRelay,
+  type NativeHookRelayRegistrationHandle,
+} from "../harness/native-hook-relay.js";
+import { findClaudeMcpConfigPath } from "./bundle-mcp-claude.js";
 import { prepareCliBundleMcpCaptureAttempt } from "./bundle-mcp.js";
+import { isClaudeLiveSessionTransport } from "./claude-live-contract.js";
+import {
+  resolveClaudeLiveMcpToolPolicy,
+  type ClaudeLiveMcpToolPolicy,
+} from "./claude-live-tool-policy.js";
+import {
+  CLAUDE_MCP_POLICY_RELAY_TIMEOUT_MS,
+  prepareClaudeMcpPolicyProxy,
+} from "./claude-mcp-policy-proxy.js";
 import { buildClaudeOwnerKey } from "./helpers.js";
 import { cliBackendLog, formatCliBackendOutputDigest } from "./log.js";
 import type { PreparedCliRunContext } from "./types.js";
@@ -61,6 +76,7 @@ type ClaudeLiveTurn = {
   observedStdout: boolean;
   streamingParser: ReturnType<typeof createCliJsonlStreamingParser>;
   execPermission: ClaudeLiveExecPermission;
+  mcpToolPolicy: ClaudeLiveMcpToolPolicy;
   resolve: (output: CliOutput) => void;
   reject: (error: unknown) => void;
 };
@@ -78,6 +94,7 @@ type ClaudeLiveSession = {
   cleanup: () => Promise<void>;
   cleanupPromise: Promise<void> | null;
   closing: boolean;
+  hookRelay?: NativeHookRelayRegistrationHandle;
   mcpCaptureKey?: string;
 };
 type ClaudeLiveRunResult = {
@@ -110,11 +127,66 @@ const CLAUDE_LIVE_ACTIVE_TOOL_PROGRESS_MS = 10_000;
 const CLAUDE_LIVE_MAX_SESSIONS = 16;
 const CLAUDE_LIVE_MAX_STDERR_CHARS = 64 * 1024;
 const CLAUDE_LIVE_CLOSE_WAIT_TIMEOUT_MS = 5_000;
+const CLAUDE_NATIVE_COMPUTER_USE_TOOL_GLOB = "mcp__computer-use__*";
 const liveSessions = new Map<string, ClaudeLiveSession>();
 const liveSessionCreates = new Map<string, Promise<ClaudeLiveSession>>();
 
 function sha256(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function buildClaudeLiveHookContext(context: PreparedCliRunContext): HookContext {
+  const runParams = context.params;
+  const channelId = runParams.messageChannel ?? runParams.messageProvider;
+  const turnSourceTo = runParams.messageTo ?? runParams.currentChannelId;
+  const turnSourceThreadId = runParams.messageThreadId ?? runParams.currentThreadTs;
+  return {
+    agentId: runParams.agentId ?? resolveAgentIdFromSessionKey(runParams.sessionKey),
+    ...(runParams.config ? { config: runParams.config } : {}),
+    cwd: context.cwd ?? context.workspaceDir,
+    workspaceDir: context.workspaceDir,
+    ...(runParams.sessionKey ? { sessionKey: runParams.sessionKey } : {}),
+    sessionId: runParams.sessionId,
+    runId: runParams.runId,
+    ...(channelId ? { channelId, turnSourceChannel: channelId } : {}),
+    ...(turnSourceTo ? { turnSourceTo } : {}),
+    ...(runParams.agentAccountId ? { turnSourceAccountId: runParams.agentAccountId } : {}),
+    ...(turnSourceThreadId !== undefined ? { turnSourceThreadId } : {}),
+    ...(runParams.skillsSnapshot ? { skillsSnapshot: runParams.skillsSnapshot } : {}),
+  };
+}
+
+function buildClaudeMcpPolicyRelayDescriptor(key: string): {
+  provider: "claude";
+  relayId: string;
+  generation: string;
+} {
+  const processKey = `${process.pid}:${key}`;
+  return {
+    provider: "claude",
+    relayId: `claude-${process.pid}-${sha256(key).slice(0, 32)}`,
+    generation: `claude-${sha256(processKey).slice(0, 32)}`,
+  };
+}
+
+function registerClaudeMcpPolicyRelay(params: {
+  context: PreparedCliRunContext;
+  descriptor: ReturnType<typeof buildClaudeMcpPolicyRelayDescriptor>;
+}): NativeHookRelayRegistrationHandle {
+  const hookContext = buildClaudeLiveHookContext(params.context);
+  return registerNativeHookRelay({
+    ...params.descriptor,
+    agentId: hookContext.agentId,
+    sessionId: params.context.params.sessionId,
+    sessionKey: params.context.params.sessionKey,
+    config: params.context.params.config,
+    hookContext,
+    runId: params.context.params.runId,
+    channelId: hookContext.channelId,
+    allowedEvents: ["pre_tool_use", "post_tool_use"],
+    ttlMs: params.context.params.timeoutMs + CLAUDE_MCP_POLICY_RELAY_TIMEOUT_MS,
+    signal: params.context.params.abortSignal,
+  });
 }
 
 /** Closes all live Claude CLI sessions and clears creation promises for tests. */
@@ -168,12 +240,7 @@ export async function rotateClaudeLiveMcpCaptureKeyForContext(
 
 /** Returns whether a prepared backend context is eligible for Claude live stdio reuse. */
 export function shouldUseClaudeLiveSession(context: PreparedCliRunContext): boolean {
-  return (
-    context.backendResolved.id === "claude-cli" &&
-    context.preparedBackend.backend.liveSession === "claude-stdio" &&
-    context.preparedBackend.backend.output === "jsonl" &&
-    context.preparedBackend.backend.input === "stdin"
-  );
+  return isClaudeLiveSessionTransport(context.preparedBackend.backend);
 }
 
 function upsertArgValue(args: string[], flag: string, value: string): string[] {
@@ -195,6 +262,36 @@ function upsertArgValue(args: string[], flag: string, value: string): string[] {
 
 function appendArg(args: string[], flag: string): string[] {
   return args.includes(flag) ? args : [...args, flag];
+}
+
+function appendVariadicArgValue(
+  args: string[],
+  flags: readonly string[],
+  canonicalFlag: string,
+  value: string,
+): string[] {
+  const values: string[] = [];
+  const normalized: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] ?? "";
+    const inlineFlag = flags.find((flag) => arg.startsWith(`${flag}=`));
+    if (inlineFlag) {
+      values.push(arg.slice(inlineFlag.length + 1));
+      continue;
+    }
+    if (!flags.includes(arg)) {
+      normalized.push(arg);
+      continue;
+    }
+    while (typeof args[i + 1] === "string" && !args[i + 1]?.startsWith("-")) {
+      values.push(args[i + 1] ?? "");
+      i += 1;
+    }
+  }
+  if (!values.includes(value)) {
+    values.push(value);
+  }
+  return [...normalized, canonicalFlag, ...values];
 }
 
 function stripLiveProcessArgs(
@@ -232,19 +329,17 @@ export function buildClaudeLiveArgs(params: {
   systemPrompt: string;
   useResume: boolean;
   permissionMode?: string;
+  denyNativeComputerUse?: boolean;
 }): string[] {
+  const processArgs = stripLiveProcessArgs(
+    params.args,
+    params.backend,
+    params.useResume && params.backend.systemPromptWhen !== "always",
+  );
   const liveArgs = appendArg(
     upsertArgValue(
       upsertArgValue(
-        upsertArgValue(
-          stripLiveProcessArgs(
-            params.args,
-            params.backend,
-            params.useResume && params.backend.systemPromptWhen !== "always",
-          ),
-          "--input-format",
-          "stream-json",
-        ),
+        upsertArgValue(processArgs, "--input-format", "stream-json"),
         "--output-format",
         "stream-json",
       ),
@@ -253,11 +348,19 @@ export function buildClaudeLiveArgs(params: {
     ),
     "--replay-user-messages",
   );
+  const restrictedArgs = params.denyNativeComputerUse
+    ? appendVariadicArgValue(
+        liveArgs,
+        ["--disallowedTools", "--disallowed-tools"],
+        "--disallowedTools",
+        CLAUDE_NATIVE_COMPUTER_USE_TOOL_GLOB,
+      )
+    : liveArgs;
   // Live sessions always speak stream-json over stdin/stdout. Strip stale one-shot args above, then
   // force the live protocol flags so resume and non-resume turns share the same process contract.
   return params.permissionMode
-    ? upsertArgValue(liveArgs, "--permission-mode", params.permissionMode)
-    : liveArgs;
+    ? upsertArgValue(restrictedArgs, "--permission-mode", params.permissionMode)
+    : restrictedArgs;
 }
 
 function buildClaudeLiveKey(context: PreparedCliRunContext): string {
@@ -274,6 +377,7 @@ function buildClaudeLiveFingerprint(params: {
   context: PreparedCliRunContext;
   argv: string[];
   env: Record<string, string>;
+  mcpToolPolicyFingerprint: string;
 }): string {
   const normalizeMcpConfigPath = Boolean(params.context.preparedBackend.mcpConfigHash);
   const skillSnapshot = params.context.params.skillsSnapshot;
@@ -345,6 +449,7 @@ function buildClaudeLiveFingerprint(params: {
     extraSystemPromptHash: params.context.extraSystemPromptHash,
     promptToolNamesHash: params.context.promptToolNamesHash,
     mcpConfigHash: params.context.preparedBackend.mcpConfigHash,
+    mcpToolPolicyFingerprint: params.mcpToolPolicyFingerprint,
     skillsFingerprint,
     argv: stableArgv,
     env: Object.keys(params.env)
@@ -423,6 +528,11 @@ function cleanupLiveSession(session: ClaudeLiveSession): Promise<void> {
   return session.cleanupPromise;
 }
 
+function releaseClaudeLiveHookRelay(session: ClaudeLiveSession): void {
+  session.hookRelay?.unregister();
+  session.hookRelay = undefined;
+}
+
 function closeLiveSession(
   session: ClaudeLiveSession,
   reason: "idle" | "restart" | "abort",
@@ -435,6 +545,7 @@ function closeLiveSession(
     `claude live session close: provider=${session.providerId} model=${session.modelId} reason=${reason}`,
   );
   session.closing = true;
+  releaseClaudeLiveHookRelay(session);
   if (session.idleTimer) {
     clearTimeout(session.idleTimer);
     session.idleTimer = null;
@@ -799,6 +910,36 @@ function writeClaudeLiveControlResponse(session: ClaudeLiveSession, response: un
   stdin.write(`${JSON.stringify(response)}\n`);
 }
 
+function writeClaudeLiveToolDecision(params: {
+  session: ClaudeLiveSession;
+  requestId: string;
+  toolUseId?: string;
+  decision:
+    | { behavior: "allow"; updatedInput: Record<string, unknown> }
+    | { behavior: "deny"; message: string };
+}): void {
+  writeClaudeLiveControlResponse(params.session, {
+    type: "control_response",
+    response: {
+      subtype: "success",
+      request_id: params.requestId,
+      response:
+        params.decision.behavior === "allow"
+          ? {
+              behavior: "allow",
+              updatedInput: params.decision.updatedInput,
+              ...(params.toolUseId ? { toolUseID: params.toolUseId } : {}),
+            }
+          : {
+              behavior: "deny",
+              decisionClassification: "user_reject",
+              message: params.decision.message,
+              ...(params.toolUseId ? { toolUseID: params.toolUseId } : {}),
+            },
+    },
+  });
+}
+
 function handleClaudeLiveControlRequest(
   session: ClaudeLiveSession,
   turn: ClaudeLiveTurn,
@@ -816,26 +957,58 @@ function handleClaudeLiveControlRequest(
     return;
   }
   const toolUseId = typeof request.tool_use_id === "string" ? request.tool_use_id : undefined;
+  const toolName = typeof request.tool_name === "string" ? request.tool_name.trim() : "";
   const toolInput = isRecord(request.input) ? request.input : {};
+  const mcpDecision = toolName ? turn.mcpToolPolicy.decide(toolName) : { matched: false as const };
+  if (mcpDecision.matched) {
+    if (!mcpDecision.allowed) {
+      writeClaudeLiveToolDecision({
+        session,
+        requestId,
+        toolUseId,
+        decision: { behavior: "deny", message: mcpDecision.reason },
+      });
+      return;
+    }
+    writeClaudeLiveToolDecision({
+      session,
+      requestId,
+      toolUseId,
+      decision: { behavior: "allow", updatedInput: toolInput },
+    });
+    return;
+  }
   const allowed = turn.execPermission.security === "full" && turn.execPermission.ask === "off";
-  writeClaudeLiveControlResponse(session, {
-    type: "control_response",
-    response: {
-      subtype: "success",
-      request_id: requestId,
-      response: allowed
-        ? {
-            behavior: "allow",
-            updatedInput: toolInput,
-            ...(toolUseId ? { toolUseID: toolUseId } : {}),
-          }
-        : {
-            behavior: "deny",
-            decisionClassification: "user_reject",
-            message: `OpenClaw exec policy denied Claude native tool use (security=${turn.execPermission.security}, ask=${turn.execPermission.ask}).`,
-          },
-    },
+  writeClaudeLiveToolDecision({
+    session,
+    requestId,
+    toolUseId,
+    decision: allowed
+      ? { behavior: "allow", updatedInput: toolInput }
+      : {
+          behavior: "deny",
+          message: `OpenClaw exec policy denied Claude native tool use (security=${turn.execPermission.security}, ask=${turn.execPermission.ask}).`,
+        },
   });
+}
+
+function assertNoNativeClaudeComputerUse(
+  turn: ClaudeLiveTurn,
+  parsed: Record<string, unknown>,
+): void {
+  if (
+    !turn.mcpToolPolicy.hasComputerUseProxy ||
+    parsed.type !== "system" ||
+    parsed.subtype !== "init"
+  ) {
+    return;
+  }
+  const tools = Array.isArray(parsed.tools)
+    ? parsed.tools.filter((tool): tool is string => typeof tool === "string")
+    : [];
+  if (tools.some((tool) => tool.startsWith("mcp__computer-use__"))) {
+    throw new Error("Claude CLI exposed native computer-use tools despite the OpenClaw deny rule.");
+  }
 }
 
 function handleClaudeLiveLine(session: ClaudeLiveSession, line: string): void {
@@ -854,6 +1027,7 @@ function handleClaudeLiveLine(session: ClaudeLiveSession, line: string): void {
   if (!turn) {
     return;
   }
+  assertNoNativeClaudeComputerUse(turn, parsed);
   turn.rawChars += trimmed.length + 1;
   if (
     turn.rawChars > turn.outputLimits.maxTurnRawChars ||
@@ -917,6 +1091,7 @@ function handleClaudeStdout(session: ClaudeLiveSession, chunk: string) {
 
 function handleClaudeExit(session: ClaudeLiveSession, exitCode: number | null): void {
   session.closing = true;
+  releaseClaudeLiveHookRelay(session);
   if (session.idleTimer) {
     clearTimeout(session.idleTimer);
     session.idleTimer = null;
@@ -1015,6 +1190,7 @@ async function createClaudeLiveSession(params: {
   noOutputTimeoutMs: number;
   supervisor: ProcessSupervisor;
   cleanup: () => Promise<void>;
+  hookRelay?: NativeHookRelayRegistrationHandle;
 }): Promise<ClaudeLiveSession> {
   let session: ClaudeLiveSession | null = null;
   const mcpCaptureAttempt = await prepareCliBundleMcpCaptureAttempt({
@@ -1077,6 +1253,7 @@ async function createClaudeLiveSession(params: {
     },
     cleanupPromise: null,
     closing: false,
+    hookRelay: params.hookRelay,
     mcpCaptureKey: params.mcpCaptureKey,
   };
   void managedRun.wait().then(
@@ -1103,17 +1280,24 @@ function createTurn(params: {
   onCommentaryText?: (text: string) => void;
   session: ClaudeLiveSession;
   execPermission: ClaudeLiveExecPermission;
+  mcpToolPolicy: ClaudeLiveMcpToolPolicy;
   resolve: (output: CliOutput) => void;
   reject: (error: unknown) => void;
 }): ClaudeLiveTurn {
+  // The liveSession contract owns the wire dialect. Custom backend ids must
+  // not fall back to generic JSONL parsing after opting into Claude stdio.
+  const backend = {
+    ...params.context.preparedBackend.backend,
+    jsonlDialect: "claude-stream-json" as const,
+  };
   const turn: ClaudeLiveTurn = {
-    backend: params.context.preparedBackend.backend,
+    backend,
     diagnosticRefs: {
       runId: params.context.params.runId,
       sessionId: params.context.params.sessionId,
       ...(params.context.params.sessionKey ? { sessionKey: params.context.params.sessionKey } : {}),
     },
-    outputLimits: resolveCliStreamJsonOutputLimits(params.context.preparedBackend.backend),
+    outputLimits: resolveCliStreamJsonOutputLimits(backend),
     startedAtMs: Date.now(),
     rawLines: [],
     rawChars: 0,
@@ -1123,7 +1307,7 @@ function createTurn(params: {
     activeTools: new Map(),
     observedStdout: false,
     streamingParser: createCliJsonlStreamingParser({
-      backend: params.context.preparedBackend.backend,
+      backend,
       providerId: params.context.backendResolved.id,
       onAssistantDelta: params.onAssistantDelta,
       onToolUseStart: params.onToolUseStart,
@@ -1131,6 +1315,7 @@ function createTurn(params: {
       onCommentaryText: params.onCommentaryText,
     }),
     execPermission: params.execPermission,
+    mcpToolPolicy: params.mcpToolPolicy,
     resolve: params.resolve,
     reject: params.reject,
   };
@@ -1201,11 +1386,31 @@ export async function runClaudeLiveSessionTurn(params: {
   onToolResult?: (delta: CliToolResultDelta) => void;
   onCommentaryText?: (text: string) => void;
   onMcpCaptureReady?: (captureKey: string) => void;
+  onCleanupOwnershipTransferred?: () => void;
   cleanup: () => Promise<void>;
 }): Promise<ClaudeLiveRunResult> {
   const key = buildClaudeLiveKey(params.context);
   const resumeCapable = Boolean(params.context.preparedBackend.backend.resumeArgs?.length);
   const execPermission = resolveClaudeLiveExecPermission(params.context);
+  const mcpToolPolicy = resolveClaudeLiveMcpToolPolicy(params.context);
+  const relayDescriptor = mcpToolPolicy.hasExternalServers
+    ? buildClaudeMcpPolicyRelayDescriptor(key)
+    : undefined;
+  if (mcpToolPolicy.hasExternalServers) {
+    const mcpConfigPath = findClaudeMcpConfigPath(params.args);
+    if (!mcpConfigPath) {
+      throw new Error("Claude MCP policy proxy requires the generated strict MCP config");
+    }
+    await prepareClaudeMcpPolicyProxy({
+      mcpConfigPath,
+      servers: mcpToolPolicy.proxyServers,
+      env: params.env,
+      relay: relayDescriptor!,
+    });
+  }
+  const permissionMode = mcpToolPolicy.hasExternalServers
+    ? "default"
+    : execPermission.permissionMode;
   const argv = [
     params.context.preparedBackend.backend.command,
     ...buildClaudeLiveArgs({
@@ -1213,15 +1418,28 @@ export async function runClaudeLiveSessionTurn(params: {
       backend: params.context.preparedBackend.backend,
       systemPrompt: params.context.systemPrompt,
       useResume: params.useResume,
-      permissionMode: execPermission.permissionMode,
+      permissionMode,
+      denyNativeComputerUse: mcpToolPolicy.hasComputerUseProxy,
     }),
   ];
   const fingerprint = buildClaudeLiveFingerprint({
     context: params.context,
     argv,
     env: params.env,
+    mcpToolPolicyFingerprint: mcpToolPolicy.fingerprint,
   });
   let cleanupDone = false;
+  let hookRelay: NativeHookRelayRegistrationHandle | undefined;
+  const ensureHookRelay = (): NativeHookRelayRegistrationHandle | undefined => {
+    if (!relayDescriptor) {
+      return undefined;
+    }
+    hookRelay ??= registerClaudeMcpPolicyRelay({
+      context: params.context,
+      descriptor: relayDescriptor,
+    });
+    return hookRelay;
+  };
   const cleanup = async () => {
     if (cleanupDone) {
       return;
@@ -1267,6 +1485,7 @@ export async function runClaudeLiveSessionTurn(params: {
       }
     }
     if (!session) {
+      const sessionHookRelay = ensureHookRelay();
       const createSession = createClaudeLiveSession({
         context: params.context,
         argv,
@@ -1277,6 +1496,7 @@ export async function runClaudeLiveSessionTurn(params: {
         noOutputTimeoutMs: params.noOutputTimeoutMs,
         supervisor: params.getProcessSupervisor(),
         cleanup,
+        hookRelay: sessionHookRelay,
       }).finally(() => {
         if (liveSessionCreates.get(key) === createSession) {
           liveSessionCreates.delete(key);
@@ -1286,10 +1506,15 @@ export async function runClaudeLiveSessionTurn(params: {
       try {
         session = await createSession;
       } catch (error) {
+        sessionHookRelay?.unregister();
         await cleanup();
         throw error;
       }
     }
+  }
+  const currentHookRelay = ensureHookRelay();
+  if (currentHookRelay) {
+    session.hookRelay = currentHookRelay;
   }
   if (cleanupTurnArtifacts && session) {
     await cleanup();
@@ -1301,6 +1526,7 @@ export async function runClaudeLiveSessionTurn(params: {
       `claude live session reuse: provider=${session.providerId} model=${session.modelId}`,
     );
   }
+  params.onCleanupOwnershipTransferred?.();
   if (session.closing) {
     await cleanup();
     throw new Error("Claude CLI live session closed before handling the turn");
@@ -1325,6 +1551,7 @@ export async function runClaudeLiveSessionTurn(params: {
       onCommentaryText: params.onCommentaryText,
       session: liveSession,
       execPermission,
+      mcpToolPolicy,
       resolve,
       reject,
     });
