@@ -11,9 +11,9 @@ import {
   canonicalizeMainSessionAlias,
   type SessionScope,
 } from "openclaw/plugin-sdk/session-store-runtime";
+import { mergeTtsConfigValues } from "openclaw/plugin-sdk/speech-core";
 import { z } from "zod";
 import { TtsConfigSchema } from "../api.js";
-import { deepMergeDefined } from "./deep-merge.js";
 import { normalizePath } from "./path-utils.js";
 import { DEFAULT_VOICE_CALL_REALTIME_INSTRUCTIONS } from "./realtime-defaults.js";
 
@@ -546,7 +546,7 @@ function normalizeVoiceCallTtsConfig(
     return undefined;
   }
 
-  return TtsConfigSchema.parse(deepMergeDefined(defaults ?? {}, overrides ?? {}));
+  return TtsConfigSchema.parse(mergeTtsConfigValues(defaults ?? {}, overrides ?? {}));
 }
 
 function normalizePhoneRouteKey(phone: string | undefined): string {
