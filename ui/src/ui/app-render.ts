@@ -341,7 +341,13 @@ function renderSidebarRecentSession(
             title=${t("sessionsView.archiveSession")}
             aria-label=${t("sessionsView.archiveSession")}
             ?disabled=${controlsDisabled || !archiveAllowed}
-            @click=${() => void patchSessionFromSessionsView(state, row.key, { archived: true })}
+            @click=${async () => {
+              const previousSessionKey = state.sessionKey;
+              await patchSessionFromSessionsView(state, row.key, { archived: true });
+              if (state.sessionKey !== previousSessionKey) {
+                navigate("chat");
+              }
+            }}
           >
             ${icons.archive}
           </button>

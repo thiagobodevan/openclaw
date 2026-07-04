@@ -91,9 +91,13 @@ export const page = definePage({
     header: true,
     render: ({ state, navigate }: ChatRenderContext) => {
       const chatSessionArchived = isCurrentChatSessionArchived(state);
+      const switchSession = (sessionKey: string) => {
+        switchChatSession(state, sessionKey);
+        navigate("chat");
+      };
       return renderChat({
         sessionKey: state.sessionKey,
-        onSessionKeyChange: (next) => switchChatSession(state, next),
+        onSessionKeyChange: switchSession,
         thinkingLevel: state.chatThinkingLevel,
         showThinking: state.onboarding ? false : state.settings.chatShowThinking,
         showToolCalls: state.onboarding ? true : state.settings.chatShowToolCalls,
@@ -173,17 +177,22 @@ export const page = definePage({
           state.chatReplyTarget = target;
           state.requestUpdate?.();
         },
-        onNewSession: () => void createChatSession(state, { source: "user" }),
+        onNewSession: () =>
+          void createChatSession(state, { source: "user" }).then((created) => {
+            if (created) {
+              navigate("chat");
+            }
+          }),
         onClearHistory: () => void clearChatHistory(state),
         agentsList: state.agentsList,
         currentAgentId: resolveChatAgentId(state),
         fullMessageAgentId: scopedAgentParamsForSession(state, state.sessionKey).agentId,
-        onAgentChange: (agentId) => switchChatSession(state, buildAgentMainSessionKey({ agentId })),
+        onAgentChange: (agentId) => switchSession(buildAgentMainSessionKey({ agentId })),
         onNavigateToAgent: () => {
           state.agentsSelectedId = state.assistantAgentId;
           navigate("agents");
         },
-        onSessionSelect: (key) => switchChatSession(state, key),
+        onSessionSelect: switchSession,
         sidebarOpen: state.sidebarOpen,
         sidebarContent: state.sidebarContent,
         sidebarError: state.sidebarError,

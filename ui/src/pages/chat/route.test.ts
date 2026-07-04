@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { switchChatSession } from "../../ui/app-render.helpers.ts";
 import type { AppViewState } from "../../ui/app-view-state.ts";
 import { renderChat } from "../../ui/views/chat.ts";
 import { page } from "./route.ts";
@@ -71,5 +72,21 @@ describe("chat route", () => {
     props?.onClearReply?.();
     expect(state.chatReplyTarget).toBeNull();
     expect(requestUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("synchronizes session selections with the router", async () => {
+    const state = {
+      settings: { chatShowThinking: true, chatShowToolCalls: true },
+      sessionKey: "agent:main:old",
+      connected: true,
+    } as unknown as AppViewState;
+    const navigate = vi.fn();
+    const module = await page.component();
+
+    module.render({ state, navigate });
+    vi.mocked(renderChat).mock.calls[0]?.[0].onSessionKeyChange("agent:main:new");
+
+    expect(switchChatSession).toHaveBeenCalledWith(state, "agent:main:new");
+    expect(navigate).toHaveBeenCalledWith("chat");
   });
 });
