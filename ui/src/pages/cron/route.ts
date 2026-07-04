@@ -222,7 +222,7 @@ function renderCronPage(
         state.cronForm = normalizeCronFormState({ ...state.cronForm, ...patch });
         state.cronFieldErrors = validateCronForm(state.cronForm);
       },
-      onRefresh: () => void state.loadCron(),
+      onRefresh: () => void loadCronPage(state as unknown as SettingsHost),
       onAdd: runTask(async () => {
         if (await addCronJob(state)) {
           state.cronFormCollapsed = true;

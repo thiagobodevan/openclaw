@@ -92,7 +92,7 @@ export async function loadChannelsPage(host: SettingsHost) {
 }
 
 export async function loadCronPage(host: SettingsHost, routeOptions?: RouteHookOptions) {
-  await loadCron(host, routeOptions);
+  await loadCron(host, routeOptions, true);
 }
 
 export async function loadOverview(
@@ -144,14 +144,18 @@ export async function loadOverview(
   });
 }
 
-export async function loadCron(host: SettingsHost, routeOptions?: RouteHookOptions) {
+export async function loadCron(
+  host: SettingsHost,
+  routeOptions?: RouteHookOptions,
+  tableFilters = false,
+) {
   const app = host as unknown as SettingsAppHost;
   const activeCronJobId = app.cronRunsScope === "job" ? app.cronRunsJobId : null;
   const cronSeq = (host.controlUiCronRefreshSeq ?? 0) + 1;
   host.controlUiCronRefreshSeq = cronSeq;
   const isCurrentCronRefresh = () =>
     host.controlUiCronRefreshSeq === cronSeq && !routeOptions?.signal.aborted;
-  const useTableFilters = routeOptions ? !routeOptions.signal.aborted : true;
+  const useTableFilters = tableFilters && !routeOptions?.signal.aborted;
   const runsStartedAtMs = controlUiNowMs();
   const runsRefresh = loadCronRuns(app, activeCronJobId)
     .catch(() => "error" as const)
