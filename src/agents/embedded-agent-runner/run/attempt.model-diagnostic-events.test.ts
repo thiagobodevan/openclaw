@@ -712,6 +712,53 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(JSON.stringify(events)).not.toContain("private tool description");
   });
 
+  it("emits terminal output and context overflow facts without content capture", async () => {
+    const assistant = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "" },
+        { type: "toolCall", id: "call-1", name: "read", arguments: {} },
+      ],
+      usage: {
+        input: 99,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 99,
+      },
+      stopReason: "length",
+      timestamp: 1,
+    };
+    async function* stream() {
+      yield { type: "done", reason: "length", message: assistant };
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        contextTokenBudget: 100,
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-terminal-facts",
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completedEvent = getEvent(events, 1);
+    expect(completedEvent.type).toBe("model.call.completed");
+    expect(completedEvent.stopReason).toBe("length");
+    expect(completedEvent.outputContentBlocks).toBe(2);
+    expect(completedEvent.outputToolCalls).toBe(1);
+    expect(completedEvent.contextOverflowDetected).toBe(true);
+    expect(completedEvent.usage?.output).toBe(0);
+    expect(completedEvent).not.toHaveProperty("outputMessages");
+    expect(JSON.stringify(events)).not.toContain("call-1");
+  });
+
   it("captures per-call usage from terminal error events", async () => {
     // Aborted/error streams terminate with an `error` event carrying the final
     // AssistantMessage and its usage. Iterating to completion without awaiting
