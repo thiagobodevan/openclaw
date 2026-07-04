@@ -798,6 +798,45 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(completedEvent.contextOverflowDetected).toBe(true);
   });
 
+  it("uses the model reference window for overflow classification", async () => {
+    const assistant = {
+      role: "assistant",
+      content: [],
+      usage: {
+        input: 99,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 99,
+      },
+      stopReason: "length",
+      timestamp: 1,
+    };
+    async function* stream() {
+      yield { type: "done", reason: "length", message: assistant };
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        contextTokenBudget: 100,
+        contextWindowReferenceTokens: 200,
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-reference-window",
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completedEvent = getEvent(events, 1);
+    expect(completedEvent.type).toBe("model.call.completed");
+    expect(completedEvent.contextOverflowDetected).toBe(false);
+  });
+
   it("captures per-call usage from terminal error events", async () => {
     // Aborted/error streams terminate with an `error` event carrying the final
     // AssistantMessage and its usage. Iterating to completion without awaiting

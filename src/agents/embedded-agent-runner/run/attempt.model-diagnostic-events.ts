@@ -98,7 +98,7 @@ type ModelCallObservationState = {
   outputMessages?: unknown[];
   usage?: ModelCallUsage;
   terminalFields?: ModelCallTerminalFields;
-  contextTokenBudget?: number;
+  contextWindowTokens?: number;
   contentCapture?: DiagnosticModelContentCapturePolicy;
   lastStreamProgressAt?: number;
   terminalEventEmitted?: boolean;
@@ -271,7 +271,7 @@ function observeModelCallTerminalFields(state: ModelCallObservationState, value:
     ).length;
     const contextOverflowDetected =
       value.role === "assistant"
-        ? isContextOverflow(value as unknown as AssistantMessage, state.contextTokenBudget)
+        ? isContextOverflow(value as unknown as AssistantMessage, state.contextWindowTokens)
         : undefined;
     const fields = {
       ...(stopReason ? { stopReason } : {}),
@@ -909,7 +909,7 @@ export function wrapStreamFnWithDiagnosticModelCallEvents(
     const state: ModelCallObservationState = {
       responseStreamBytes: 0,
       modelContent,
-      contextTokenBudget: eventBase.contextTokenBudget,
+      contextWindowTokens: eventBase.contextWindowReferenceTokens ?? eventBase.contextTokenBudget,
       contentCapture: ctx.contentCapture,
     };
     // Provider wrappers consume this same call id for transport correlation,
