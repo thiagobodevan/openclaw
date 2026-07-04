@@ -183,8 +183,10 @@ export function startAppRouter(
     history.replace(fallback);
     return fallback;
   };
+  const initialLocation = resolveLocation(history.location());
+  onLocation?.(initialLocation);
   const appHistory: RouterHistory = {
-    location: () => resolveLocation(history.location()),
+    location: () => initialLocation,
     push: history.push,
     replace: history.replace,
     listen: (listener) =>
