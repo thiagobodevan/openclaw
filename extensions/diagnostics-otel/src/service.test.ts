@@ -2548,6 +2548,33 @@ describe("diagnostics-otel service", () => {
     await service.stop?.(ctx);
   });
 
+  test("preserves explicit zero output usage on model usage spans", async () => {
+    const service = createDiagnosticsOtelService();
+    const ctx = createOtelContext(OTEL_TEST_ENDPOINT, { traces: true });
+    await service.start(ctx);
+
+    emitDiagnosticEvent({
+      type: "model.usage",
+      provider: "openai",
+      model: "gpt-5.4",
+      usage: {
+        input: 99,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        promptTokens: 99,
+        total: 99,
+      },
+    });
+    await flushDiagnosticEvents();
+
+    const attributes = startedSpanOptions("openclaw.model.usage")?.attributes;
+    expect(attributes?.["gen_ai.usage.output_tokens"]).toBe(0);
+    expect(attributes?.["gen_ai.usage.cache_read.input_tokens"]).toBe(0);
+    expect(attributes?.["gen_ai.usage.cache_creation.input_tokens"]).toBe(0);
+    await service.stop?.(ctx);
+  });
+
   test("exports GenAI client operation duration histogram without diagnostic identifiers", async () => {
     const service = createDiagnosticsOtelService();
     const ctx = createOtelContext(OTEL_TEST_ENDPOINT, { metrics: true });
