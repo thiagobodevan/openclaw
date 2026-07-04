@@ -270,7 +270,7 @@ function observeModelCallTerminalFields(state: ModelCallObservationState, value:
       (block) => isRecord(block) && block.type === "toolCall",
     ).length;
     const contextOverflowDetected =
-      value.role === "assistant" && state.contextTokenBudget
+      value.role === "assistant"
         ? isContextOverflow(value as unknown as AssistantMessage, state.contextTokenBudget)
         : undefined;
     const fields = {

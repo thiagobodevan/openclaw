@@ -754,9 +754,48 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(completedEvent.outputContentBlocks).toBe(2);
     expect(completedEvent.outputToolCalls).toBe(1);
     expect(completedEvent.contextOverflowDetected).toBe(true);
-    expect(completedEvent.usage?.output).toBe(0);
+    expect(completedEvent.usage).toEqual(expect.objectContaining({ output: 0 }));
     expect(completedEvent).not.toHaveProperty("outputMessages");
     expect(JSON.stringify(events)).not.toContain("call-1");
+  });
+
+  it("detects error-based context overflow without a context token budget", async () => {
+    const assistant = {
+      role: "assistant",
+      content: [],
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+      },
+      stopReason: "error",
+      errorMessage: "Your input exceeds the context window of this model",
+      timestamp: 1,
+    };
+    async function* stream() {
+      yield { type: "error", reason: "error", error: assistant };
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "openai",
+        model: "gpt-5.4",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-error-overflow",
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completedEvent = getEvent(events, 1);
+    expect(completedEvent.type).toBe("model.call.completed");
+    expect(completedEvent.stopReason).toBe("error");
+    expect(completedEvent.contextOverflowDetected).toBe(true);
   });
 
   it("captures per-call usage from terminal error events", async () => {
