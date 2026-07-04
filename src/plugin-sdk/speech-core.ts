@@ -43,7 +43,6 @@ export {
   normalizeSpeechProviderId,
 } from "../tts/provider-registry.js";
 export { resolveEffectiveTtsConfig } from "../tts/tts-config.js";
-export { mergeTtsConfigValues } from "../tts/tts-config-merge.js";
 export type { TtsConfigResolutionContext } from "../tts/tts-config.js";
 export { normalizeTtsAutoMode, TTS_AUTO_MODES } from "../tts/tts-auto-mode.js";
 export {
