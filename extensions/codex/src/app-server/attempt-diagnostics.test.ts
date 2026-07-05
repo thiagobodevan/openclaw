@@ -127,11 +127,9 @@ describe("Codex app-server attempt diagnostics", () => {
       lastAssistant: {
         role: "assistant",
         stopReason: "toolUse",
-        content: [
-          { type: "text", text: "" },
-          { type: "toolCall", id: "secret-call-id", name: "read", arguments: {} },
-        ],
+        content: [{ type: "text", text: "done" }],
       },
+      toolMetas: [{ toolName: "read", meta: "secret path" }],
     });
 
     expect(emitTrustedDiagnosticEventWithPrivateData).toHaveBeenCalledTimes(2);
@@ -140,7 +138,7 @@ describe("Codex app-server attempt diagnostics", () => {
       expect.objectContaining({
         type: "model.call.completed",
         stopReason: "toolUse",
-        outputContentBlocks: 2,
+        outputContentBlocks: 1,
         outputToolCalls: 1,
         contextOverflowDetected: false,
         usage: {
@@ -152,7 +150,7 @@ describe("Codex app-server attempt diagnostics", () => {
         },
       }),
     );
-    expect(JSON.stringify(completedEvent)).not.toContain("secret-call-id");
+    expect(JSON.stringify(completedEvent)).not.toContain("secret path");
   });
 
   it("emits terminal facts on context overflow errors", () => {
@@ -188,6 +186,7 @@ describe("Codex app-server attempt diagnostics", () => {
           stopReason: "error",
           content: [],
         },
+        toolMetas: [],
       },
     });
 
@@ -208,5 +207,36 @@ describe("Codex app-server attempt diagnostics", () => {
         },
       }),
     );
+  });
+
+  it("counts tool-only Codex turns from projected tool metadata", () => {
+    emitTrustedDiagnosticEventWithPrivateData.mockClear();
+    const emitter = createCodexModelCallDiagnosticEmitter({
+      baseFields: {
+        runId: "run-1",
+        callId: "call-1",
+        provider: "codex",
+        model: "gpt-5.4-codex",
+      },
+      capture: {},
+      tools: [],
+      buildInputMessages: () => [],
+      buildSystemPrompt: () => undefined,
+      now: () => 10,
+    });
+
+    emitter.emitStarted();
+    emitter.emitCompleted({
+      toolMetas: [{ toolName: "exec" }],
+    });
+
+    const completedEvent = emitTrustedDiagnosticEventWithPrivateData.mock.calls[1]?.[0];
+    expect(completedEvent).toEqual(
+      expect.objectContaining({
+        type: "model.call.completed",
+        outputToolCalls: 1,
+      }),
+    );
+    expect(completedEvent).not.toHaveProperty("outputContentBlocks");
   });
 });

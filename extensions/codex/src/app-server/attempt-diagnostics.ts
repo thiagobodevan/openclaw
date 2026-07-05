@@ -101,6 +101,7 @@ type CodexModelCallTerminalResult = {
   assistantTexts?: unknown;
   attemptUsage?: CodexModelCallUsage;
   lastAssistant?: unknown;
+  toolMetas?: unknown[];
 };
 
 type CodexModelCallErrorFields = {
@@ -123,22 +124,15 @@ type CodexModelCallDiagnosticTool = {
   parameters?: unknown;
 };
 
-function codexModelCallTerminalFields(lastAssistant: unknown) {
-  if (!isRecord(lastAssistant)) {
-    return {};
-  }
-  const content = Array.isArray(lastAssistant.content) ? lastAssistant.content : undefined;
+function codexModelCallTerminalFields(result: CodexModelCallTerminalResult | undefined) {
+  const lastAssistant = isRecord(result?.lastAssistant) ? result.lastAssistant : undefined;
+  const content = Array.isArray(lastAssistant?.content) ? lastAssistant.content : undefined;
   return {
-    ...(typeof lastAssistant.stopReason === "string"
+    ...(typeof lastAssistant?.stopReason === "string"
       ? { stopReason: lastAssistant.stopReason }
       : {}),
     ...(content ? { outputContentBlocks: content.length } : {}),
-    ...(content
-      ? {
-          outputToolCalls: content.filter((block) => isRecord(block) && block.type === "toolCall")
-            .length,
-        }
-      : {}),
+    ...(result?.toolMetas ? { outputToolCalls: result.toolMetas.length } : {}),
   };
 }
 
@@ -148,7 +142,7 @@ function codexModelCallResultFields(
 ) {
   return {
     ...(result?.attemptUsage ? { usage: result.attemptUsage } : {}),
-    ...codexModelCallTerminalFields(result?.lastAssistant),
+    ...codexModelCallTerminalFields(result),
     ...(contextOverflowDetected !== undefined ? { contextOverflowDetected } : {}),
   };
 }
