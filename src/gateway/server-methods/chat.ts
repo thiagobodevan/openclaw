@@ -197,7 +197,6 @@ import {
   capArrayByJsonBytes,
   readRecentSessionMessagesWithStatsAsync,
   readSessionMessageByIdAsync,
-  readRecentSessionMessagesAsync,
   readSessionMessagesAfterSeqWithStatsAsync,
   readSessionMessagesPageWithStatsAsync,
   readSessionMessagesAsync,
@@ -3112,11 +3111,16 @@ async function readChatHistoryPage(params: {
     maxMessages: rawHistoryWindow.maxMessages + 1,
     maxLines: rawHistoryWindow.maxLines + 1,
   };
-  const localMessages = await readRecentSessionMessagesAsync(readScope, {
+  // Stats variant restamps transcript-GLOBAL `__openclaw.seq` on each row.
+  // The plain tail reader numbers rows within its byte window, and clients
+  // seed the afterSeq reconnect cursor from this page's highest seq; a
+  // window-local seq would silently re-fetch or skip catch-up entries.
+  const localReadPage = await readRecentSessionMessagesWithStatsAsync(readScope, {
     ...localHistoryReadOptions,
     maxBytes: Math.max(maxHistoryBytes * 2, 1024 * 1024),
     allowResetArchiveFallback: true,
   });
+  const localMessages = localReadPage.messages;
   const overreadContextMessage =
     localMessages.length > rawHistoryWindow.maxMessages ? localMessages[0] : undefined;
   const localMessagesWithBoundaryFilter = dropLocalHistoryOverreadContextMessage(

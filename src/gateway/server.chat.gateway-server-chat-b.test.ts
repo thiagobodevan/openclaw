@@ -4308,6 +4308,38 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.history recent tail stamps transcript-global seq for afterSeq baselines", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      const sessionDir = await prepareMainHistoryHarness({ ws, createSessionDir });
+      // 45 rows exceed the limit=1 raw tail window (limit*20+20+1 lines), so a
+      // tail-window-local numbering would top out below the transcript total
+      // and poison client afterSeq reconnect baselines.
+      const now = Date.now();
+      await writeMainSessionTranscript(
+        sessionDir,
+        Array.from({ length: 45 }, (_, index) =>
+          JSON.stringify({
+            message: {
+              role: index % 2 === 0 ? "user" : "assistant",
+              content: [{ type: "text", text: `row ${index + 1}` }],
+              timestamp: now + index,
+            },
+          }),
+        ),
+      );
+
+      const res = await rpcReq<{ messages?: unknown[] }>(ws, "chat.history", {
+        sessionKey: "main",
+        limit: 1,
+        maxChars: 100,
+      });
+      expect(res.ok).toBe(true);
+      const seqs = res.payload?.messages?.map(readOpenClawSeq) ?? [];
+      expect(seqs.length).toBeGreaterThan(0);
+      expect(seqs.at(-1)).toBe(45);
+    });
+  });
+
   test("chat.history rejects invalid afterSeq cursors", async () => {
     await withGatewayChatHarness(async ({ ws }) => {
       await connectOk(ws);
