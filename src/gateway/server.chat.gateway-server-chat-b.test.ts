@@ -4181,6 +4181,154 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.history afterSeq returns only newer messages oldest-first and advances past filtered rows", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      const sessionDir = await prepareMainHistoryHarness({ ws, createSessionDir });
+      await writeMainSessionTranscript(sessionDir, [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "oldest question" }],
+            timestamp: Date.now(),
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "oldest answer" }],
+            timestamp: Date.now() + 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "missed question" }],
+            timestamp: Date.now() + 2,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "NO_REPLY" }],
+            timestamp: Date.now() + 3,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "missed answer" }],
+            timestamp: Date.now() + 4,
+          },
+        }),
+      ]);
+
+      type CursorPage = {
+        messages?: Array<{ __openclaw?: { seq?: number } }>;
+        afterSeq?: number;
+        nextAfterSeq?: number;
+        nextOffset?: number;
+        hasMore?: boolean;
+        totalMessages?: number;
+      };
+      const firstPage = await rpcReq<CursorPage>(ws, "chat.history", {
+        sessionKey: "main",
+        limit: 2,
+        afterSeq: 2,
+        maxChars: 100,
+      });
+      expect(firstPage.ok).toBe(true);
+      // Raw entries 3-4 are consumed; the NO_REPLY row (seq 4) is projected
+      // away but still advances the cursor so catch-up cannot stall.
+      expect(firstPage.payload?.messages?.map(readOpenClawSeq)).toEqual([3]);
+      expect(JSON.stringify(firstPage.payload?.messages)).toContain("missed question");
+      expect(JSON.stringify(firstPage.payload?.messages)).not.toContain("oldest");
+      expect(firstPage.payload?.afterSeq).toBe(2);
+      expect(firstPage.payload?.nextAfterSeq).toBe(4);
+      expect(firstPage.payload?.hasMore).toBe(true);
+      expect(firstPage.payload?.totalMessages).toBe(5);
+      expect(firstPage.payload?.nextOffset).toBeUndefined();
+
+      const secondPage = await rpcReq<CursorPage>(ws, "chat.history", {
+        sessionKey: "main",
+        limit: 2,
+        afterSeq: firstPage.payload?.nextAfterSeq,
+        maxChars: 100,
+      });
+      expect(secondPage.ok).toBe(true);
+      expect(secondPage.payload?.messages?.map(readOpenClawSeq)).toEqual([5]);
+      expect(JSON.stringify(secondPage.payload?.messages)).toContain("missed answer");
+      expect(secondPage.payload?.nextAfterSeq).toBe(5);
+      expect(secondPage.payload?.hasMore).toBe(false);
+
+      // A cursor at/past the transcript tail returns an empty page and stops.
+      const drained = await rpcReq<CursorPage>(ws, "chat.history", {
+        sessionKey: "main",
+        limit: 2,
+        afterSeq: 99,
+        maxChars: 100,
+      });
+      expect(drained.ok).toBe(true);
+      expect(drained.payload?.messages).toEqual([]);
+      expect(drained.payload?.nextAfterSeq).toBe(5);
+      expect(drained.payload?.hasMore).toBe(false);
+    });
+  });
+
+  test("chat.history without afterSeq keeps the existing recent-tail response shape", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      const sessionDir = await prepareMainHistoryHarness({ ws, createSessionDir });
+      await writeMainSessionTranscript(sessionDir, [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "plain question" }],
+            timestamp: Date.now(),
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "plain answer" }],
+            timestamp: Date.now() + 1,
+          },
+        }),
+      ]);
+
+      const res = await rpcReq<{
+        messages?: unknown[];
+        afterSeq?: number;
+        nextAfterSeq?: number;
+        hasMore?: boolean;
+      }>(ws, "chat.history", { sessionKey: "main", limit: 10, maxChars: 100 });
+      expect(res.ok).toBe(true);
+      expect(res.payload?.messages).toHaveLength(2);
+      expect(res.payload?.afterSeq).toBeUndefined();
+      expect(res.payload?.nextAfterSeq).toBeUndefined();
+      expect(res.payload?.hasMore).toBeUndefined();
+    });
+  });
+
+  test("chat.history rejects invalid afterSeq cursors", async () => {
+    await withGatewayChatHarness(async ({ ws }) => {
+      await connectOk(ws);
+      const negative = await rpcReq(ws, "chat.history", { sessionKey: "main", afterSeq: -1 });
+      expect(negative.ok).toBe(false);
+      expect(String(negative.error?.message)).toContain("invalid chat.history params");
+
+      const fractional = await rpcReq(ws, "chat.history", { sessionKey: "main", afterSeq: 1.5 });
+      expect(fractional.ok).toBe(false);
+      expect(String(fractional.error?.message)).toContain("invalid chat.history params");
+
+      const combined = await rpcReq(ws, "chat.history", {
+        sessionKey: "main",
+        afterSeq: 1,
+        offset: 1,
+      });
+      expect(combined.ok).toBe(false);
+      expect(String(combined.error?.message)).toContain("afterSeq cannot be combined with offset");
+    });
+  });
+
   test("chat.history offset pagination advances from the final budgeted page", async () => {
     await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
       const sessionDir = await prepareMainHistoryHarness({

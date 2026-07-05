@@ -200,6 +200,12 @@ export type ReadSessionMessagesPageOptions = {
   allowResetArchiveFallback?: boolean;
 };
 
+export type ReadSessionMessagesAfterSeqOptions = {
+  afterSeq: number;
+  maxMessages: number;
+  allowResetArchiveFallback?: boolean;
+};
+
 export type ReadSessionMessagesAsyncOptions =
   | {
       mode: "full";
@@ -850,6 +856,38 @@ export async function readSessionMessagesPageWithStatsAsync(
   return {
     messages: index.entries
       .slice(start, endExclusive)
+      .flatMap((entry) => indexedTranscriptEntryToMessages(entry)),
+    totalMessages,
+    transcriptPath: filePath,
+  };
+}
+
+export async function readSessionMessagesAfterSeqWithStatsAsync(
+  sessionId: string,
+  storePath: string | undefined,
+  sessionFile: string | undefined,
+  opts: ReadSessionMessagesAfterSeqOptions,
+  agentId?: string,
+): Promise<ReadRecentSessionMessagesResult> {
+  const filePath =
+    opts.allowResetArchiveFallback === true
+      ? await findExistingTranscriptHistoryPathAsync(sessionId, storePath, sessionFile, agentId)
+      : findExistingTranscriptPath(sessionId, storePath, sessionFile, agentId);
+  if (!filePath) {
+    return { messages: [], totalMessages: 0 };
+  }
+  const index = await readSessionTranscriptIndex(filePath);
+  if (!index) {
+    return { messages: [], totalMessages: 0, transcriptPath: filePath };
+  }
+  const totalMessages = index.entries.length;
+  // Index entries carry contiguous 1-based seq over visible records, so
+  // "seq > afterSeq" is a plain slice; oldest-first keeps catch-up ordered.
+  const start = Math.min(resolveNonNegativeIntegerOption(opts.afterSeq, 0), totalMessages);
+  const maxMessages = resolveNonNegativeIntegerOption(opts.maxMessages, 0);
+  return {
+    messages: index.entries
+      .slice(start, start + maxMessages)
       .flatMap((entry) => indexedTranscriptEntryToMessages(entry)),
     totalMessages,
     transcriptPath: filePath,
