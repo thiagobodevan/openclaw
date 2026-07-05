@@ -1745,8 +1745,9 @@ export function enforceChatHistoryFinalBudget(params: { messages: unknown[]; max
 // Byte budget for afterSeq catch-up pages. Unlike the tail-preserving offset
 // and recent paths, the cursor page must keep its OLDEST rows: dropping from
 // the head while nextAfterSeq advances would silently skip unread messages
-// forever. Trims from the newest end at a transcript-seq boundary so mirror
-// rows that share one raw entry are never stranded across pages.
+// forever. Trims from the newest end at a transcript-seq boundary and always
+// delivers at least one COMPLETE seq group: nextAfterSeq advances past whole
+// raw entries, so a split group would permanently lose its trimmed mirror rows.
 export function capCursorChatHistoryMessagesKeepOldest(params: {
   messages: unknown[];
   maxBytes: number;
@@ -1771,8 +1772,23 @@ export function capCursorChatHistoryMessagesKeepOldest(params: {
   }
   const boundarySeq = readChatHistoryMessageSeq(messages[end]);
   if (boundarySeq !== undefined) {
-    while (end > 1 && readChatHistoryMessageSeq(messages[end - 1]) === boundarySeq) {
+    while (end > 0 && readChatHistoryMessageSeq(messages[end - 1]) === boundarySeq) {
       end--;
+    }
+  }
+  if (end === 0) {
+    // The budget boundary fell inside the FIRST seq group. Deliver the whole
+    // group as one oversized page (same degradation class as a single
+    // over-budget row): a partial group would advance nextAfterSeq past the
+    // raw entry and permanently drop its undelivered mirror rows.
+    const firstSeq = readChatHistoryMessageSeq(messages[0]);
+    end = 1;
+    while (
+      end < messages.length &&
+      firstSeq !== undefined &&
+      readChatHistoryMessageSeq(messages[end]) === firstSeq
+    ) {
+      end++;
     }
   }
   return { messages: messages.slice(0, end) };
