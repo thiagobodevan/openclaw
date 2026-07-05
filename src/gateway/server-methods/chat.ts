@@ -198,6 +198,7 @@ import {
   readRecentSessionMessagesWithStatsAsync,
   readSessionMessageByIdAsync,
   readRecentSessionMessagesAsync,
+  readSessionMessagesAfterSeqWithStatsAsync,
   readSessionMessagesPageWithStatsAsync,
   readSessionMessagesAsync,
 } from "../session-transcript-readers.js";
@@ -284,6 +285,8 @@ type ChatHistoryMethod = "chat.history" | "chat.startup";
 type ChatHistoryPage = {
   messages: unknown[];
   offset?: number;
+  afterSeq?: number;
+  nextAfterSeq?: number;
   totalMessages?: number;
   rawPageMessages?: number;
 };
@@ -2924,6 +2927,7 @@ async function readChatHistoryPage(params: {
   maxHistoryBytes: number;
   effectiveMaxChars: number;
   offset: number | undefined;
+  afterSeq: number | undefined;
 }): Promise<ChatHistoryPage> {
   const {
     entry,
@@ -2936,6 +2940,7 @@ async function readChatHistoryPage(params: {
     maxHistoryBytes,
     effectiveMaxChars,
     offset,
+    afterSeq,
   } = params;
   if (!sessionId || !storePath) {
     return { messages: [] };
@@ -2948,6 +2953,30 @@ async function readChatHistoryPage(params: {
     sessionKey: canonicalKey,
     storePath,
   };
+  if (afterSeq !== undefined) {
+    const readPage = await readSessionMessagesAfterSeqWithStatsAsync(readScope, {
+      afterSeq,
+      maxMessages: max,
+      allowResetArchiveFallback: true,
+    });
+    // The cursor advances over raw transcript entries (contiguous 1-based seq),
+    // not surviving projected rows, so a fully filtered page still terminates
+    // the client's catch-up loop instead of re-requesting the same range.
+    const start = Math.min(afterSeq, readPage.totalMessages);
+    const nextAfterSeq = Math.min(start + max, readPage.totalMessages);
+    const recencyFilteredMessages = dropPreSessionStartAnnouncePairs(
+      readPage.messages,
+      typeof entry?.sessionStartedAt === "number" ? entry.sessionStartedAt : undefined,
+    );
+    return {
+      messages: augmentChatHistoryWithCanvasBlocks(
+        projectChatDisplayMessages(recencyFilteredMessages, { maxChars: effectiveMaxChars }),
+      ),
+      afterSeq,
+      nextAfterSeq,
+      totalMessages: readPage.totalMessages,
+    };
+  }
   if (offset !== undefined) {
     const rawHistoryWindow = resolveSessionHistoryTailReadOptions(max);
     const readPage =
@@ -3081,13 +3110,27 @@ async function handleChatHistoryRequest({
     );
     return;
   }
-  const { sessionKey, limit, offset, maxChars } = params as {
+  const { sessionKey, limit, offset, afterSeq, maxChars } = params as {
     sessionKey: string;
     agentId?: string;
     limit?: number;
     offset?: number;
+    afterSeq?: number;
     maxChars?: number;
   };
+  // afterSeq (oldest-first catch-up) and offset (newest-first backfill) walk
+  // the transcript in opposite directions; combining them has no coherent page.
+  if (afterSeq !== undefined && offset !== undefined) {
+    respond(
+      false,
+      undefined,
+      errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        `invalid ${method} params: afterSeq cannot be combined with offset`,
+      ),
+    );
+    return;
+  }
   const agentIdOverride = normalizeOptionalText((params as { agentId?: string }).agentId);
   const requestedAgentId = resolveRequestedChatAgentId({
     cfg: (context as { getRuntimeConfig?: () => OpenClawConfig }).getRuntimeConfig?.(),
@@ -3152,6 +3195,7 @@ async function handleChatHistoryRequest({
     maxHistoryBytes,
     effectiveMaxChars,
     offset,
+    afterSeq,
   });
   const normalized = historyPage.messages;
   const perMessageHardCap = Math.min(CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES, maxHistoryBytes);
@@ -3175,10 +3219,15 @@ async function handleChatHistoryRequest({
           rawPageMessages: historyPage.rawPageMessages ?? bounded.messages.length,
         })
       : undefined;
-  const hasMore =
+  const offsetHasMore =
     nextOffset !== undefined && historyPage.totalMessages !== undefined
       ? nextOffset < historyPage.totalMessages
       : undefined;
+  const cursorHasMore =
+    historyPage.nextAfterSeq !== undefined && historyPage.totalMessages !== undefined
+      ? historyPage.nextAfterSeq < historyPage.totalMessages
+      : undefined;
+  const hasMore = offsetHasMore ?? cursorHasMore;
   reportOmittedChatHistory({
     originalMessages: normalized,
     finalMessages: bounded.messages,
@@ -3240,7 +3289,9 @@ async function handleChatHistoryRequest({
     sessionId,
     messages: bounded.messages,
     ...(historyPage.offset !== undefined ? { offset: historyPage.offset } : {}),
-    ...(hasMore ? { nextOffset } : {}),
+    ...(offsetHasMore ? { nextOffset } : {}),
+    ...(historyPage.afterSeq !== undefined ? { afterSeq: historyPage.afterSeq } : {}),
+    ...(historyPage.nextAfterSeq !== undefined ? { nextAfterSeq: historyPage.nextAfterSeq } : {}),
     ...(hasMore !== undefined ? { hasMore } : {}),
     ...(historyPage.totalMessages !== undefined
       ? { totalMessages: historyPage.totalMessages }
