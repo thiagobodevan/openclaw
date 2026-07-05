@@ -13,6 +13,26 @@ vi.mock("./local-roots.js", () => ({
 }));
 
 describe("assertLocalMediaAllowed", () => {
+  it("allows missing files under a root reached through a symlinked dir", async () => {
+    // Regression: staged outbound media may not exist on disk yet (host-read
+    // callbacks provide the bytes) and cannot be realpathed. When the allowed
+    // root is reached through a symlink (macOS /var -> /private/var, or any
+    // user-level symlinked media dir), the raw candidate must still compare
+    // as inside the resolved root instead of failing closed.
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-media-symlink-"));
+    const realRoot = path.join(base, "real-root");
+    const linkRoot = path.join(base, "link-root");
+    await fs.mkdir(realRoot, { recursive: true });
+    await fs.symlink(realRoot, linkRoot);
+    const missingViaLink = path.join(linkRoot, "staged-report.docx");
+
+    try {
+      await expect(assertLocalMediaAllowed(missingViaLink, [linkRoot])).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+
   it("allows managed inbound media paths before explicit root checks", async () => {
     const stateDir = resolveStateDir();
     const id = `managed-local-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;

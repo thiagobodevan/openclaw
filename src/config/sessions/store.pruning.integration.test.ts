@@ -578,6 +578,55 @@ describe("Integration: saveSessionStore with pruning", () => {
     await expectPathExists(userOnlyPresentTranscript);
   });
 
+  it("repairs stale generated metadata when the store is reached through a symlinked dir", async () => {
+    // Regression: cleanup resolves stored sessionFile paths against the
+    // realpathed sessions dir. A store addressed through a symlink (macOS
+    // /var -> /private/var, or a user-level symlinked state dir) made the
+    // resolver fall back to the canonical transcript, silently skipping both
+    // the stale-metadata repair and missing-file pruning.
+    const realDir = path.join(testDir, "real-sessions");
+    const linkDir = path.join(testDir, "link-sessions");
+    await fs.mkdir(realDir, { recursive: true });
+    await fs.symlink(realDir, linkDir);
+    const linkedStorePath = path.join(linkDir, "sessions.json");
+    const sessionId = "77777777-7777-4777-8777-777777777777";
+    const staleTranscript = path.join(linkDir, "88888888-8888-4888-8888-888888888888.jsonl");
+    const canonicalTranscript = path.join(linkDir, `${sessionId}.jsonl`);
+    await fs.writeFile(
+      linkedStorePath,
+      JSON.stringify(
+        {
+          "agent:main:cron:job:run:fresh": {
+            sessionId,
+            updatedAt: Date.now(),
+            sessionFile: staleTranscript,
+          },
+        } satisfies Record<string, SessionEntry>,
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    await fs.writeFile(
+      canonicalTranscript,
+      `{"type":"session","id":"${sessionId}","cwd":"/tmp"}\n{"type":"message","message":{"role":"user","content":"still valid"}}\n`,
+      "utf-8",
+    );
+
+    const applied = await runSessionsCleanup({
+      cfg: {},
+      opts: { store: linkedStorePath, enforce: true, fixMissing: true },
+      targets: [{ agentId: "main", storePath: linkedStorePath }],
+    });
+
+    expect(applied.appliedSummaries[0]?.repaired).toBe(1);
+    expect(applied.appliedSummaries[0]?.missing).toBe(0);
+    const persisted = loadSessionStore(linkedStorePath, { skipCache: true });
+    expect(persisted["agent:main:cron:job:run:fresh"]?.sessionFile).toBe(
+      await fs.realpath(canonicalTranscript),
+    );
+  });
+
   it("sessions cleanup repairs stale generated sessionFile metadata before pruning", async () => {
     applyEnforcedMaintenanceConfig(mockLoadConfig);
 
