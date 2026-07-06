@@ -267,6 +267,7 @@ export type SessionTranscriptRuntimeTarget = {
 export type SessionTranscriptTurnPersistOptions = {
   config?: OpenClawConfig;
   cwd?: string;
+  expectedLifecycleRevision?: string;
   expectedSessionId?: string;
   messages: readonly SessionTranscriptTurnMessageAppend[];
   updateMode?: "inline" | "file-only" | "none";

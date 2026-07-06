@@ -363,6 +363,8 @@ export type SessionTranscriptTurnPersistOptions = {
    * write as the transcript append and metadata touch.
    */
   expectedSessionId?: string;
+  /** Rejects the turn when lifecycle ownership changed without rotating the session id. */
+  expectedLifecycleRevision?: string;
   /** Message rows to append under one transcript write lock. */
   messages: readonly SessionTranscriptTurnMessageAppend[];
   /** Controls whether the update event includes the last appended message. */
@@ -2606,6 +2608,7 @@ async function persistExpectedSessionTranscriptTurn(
         {
           config: options.config,
           cwd: options.cwd,
+          expectedLifecycleRevision: options.expectedLifecycleRevision,
           expectedSessionId,
           messages: options.messages,
           sessionFile: target.sessionFile,

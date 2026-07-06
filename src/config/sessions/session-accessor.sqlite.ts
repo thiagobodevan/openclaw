@@ -1477,6 +1477,7 @@ export async function appendSqliteExpectedSessionTranscriptTurn(
   options: {
     config?: import("../types.openclaw.js").OpenClawConfig;
     cwd?: string;
+    expectedLifecycleRevision?: string;
     expectedSessionId: string;
     messages: readonly SessionTranscriptTurnMessageAppend[];
     sessionFile: string;
@@ -1490,7 +1491,12 @@ export async function appendSqliteExpectedSessionTranscriptTurn(
   return await runExclusiveSqliteSessionWrite(resolved, async () => {
     return await runOpenClawAgentWriteTransactionAsync(async (transactionDb) => {
       const fresh = readSessionEntryRow(transactionDb, resolved.sessionKey);
-      if (!fresh || fresh.entry.sessionId !== options.expectedSessionId) {
+      if (
+        !fresh ||
+        fresh.entry.sessionId !== options.expectedSessionId ||
+        (options.expectedLifecycleRevision !== undefined &&
+          fresh.entry.lifecycleRevision !== options.expectedLifecycleRevision)
+      ) {
         return {
           appendedMessages: [],
           rejectedReason: "session-rebound",

@@ -1728,6 +1728,53 @@ describe("session accessor seam", () => {
     await expect(loadTranscriptEvents(scope)).resolves.toEqual([]);
   });
 
+  it("rejects expected-session transcript turns after lifecycle ownership changes", async () => {
+    const scope = {
+      agentId: "main",
+      sessionId: "session-original",
+      sessionKey: "agent:main:main",
+      storePath,
+    };
+    await upsertSessionEntry(scope, {
+      lifecycleRevision: "original-revision",
+      sessionId: scope.sessionId,
+      updatedAt: 10,
+    });
+    await updateSessionEntry(
+      {
+        sessionKey: scope.sessionKey,
+        storePath,
+      },
+      () => ({
+        lifecycleRevision: "replacement-revision",
+      }),
+      { skipMaintenance: true },
+    );
+
+    const result = await persistSessionTranscriptTurn(scope, {
+      expectedLifecycleRevision: "original-revision",
+      expectedSessionId: scope.sessionId,
+      messages: [
+        {
+          message: {
+            role: "assistant",
+            content: "late reply",
+            timestamp: 100,
+          },
+        },
+      ],
+      publishWhen: "always",
+      touchSessionEntry: true,
+      updateMode: "file-only",
+    });
+
+    expect(result).toMatchObject({
+      appendedCount: 0,
+      rejectedReason: "session-rebound",
+    });
+    await expect(loadTranscriptEvents(scope)).resolves.toEqual([]);
+  });
+
   it("routes SQLite transcript turn appends through an active owned file lock", async () => {
     const scope = {
       agentId: "main",
