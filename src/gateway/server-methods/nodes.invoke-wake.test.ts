@@ -751,7 +751,7 @@ describe("node.invoke APNs wake path", () => {
       deviceFamily: "Mac",
     };
     const nodeRegistry = {
-      get: vi.fn(() => nodeSession),
+      get: vi.fn((_nodeId: string) => nodeSession),
       invoke: vi.fn().mockResolvedValue({
         ok: false,
         error: {
