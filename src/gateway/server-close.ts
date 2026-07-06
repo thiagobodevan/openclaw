@@ -30,7 +30,7 @@ import {
   type ChatRunEntry,
   type ChatRunState,
 } from "./server-chat-state.js";
-import type { GatewayPostReadySidecarHandle } from "./server-startup-post-attach.js";
+import type { GatewayPostReadySidecarHandle } from "./server-startup-types.js";
 
 const shutdownLog = createSubsystemLogger("gateway/shutdown");
 const GATEWAY_SHUTDOWN_HOOK_TIMEOUT_MS = 5_000;
