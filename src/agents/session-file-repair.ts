@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isImageLabeledBlock } from "@openclaw/ai/internal/shared";
 import { sanitizeInlineImageBase64 } from "@openclaw/media-core/inline-image-data-url";
 import { replaceFileAtomic } from "../infra/replace-file.js";
 import type { AgentMessage } from "./runtime/index.js";
@@ -236,7 +237,7 @@ function containsNonAscii(value: string): boolean {
 }
 
 function isCorruptedImageContentBlock(block: unknown): boolean {
-  if (!block || typeof block !== "object" || Array.isArray(block)) {
+  if (!isImageLabeledBlock(block) || Array.isArray(block)) {
     return false;
   }
   const record = block as {
@@ -246,7 +247,7 @@ function isCorruptedImageContentBlock(block: unknown): boolean {
     mediaType?: unknown;
     media_type?: unknown;
   };
-  if (record.type !== "image" || typeof record.data !== "string") {
+  if (typeof record.data !== "string") {
     return false;
   }
   const mimeType = [record.mimeType, record.mediaType, record.media_type].find(isImageMimeType);

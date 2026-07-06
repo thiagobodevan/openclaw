@@ -3,6 +3,7 @@
  *
  * Downscales and recompresses oversized base64 image blocks before provider replay.
  */
+import { isCanonicalImageBlock, isImageLabeledBlock } from "@openclaw/ai/internal/shared";
 import { canonicalizeBase64 } from "@openclaw/media-core/base64";
 import { resolveIntegerOption } from "@openclaw/normalization-core/number-coercion";
 import { toErrorObject } from "../infra/errors.js";
@@ -35,17 +36,14 @@ const MAX_IMAGE_DIMENSION_PX = DEFAULT_IMAGE_MAX_DIMENSION_PX;
 const MAX_IMAGE_BYTES = DEFAULT_IMAGE_MAX_BYTES;
 const log = createSubsystemLogger("agents/tool-images");
 
+// Thin typed adapters over the shared media-block vocabulary in
+// @openclaw/ai — classification logic must stay single-sourced there.
 function isImageTypeBlock(block: unknown): block is Record<string, unknown> & { type: "image" } {
-  return (
-    Boolean(block) && typeof block === "object" && (block as { type?: unknown }).type === "image"
-  );
+  return isImageLabeledBlock(block);
 }
 
 function isImageBlock(block: unknown): block is ImageContentBlock {
-  if (!isImageTypeBlock(block)) {
-    return false;
-  }
-  return typeof block.data === "string" && typeof block.mimeType === "string";
+  return isCanonicalImageBlock(block);
 }
 
 function isTextBlock(block: unknown): block is TextContentBlock {

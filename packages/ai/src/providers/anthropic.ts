@@ -81,12 +81,12 @@ import {
 import { resolveCacheRetention } from "./cache-retention.js";
 import { resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
+import { hasInlineMediaData } from "./media-blocks.js";
 import { adjustMaxTokensForThinking, buildBaseOptions } from "./simple-options.js";
 import {
   describeToolResultMediaPlaceholder,
   extractToolResultBlockText,
   extractToolResultText,
-  hasInlineMediaData,
 } from "./tool-result-text.js";
 import { transformMessages } from "./transform-messages.js";
 

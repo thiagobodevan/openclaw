@@ -49,6 +49,7 @@ import {
 import { resolveCacheRetention } from "./cache-retention.js";
 import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
+import { hasInlineMediaData } from "./media-blocks.js";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.js";
 import { mapOpenAIStopReason } from "./openai-stop-reason.js";
 import {
@@ -58,11 +59,7 @@ import {
   type OpenAIToolProjection,
 } from "./openai-tool-projection.js";
 import { buildBaseOptions } from "./simple-options.js";
-import {
-  describeToolResultMediaPlaceholder,
-  extractToolResultText,
-  hasInlineMediaData,
-} from "./tool-result-text.js";
+import { describeToolResultMediaPlaceholder, extractToolResultText } from "./tool-result-text.js";
 import { transformMessages } from "./transform-messages.js";
 
 /**

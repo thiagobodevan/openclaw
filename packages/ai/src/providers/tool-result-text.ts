@@ -2,109 +2,22 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { getAiTransportHost } from "../host.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import {
+  AUDIO_TOOL_RESULT_TYPES,
+  hasMediaPayload,
+  IMAGE_TOOL_RESULT_TYPES,
+  MEDIA_ONLY_TOOL_RESULT_TYPES,
+  readMediaMimeType as readMimeType,
+} from "./media-blocks.js";
 
 const PROVIDER_TOOL_RESULT_MAX_CHARS = 8000;
-const IMAGE_TOOL_RESULT_TYPES = new Set(["image", "image_url", "input_image"]);
-const AUDIO_TOOL_RESULT_TYPES = new Set(["audio", "input_audio", "output_audio"]);
-const MEDIA_ONLY_TOOL_RESULT_TYPES = new Set([
-  ...IMAGE_TOOL_RESULT_TYPES,
-  ...AUDIO_TOOL_RESULT_TYPES,
-]);
 const INLINE_DATA_URI_PATTERN =
   /(^|[^A-Za-z0-9_])data:([a-z][a-z0-9.+-]*\/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[^,;"'\s]+|;base64)*,[^\s"'<>)]+)/gi;
-const MIME_KEY_CANDIDATES = [
-  "mimeType",
-  "mime_type",
-  "mediaType",
-  "media_type",
-  "contentType",
-  "content_type",
-];
 const TEXTUAL_MIME_PATTERN =
   /^(?:text\/|application\/(?:json|ld\+json|x-ndjson|xml|javascript|x-www-form-urlencoded)|[^/]+\/[^+]+\+(?:json|xml)$)/i;
 const OPAQUE_OR_BINARY_FIELD_RE = /^(?:blob|buffer|bytes|encrypted_content|encrypted_stdout)$/i;
 const MISSING_IMAGE_PAYLOAD_TEXT = "[image omitted: missing payload]";
 const MISSING_AUDIO_PAYLOAD_TEXT = "[audio omitted: missing payload]";
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-/**
- * True when a media-shaped block carries a payload in one of the canonical or
- * provider wire shapes:
- * - `data` — canonical inline base64 (ImageContent/audio blocks)
- * - `image_url` string, or `image_url.url` (OpenAI chat completions)
- * - `file_id` — file reference (OpenAI Responses)
- * - `source.data` / `source.url` (Anthropic)
- * - `input_audio.data` / `audio.data`, or string-valued `input_audio` /
- *   `audio` / `audio_url` (OpenAI-style audio)
- * - `url` — by-reference media
- *
- * This is deliberately broader than {@link hasInlineMediaData}: it decides
- * husk vs genuine media, not renderability. A genuine non-canonical block is
- * excluded from replay text (never stringified — nested payloads must not
- * leak) even though converters cannot inline it.
- */
-function hasMediaPayload(block: unknown): boolean {
-  if (!isRecord(block)) {
-    return false;
-  }
-  if (
-    isNonEmptyString(block.data) ||
-    isNonEmptyString(block.url) ||
-    isNonEmptyString(block.file_id) ||
-    isNonEmptyString(block.audio_url)
-  ) {
-    return true;
-  }
-  const imageUrl = block.image_url;
-  if (isNonEmptyString(imageUrl) || (isRecord(imageUrl) && isNonEmptyString(imageUrl.url))) {
-    return true;
-  }
-  const source = block.source;
-  if (isRecord(source) && (isNonEmptyString(source.data) || isNonEmptyString(source.url))) {
-    return true;
-  }
-  const inputAudio = block.input_audio;
-  if (isNonEmptyString(inputAudio) || (isRecord(inputAudio) && isNonEmptyString(inputAudio.data))) {
-    return true;
-  }
-  const audio = block.audio;
-  if (isNonEmptyString(audio) || (isRecord(audio) && isNonEmptyString(audio.data))) {
-    return true;
-  }
-  return false;
-}
-
-/**
- * True when a canonical media block carries inline base64 `data` that provider
- * converters can embed directly (Anthropic `source`, data-URI `image_url`,
- * Gemini `inlineData`). Converters must not emit a native media part from a
- * block that fails this check — an empty payload produces an invalid part the
- * provider API rejects.
- *
- * Narrower than {@link hasMediaPayload} on purpose: a genuine wire-shaped
- * block (e.g. Anthropic `source.data`) is not inlinable by the canonical
- * converters, so it is excluded from text and skipped at emission rather than
- * emitted as an invalid part with an empty top-level payload.
- */
-export function hasInlineMediaData(block: unknown): boolean {
-  return isRecord(block) && isNonEmptyString(block.data);
-}
-
-function readMimeType(value: unknown): string | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  for (const key of MIME_KEY_CANDIDATES) {
-    const mimeType = value[key];
-    if (typeof mimeType === "string" && mimeType.trim().length > 0) {
-      return mimeType;
-    }
-  }
-  return undefined;
-}
 
 function isBinaryMimeType(mimeType: string): boolean {
   const normalized = mimeType.split(";", 1)[0]?.trim().toLowerCase();
