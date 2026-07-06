@@ -236,13 +236,10 @@ describe("createDiscordGatewayPlugin", () => {
         new HttpsProxyAgent(proxyUrl) as unknown as import("node:http").Agent,
       webSocketCtor: function WebSocketCtor(
         url: string,
-        options?: { agent?: unknown; handshakeTimeout?: number },
+        options?: { agent?: unknown; handshakeTimeout?: number; maxPayload?: number },
       ) {
         webSocketSpy(url, options);
-      } as unknown as new (
-        url: string,
-        options?: { agent?: unknown; handshakeTimeout?: number },
-      ) => import("ws").WebSocket,
+      } as unknown as typeof import("ws").WebSocket,
       registerClient: async (_plugin: unknown, client: unknown) => {
         baseRegisterClientSpy(client);
       },
