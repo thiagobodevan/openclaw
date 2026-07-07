@@ -253,10 +253,12 @@ controlled by each app's `destructive_enabled` policy.
 Each configured plugin can pass exact Codex per-app tool keys through to its
 owned apps:
 
-```json5
-tools: {
-  "slack.slack_read_channel": { enabled: true },
-  "slack.slack_send_message": { enabled: false },
+```json
+{
+  "tools": {
+    "slack.slack_read_channel": { "enabled": true },
+    "slack.slack_send_message": { "enabled": false }
+  }
 }
 ```
 
