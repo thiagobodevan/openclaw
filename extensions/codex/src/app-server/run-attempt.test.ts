@@ -2246,14 +2246,16 @@ describe("runCodexAppServerAttempt", () => {
     expect(turnStartParams?.input).toEqual([
       { type: "text", text: "queued context\n\nhello\n\ntail context", text_elements: [] },
     ]);
-    expect(JSON.stringify(turnStartParams)).not.toContain("previous turn");
+    const serializedTurnStartParams = JSON.stringify(turnStartParams);
+    expect(serializedTurnStartParams).not.toContain("previous turn");
     const [llmInputPayload] = mockCall(llmInput, "llm_input") as [
       { historyMessages?: unknown[]; prompt?: string },
       unknown,
     ];
     expect(llmInputPayload.prompt).toBe("queued context\n\nhello\n\ntail context");
     expect(llmInputPayload.historyMessages).toEqual([]);
-    expect(JSON.stringify(llmInputPayload)).not.toContain("previous turn");
+    const serializedLlmInputPayload = JSON.stringify(llmInputPayload);
+    expect(serializedLlmInputPayload).not.toContain("previous turn");
   });
 
   it("projects bounded continuity when starting Codex without a native thread binding", async () => {
