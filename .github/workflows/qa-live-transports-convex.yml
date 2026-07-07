@@ -429,8 +429,8 @@ jobs:
 
       - name: Validate required QA credential env
         env:
-          MATRIX_PROVIDER_MODE: ${{ inputs.expected_sha != '' && inputs.matrix_provider_mode || 'live-frontier' }}
-          OPENAI_API_KEY: ${{ (inputs.expected_sha == '' || inputs.matrix_provider_mode == 'live-frontier') && secrets.OPENAI_API_KEY || '' }}
+          MATRIX_PROVIDER_MODE: ${{ inputs.expected_sha != '' && inputs.matrix_provider_mode || github.event_name == 'workflow_dispatch' && 'mock-openai' || 'live-frontier' }}
+          OPENAI_API_KEY: ${{ (inputs.expected_sha != '' && inputs.matrix_provider_mode == 'live-frontier' || inputs.expected_sha == '' && github.event_name != 'workflow_dispatch') && secrets.OPENAI_API_KEY || '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -449,12 +449,12 @@ jobs:
         id: run_lane
         shell: bash
         env:
-          OPENAI_API_KEY: ${{ (inputs.expected_sha == '' || inputs.matrix_provider_mode == 'live-frontier') && secrets.OPENAI_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ (inputs.expected_sha != '' && inputs.matrix_provider_mode == 'live-frontier' || inputs.expected_sha == '' && github.event_name != 'workflow_dispatch') && secrets.OPENAI_API_KEY || '' }}
           INPUT_MATRIX_PROFILE: ${{ inputs.expected_sha != '' && inputs.matrix_profile || github.event_name == 'workflow_dispatch' && inputs.matrix_profile || 'release' }}
-          MATRIX_ALTERNATE_MODEL: ${{ inputs.expected_sha != '' && inputs.matrix_alternate_model || env.OPENCLAW_CI_OPENAI_FALLBACK_MODEL }}
+          MATRIX_ALTERNATE_MODEL: ${{ inputs.expected_sha != '' && inputs.matrix_alternate_model || github.event_name == 'workflow_dispatch' && 'mock-openai/gpt-5.5-alt' || env.OPENCLAW_CI_OPENAI_FALLBACK_MODEL }}
           MATRIX_ATTEMPTS: ${{ inputs.expected_sha != '' && inputs.matrix_attempts || 1 }}
-          MATRIX_PRIMARY_MODEL: ${{ inputs.expected_sha != '' && inputs.matrix_primary_model || env.OPENCLAW_CI_OPENAI_MODEL }}
-          MATRIX_PROVIDER_MODE: ${{ inputs.expected_sha != '' && inputs.matrix_provider_mode || 'live-frontier' }}
+          MATRIX_PRIMARY_MODEL: ${{ inputs.expected_sha != '' && inputs.matrix_primary_model || github.event_name == 'workflow_dispatch' && 'mock-openai/gpt-5.5' || env.OPENCLAW_CI_OPENAI_MODEL }}
+          MATRIX_PROVIDER_MODE: ${{ inputs.expected_sha != '' && inputs.matrix_provider_mode || github.event_name == 'workflow_dispatch' && 'mock-openai' || 'live-frontier' }}
           OPENCLAW_QA_REDACT_PUBLIC_METADATA: "1"
         run: |
           set -euo pipefail

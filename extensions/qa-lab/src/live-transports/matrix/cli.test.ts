@@ -82,6 +82,7 @@ describe("QA Lab Matrix CLI registration", () => {
     expect(runQaMatrixCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         profile: "release",
+        providerMode: "mock-openai",
         scenarioIds: ["matrix-allowlist-hot-reload"],
       }),
     );

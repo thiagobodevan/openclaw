@@ -61,7 +61,7 @@ Repeat `--scenario <id>` to bypass profile selection and run only named canonica
 
 - `--profile <profile>`: select `all`, `fast`, `release`, or `transport`; default `all`.
 - `--scenario <id>`: run a named scenario; repeatable and takes precedence over the profile.
-- `--provider-mode <mode>`: choose the QA Lab provider mode.
+- `--provider-mode <mode>`: choose the QA Lab provider mode; defaults to `mock-openai` so the comprehensive profile can include deterministic streaming and image scenarios.
 - `--model <ref>` and `--alt-model <ref>`: select primary and alternate models.
 - `--fast`: enable provider fast mode where supported.
 - `--allow-failures`: write evidence without returning a failing exit code for scenario failures.
@@ -89,7 +89,7 @@ Matrix transport logs and lifecycle evidence referenced by the suite are stored 
 
 ## Workflow use
 
-`QA-Lab - All Lanes` and `OpenClaw Release Checks` call the focused selector through the reusable QA Live workflow. Scheduled and release gates use `--profile release`; manual dispatch can select `all`, `fast`, `release`, or `transport` without creating a separate execution path.
+`QA-Lab - All Lanes` and `OpenClaw Release Checks` call the focused selector through the reusable QA Live workflow. Scheduled live-provider and release gates use `--profile release`; manual dispatch defaults to the comprehensive `all` profile with `mock-openai`. It can select `all`, `fast`, `release`, or `transport` without creating a separate execution path.
 
 ## Related
 
