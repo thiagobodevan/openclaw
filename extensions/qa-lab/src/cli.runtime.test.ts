@@ -660,6 +660,7 @@ describe("qa cli runtime", () => {
       primaryModel: "openai/gpt-5.5",
       alternateModel: "anthropic/claude-sonnet-4-6",
       fastMode: true,
+      failFast: true,
       thinking: "medium",
       scenarioIds: ["approval-turn-tool-followthrough"],
     });
@@ -674,6 +675,7 @@ describe("qa cli runtime", () => {
       primaryModel: "openai/gpt-5.5",
       alternateModel: "anthropic/claude-sonnet-4-6",
       fastMode: true,
+      failFast: true,
       thinkingDefault: "medium",
       scenarioIds: ["approval-turn-tool-followthrough"],
     });

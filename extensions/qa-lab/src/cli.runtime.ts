@@ -1035,6 +1035,7 @@ export async function runQaSuiteCommand(opts: QaSuiteCommandOptions) {
       primaryModel,
       alternateModel,
       fastMode: opts.fastMode,
+      failFast: opts.failFast,
       ...(thinkingDefault ? { thinkingDefault } : {}),
       ...(claudeCliAuthMode ? { claudeCliAuthMode } : {}),
       scenarioIds: liveChannelId ? liveScenarioIds : scenarioIds,
