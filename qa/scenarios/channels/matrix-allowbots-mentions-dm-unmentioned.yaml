@@ -8,15 +8,15 @@ scenario:
   objective: "Preserve the retired qa-matrix behavior: Matrix allowBots=mentions accepts unmentioned
     configured bot DMs."
   successCriteria:
-    - The QA Lab Matrix adapter completes matrix-allowbots-mentions-dm-unmentioned with the original
+    - The QA Lab flow completes matrix-allowbots-mentions-dm-unmentioned through the Matrix adapter with the original
       Matrix-specific assertions.
   docsRefs:
     - docs/channels/matrix.md
     - docs/concepts/qa-e2e-automation.md
   codeRefs:
-    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/matrix-scenario.fixture.ts
   execution:
-    kind: transport
+    kind: flow
     channel: matrix
     summary: Matrix allowBots=mentions accepts unmentioned configured bot DMs
     timeoutMs: 45000
@@ -36,3 +36,16 @@ scenario:
               - observer
               - sut
             name: Matrix QA Observer/SUT Bot DM
+
+flow:
+  steps:
+    - name: Matrix allowBots=mentions accepts unmentioned configured bot DMs
+      actions:
+        - set: matrixFixtures
+          value:
+            expr: "await qaImport('./matrix-scenario.fixture.js')"
+        - call: matrixFixtures.runAllowBotsMentionsDmUnmentionedScenario
+          args:
+            - expr: "await transport.fixtureApi.getContext()"
+          saveAs: result
+      detailsExpr: "result.details ?? (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)"

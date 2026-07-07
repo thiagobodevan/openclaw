@@ -6,6 +6,7 @@ import {
   MATRIX_QA_E2EE_SMOKE_SCENARIO_IDS,
   MATRIX_QA_FAST_SCENARIO_IDS,
   MATRIX_QA_MEDIA_SCENARIO_IDS,
+  MATRIX_QA_RELEASE_SCENARIO_IDS,
   MATRIX_QA_TRANSPORT_SCENARIO_IDS,
   resolveMatrixQaScenarioIds,
 } from "./profiles.js";
@@ -14,6 +15,10 @@ describe("QA Lab Matrix profiles", () => {
   it("preserves the legacy profile sizes and default selection", () => {
     expect(MATRIX_QA_ALL_SCENARIO_IDS).toHaveLength(92);
     expect(MATRIX_QA_FAST_SCENARIO_IDS).toHaveLength(11);
+    expect(MATRIX_QA_RELEASE_SCENARIO_IDS).toEqual([
+      "channel-chat-baseline",
+      "matrix-allowlist-hot-reload",
+    ]);
     expect(MATRIX_QA_TRANSPORT_SCENARIO_IDS).toHaveLength(50);
     expect(MATRIX_QA_MEDIA_SCENARIO_IDS).toHaveLength(7);
     expect(MATRIX_QA_E2EE_SMOKE_SCENARIO_IDS).toHaveLength(8);
@@ -26,6 +31,7 @@ describe("QA Lab Matrix profiles", () => {
     for (const profile of [
       MATRIX_QA_ALL_SCENARIO_IDS,
       MATRIX_QA_FAST_SCENARIO_IDS,
+      MATRIX_QA_RELEASE_SCENARIO_IDS,
       MATRIX_QA_TRANSPORT_SCENARIO_IDS,
       MATRIX_QA_MEDIA_SCENARIO_IDS,
       MATRIX_QA_E2EE_SMOKE_SCENARIO_IDS,

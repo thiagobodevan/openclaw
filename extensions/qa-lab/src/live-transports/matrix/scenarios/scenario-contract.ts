@@ -6,12 +6,6 @@ import {
 
 export type MatrixQaE2eeScenarioId = `matrix-e2ee-${string}`;
 
-export type MatrixQaScenarioDefinition = {
-  id: string;
-  timeoutMs: number;
-  title: string;
-};
-
 export const MATRIX_QA_BLOCK_ROOM_KEY = "block";
 export const MATRIX_QA_BOT_DM_ROOM_KEY = "bot-dm";
 export const MATRIX_QA_DRIVER_DM_ROOM_KEY = "driver-dm";

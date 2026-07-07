@@ -99,14 +99,14 @@ function selectQaFlowSuiteScenarios(params: {
       (scenarioId) => scenarioById.get(scenarioId)!,
     );
     const unsupportedScenarios = selectedScenarios.filter(
-      (scenario) => scenario.execution.kind !== "flow" && scenario.execution.kind !== "transport",
+      (scenario) => scenario.execution.kind !== "flow",
     );
     if (unsupportedScenarios.length > 0) {
       const scenarioList = unsupportedScenarios
         .map((scenario) => `${scenario.id} (${scenario.execution.kind})`)
         .join(", ");
       throw new Error(
-        `suite execution requires flow or transport scenarios; unsupported scenario(s): ${scenarioList}`,
+        `suite execution requires flow scenarios; unsupported scenario(s): ${scenarioList}`,
       );
     }
     const channelDriverMismatches = selectedScenarios.flatMap((scenario) => {
@@ -128,7 +128,7 @@ function selectQaFlowSuiteScenarios(params: {
   }
   return params.scenarios.filter(
     (scenario) =>
-      (scenario.execution.kind === "flow" || scenario.execution.kind === "transport") &&
+      scenario.execution.kind === "flow" &&
       scenarioMatchesQaProviderLane({
         scenario,
         providerMode: params.providerMode,
@@ -306,17 +306,13 @@ function shouldUseIsolatedQaSuiteScenarioWorkers(params: {
       params.scenarios.some(
         (scenario) =>
           isQaMergePatchObject(scenario.gatewayConfigPatch) ||
-          (scenario.execution.kind === "transport" &&
-            scenario.execution.providerMode !== undefined) ||
+          (scenario.execution.kind === "flow" && scenario.execution.providerMode !== undefined) ||
           (scenario.execution.kind === "flow" && scenario.execution.transportPolicy !== undefined),
       ))
   );
 }
 
 function scenarioRequiresIsolatedQaSuiteWorker(scenario: QaSeedScenario) {
-  if (scenario.execution.kind === "transport") {
-    return false;
-  }
   if (scenario.execution.kind !== "flow") {
     return false;
   }

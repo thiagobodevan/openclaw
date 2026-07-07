@@ -23,7 +23,7 @@ describe("live transport QA contributions", () => {
     listQaRunnerCliContributions.mockReturnValue([]);
   });
 
-  it("discovers all four canonical live adapter factories without changing CLI ownership", () => {
+  it("discovers all four shared live adapter factories without changing CLI ownership", () => {
     expect(listLiveTransportQaAdapterFactories().map((factory) => factory.id)).toEqual([
       "telegram",
       "matrix",

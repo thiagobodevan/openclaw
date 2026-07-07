@@ -79,17 +79,10 @@ const qaFlowScenarioExecutionSchema = z.object({
   suiteIsolation: z.literal("isolated").optional(),
   isolationReason: z.string().trim().min(1).optional(),
   transportPolicy: qaScenarioTransportPolicySchema.optional(),
-  config: qaScenarioConfigSchema.optional(),
-});
-
-const qaTransportScenarioExecutionSchema = z.object({
-  kind: z.literal("transport"),
-  summary: z.string().trim().min(1).optional(),
-  channel: qaScenarioChannelSchema,
   providerMode: z.enum(["aimock", "live-frontier", "mock-openai"]).optional(),
   config: qaScenarioConfigSchema.optional(),
-  timeoutMs: z.number().int().positive(),
-  retryCount: z.number().int().min(0).max(1).default(0),
+  timeoutMs: z.number().int().positive().optional(),
+  retryCount: z.number().int().min(0).max(1).optional(),
 });
 
 const qaTestFileScenarioExecutionBaseSchema = z.object({
@@ -112,7 +105,6 @@ const qaTestFileScenarioExecutionSchema = z.discriminatedUnion("kind", [
 
 const qaScenarioExecutionSchema = z.union([
   qaFlowScenarioExecutionSchema,
-  qaTransportScenarioExecutionSchema,
   qaTestFileScenarioExecutionSchema,
 ]);
 

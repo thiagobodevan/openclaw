@@ -5,18 +5,19 @@ scenario:
   coverage:
     primary:
       - channels.access-and-identity
-  objective: "Preserve the retired qa-matrix behavior: Matrix E2EE bootstrap verifies the owner device
+  objective:
+    "Preserve the retired qa-matrix behavior: Matrix E2EE bootstrap verifies the owner device
     and backup."
   successCriteria:
-    - The QA Lab Matrix adapter completes matrix-e2ee-bootstrap-success with the original
+    - The QA Lab flow completes matrix-e2ee-bootstrap-success through the Matrix adapter with the original
       Matrix-specific assertions.
   docsRefs:
     - docs/channels/matrix.md
     - docs/concepts/qa-e2e-automation.md
   codeRefs:
-    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/matrix-scenario.fixture.ts
   execution:
-    kind: transport
+    kind: flow
     channel: matrix
     summary: Matrix E2EE bootstrap verifies the owner device and backup
     timeoutMs: 90000
@@ -38,3 +39,16 @@ scenario:
               - sut
             name: Matrix QA E2EE Bootstrap Success Room
             requireMention: true
+
+flow:
+  steps:
+    - name: Matrix E2EE bootstrap verifies the owner device and backup
+      actions:
+        - set: matrixFixtures
+          value:
+            expr: "await qaImport('./matrix-scenario.fixture.js')"
+        - call: matrixFixtures.runMatrixQaE2eeBootstrapSuccessScenario
+          args:
+            - expr: "await transport.fixtureApi.getContext()"
+          saveAs: result
+      detailsExpr: "result.details ?? (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)"

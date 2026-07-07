@@ -36,7 +36,7 @@ type QaRunnerMessageRecorder = {
   editMessage: (input: QaBusEditMessageInput) => QaBusMessage | Promise<QaBusMessage>;
 };
 
-type QaRunnerTransportScenarioInput = {
+type QaRunnerTransportFlowPreparationInput = {
   config: Record<string, unknown>;
   gateway: {
     baseUrl: string;
@@ -54,13 +54,7 @@ type QaRunnerTransportScenarioInput = {
     ) => Promise<void>;
   };
   outputDir: string;
-  scenarioId: string;
   timeoutMs: number;
-};
-
-type QaRunnerTransportScenarioResult = {
-  artifacts?: Record<string, unknown>;
-  details?: string;
 };
 
 type QaRunnerTransportAdapterDefinition = {
@@ -108,9 +102,10 @@ type QaRunnerTransportAdapterDefinition = {
     replyTo: string;
   };
   createRuntimeEnvPatch?: () => NodeJS.ProcessEnv;
-  scenarioRetryCount?: 0 | 1;
-  scenarioTimeoutOwner?: "adapter" | "suite";
-  runScenario?: (input: QaRunnerTransportScenarioInput) => Promise<QaRunnerTransportScenarioResult>;
+  prepareFlow?: (input: QaRunnerTransportFlowPreparationInput) => Promise<void>;
+  // Expose transport-specific primitives to QA Lab fixtures without moving
+  // scenario selection, sequencing, retries, or assertions into the adapter.
+  fixtureApi?: object;
   handleAction: (params: {
     action: "delete" | "edit" | "react" | "thread-create";
     args: Record<string, unknown>;

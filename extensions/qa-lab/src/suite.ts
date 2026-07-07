@@ -426,11 +426,12 @@ async function runScenario(name: string, steps: QaSuiteStep[]): Promise<QaSuiteS
 function createScenarioFlowApi(
   env: QaSuiteEnvironment,
   scenario: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"][number],
+  runScenarioWithSteps: typeof runScenario = runScenario,
 ) {
   return createQaSuiteScenarioFlowApi({
     env,
     scenario,
-    runScenario,
+    runScenario: runScenarioWithSteps,
     splitModelRef,
     formatErrorMessage,
     liveTurnTimeoutMs,
@@ -443,56 +444,40 @@ function createScenarioFlowApi(
   });
 }
 
+function createScenarioStepRunner(
+  env: QaSuiteEnvironment,
+  scenario: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"][number],
+): typeof runScenario {
+  const prepareFlow = env.transport.prepareFlow;
+  const execution = scenario.execution;
+  if (!prepareFlow || execution.kind !== "flow") {
+    return runScenario;
+  }
+  return async (name, steps) =>
+    await runScenario(name, [
+      {
+        name: `Prepare ${env.transport.label}`,
+        run: async () => {
+          await prepareFlow({
+            config: execution.config ?? {},
+            gateway: env.gateway,
+            outputDir: env.outputDir,
+            timeoutMs: execution.timeoutMs ?? liveTurnTimeoutMs(env, 60_000),
+          });
+        },
+      },
+      ...steps,
+    ]);
+}
+
 async function runScenarioDefinition(
   env: QaSuiteEnvironment,
   scenario: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"][number],
 ) {
-  if (scenario.execution.kind === "transport") {
-    const execution = scenario.execution;
-    const runTransportScenario = env.transport.runScenario;
-    if (!runTransportScenario) {
-      throw new Error(`transport ${env.transport.id} cannot run scenario: ${scenario.id}`);
-    }
-    return await runScenario(scenario.title, [
-      {
-        name: execution.summary ?? scenario.title,
-        run: async () => {
-          const run = () =>
-            runTransportScenario({
-              config: execution.config ?? {},
-              gateway: env.gateway,
-              outputDir: env.outputDir,
-              scenarioId: scenario.id,
-              timeoutMs: execution.timeoutMs,
-            });
-          const result =
-            env.transport.scenarioTimeoutOwner === "adapter"
-              ? await run()
-              : await new Promise<Awaited<ReturnType<typeof runTransportScenario>>>(
-                  (resolve, reject) => {
-                    const timeout = setTimeout(
-                      () =>
-                        reject(
-                          new Error(
-                            `transport scenario ${scenario.id} timed out after ${execution.timeoutMs}ms`,
-                          ),
-                        ),
-                      execution.timeoutMs,
-                    );
-                    void run()
-                      .then(resolve, reject)
-                      .finally(() => clearTimeout(timeout));
-                  },
-                );
-          return (
-            result.details ??
-            (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)
-          );
-        },
-      },
-    ]);
+  if (scenario.execution.kind !== "flow") {
+    throw new Error(`scenario is not a flow: ${scenario.id}`);
   }
-  const api = createScenarioFlowApi(env, scenario);
+  const api = createScenarioFlowApi(env, scenario, createScenarioStepRunner(env, scenario));
   if (!scenario.execution.flow) {
     throw new Error(`scenario missing flow: ${scenario.id}`);
   }
@@ -1310,7 +1295,7 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
     claudeCliAuthMode: params?.claudeCliAuthMode,
   });
   const selectedProviderMode =
-    selectedScenarios.length === 1 && selectedScenarios[0]?.execution.kind === "transport"
+    selectedScenarios.length === 1 && selectedScenarios[0]?.execution.kind === "flow"
       ? selectedScenarios[0].execution.providerMode
       : undefined;
   const providerMode = selectedProviderMode ?? requestedProviderMode;
@@ -1833,9 +1818,7 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
 
       const runSelectedScenario = () => runScenarioDefinition(activeEnv, scenario);
       const scenarioRetryCount =
-        scenario.execution.kind === "transport"
-          ? scenario.execution.retryCount
-          : activeEnv.transport.scenarioRetryCount;
+        scenario.execution.kind === "flow" ? scenario.execution.retryCount : undefined;
       const result =
         scenarioRetryCount === 0
           ? await runSelectedScenario()
@@ -1992,6 +1975,7 @@ export const qaSuiteProgressTesting = {
   buildQaIsolatedScenarioWorkerParams,
   buildQaSuiteRuntimeMetrics,
   createQaSuiteTransportAdapter,
+  createScenarioStepRunner,
   formatQaSuiteRunStartProgress,
   buildQaRuntimeEnvPatch,
   mergeQaRuntimeEnvPatches,

@@ -90,14 +90,8 @@ describe("qa scenario catalog", () => {
       if (execution.kind === "flow") {
         throw new Error(`expected native execution scenario: ${scenario.id}`);
       }
-      if (execution.kind === "transport") {
-        expect(execution.channel).toBeTruthy();
-        expect(execution.timeoutMs).toBeGreaterThan(0);
-        expect(execution.retryCount).toBeGreaterThanOrEqual(0);
-      } else {
-        expect(["playwright", "script", "vitest"]).toContain(execution.kind);
-        expect(fs.existsSync(execution.path), `${scenario.id} execution.path exists`).toBe(true);
-      }
+      expect(["playwright", "script", "vitest"]).toContain(execution.kind);
+      expect(fs.existsSync(execution.path), `${scenario.id} execution.path exists`).toBe(true);
       expect(execution.flow).toBeUndefined();
     }
     expect(
@@ -388,15 +382,15 @@ describe("qa scenario catalog", () => {
     expect(config?.unavailableNeedles).toContain("not in my available tool surface");
   });
 
-  it("loads Matrix transport provider overrides", () => {
+  it("loads Matrix flow provider overrides", () => {
     expect(readQaScenarioById("matrix-room-block-streaming").execution).toMatchObject({
-      kind: "transport",
+      kind: "flow",
       providerMode: "mock-openai",
       retryCount: 0,
       timeoutMs: 75_000,
     });
     expect(readQaScenarioById("matrix-voice-preflight-mention").execution).toMatchObject({
-      kind: "transport",
+      kind: "flow",
       providerMode: "live-frontier",
       retryCount: 0,
       timeoutMs: 180_000,

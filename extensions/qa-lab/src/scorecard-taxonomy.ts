@@ -532,9 +532,7 @@ type ScenarioEvidenceRef = {
 };
 
 function scenarioEvidenceKind(scenario: QaSeedScenarioWithSource): QaScorecardEvidenceKind {
-  return scenario.execution.kind === "flow" || scenario.execution.kind === "transport"
-    ? "qa-scenario"
-    : scenario.execution.kind;
+  return scenario.execution.kind === "flow" ? "qa-scenario" : scenario.execution.kind;
 }
 
 function scenarioEvidencePath(scenario: QaSeedScenarioWithSource) {

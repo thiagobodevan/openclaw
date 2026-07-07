@@ -15,8 +15,8 @@ Pieces:
 
 - `extensions/qa-channel`: synthetic message channel with DM, channel, thread,
   reaction, edit, and delete surfaces.
-- `extensions/qa-lab`: debugger UI, QA bus, live transport adapters, and
-  transport-owned scenario profiles. Its Matrix adapter drives the real Matrix
+- `extensions/qa-lab`: debugger UI, QA bus, scenario profiles, and live
+  transport adapters. Its Matrix adapter drives the real Matrix
   plugin inside a child QA gateway.
 - `qa/`: repo-backed seed assets for the kickoff task and baseline QA
   scenarios.

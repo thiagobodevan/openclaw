@@ -357,11 +357,8 @@ export function createQaStateBackedTransportAdapter(
     ...(params.createRuntimeEnvPatch
       ? { createRuntimeEnvPatch: params.createRuntimeEnvPatch }
       : {}),
-    ...(params.scenarioRetryCount !== undefined
-      ? { scenarioRetryCount: params.scenarioRetryCount }
-      : {}),
-    ...(params.scenarioTimeoutOwner ? { scenarioTimeoutOwner: params.scenarioTimeoutOwner } : {}),
-    ...(params.runScenario ? { runScenario: params.runScenario } : {}),
+    ...(params.prepareFlow ? { prepareFlow: params.prepareFlow } : {}),
+    ...(params.fixtureApi ? { fixtureApi: params.fixtureApi } : {}),
     ...(params.cleanup ? { cleanup: params.cleanup } : {}),
   });
   return adapter;

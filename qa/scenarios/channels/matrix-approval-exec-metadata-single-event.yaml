@@ -5,18 +5,19 @@ scenario:
   coverage:
     primary:
       - channels.native-approval-prompts
-  objective: "Preserve the retired qa-matrix behavior: Matrix exec approval prompt carries structured
+  objective:
+    "Preserve the retired qa-matrix behavior: Matrix exec approval prompt carries structured
     metadata on one event."
   successCriteria:
-    - The QA Lab Matrix adapter completes matrix-approval-exec-metadata-single-event with the
+    - The QA Lab flow completes matrix-approval-exec-metadata-single-event through the Matrix adapter with the
       original Matrix-specific assertions.
   docsRefs:
     - docs/channels/matrix.md
     - docs/concepts/qa-e2e-automation.md
   codeRefs:
-    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/matrix-scenario.fixture.ts
   execution:
-    kind: transport
+    kind: flow
     channel: matrix
     summary: Matrix exec approval prompt carries structured metadata on one event
     timeoutMs: 75000
@@ -31,3 +32,16 @@ scenario:
         execApprovals:
           enabled: true
           target: channel
+
+flow:
+  steps:
+    - name: Matrix exec approval prompt carries structured metadata on one event
+      actions:
+        - set: matrixFixtures
+          value:
+            expr: "await qaImport('./matrix-scenario.fixture.js')"
+        - call: matrixFixtures.runApprovalExecMetadataSingleEventScenario
+          args:
+            - expr: "await transport.fixtureApi.getContext()"
+          saveAs: result
+      detailsExpr: "result.details ?? (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)"

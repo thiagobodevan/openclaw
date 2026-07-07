@@ -1,4 +1,4 @@
-// QA Lab Matrix scenarios execute transport-owned behavior through the shared suite host.
+// QA Lab Matrix fixture setup prepares transport state for the shared flow host.
 import { setTimeout as sleep } from "node:timers/promises";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -8,14 +8,15 @@ import type { MatrixQaRoomObserver } from "../substrate/client.js";
 import { buildMatrixQaConfig, type MatrixQaConfigOverrides } from "../substrate/config.js";
 import type { MatrixQaObservedEvent } from "../substrate/events.js";
 import type { MatrixQaHarness } from "../substrate/harness.runtime.js";
-import { runMatrixQaCanary, runMatrixQaScenario } from "./scenario-runtime.js";
+import { runMatrixQaCanary } from "./scenario-runtime-room.js";
+import type { MatrixQaScenarioContext } from "./scenario-runtime-shared.js";
 import type { MatrixQaCanaryArtifact } from "./scenario-types.js";
 
 type AdapterFactory = NonNullable<QaRunnerCliRegistration["adapterFactory"]>;
 type AdapterDefinition = Awaited<ReturnType<AdapterFactory["create"]>>;
-type TransportScenarioInput = Parameters<NonNullable<AdapterDefinition["runScenario"]>>[0];
+type FlowPreparationInput = Parameters<NonNullable<AdapterDefinition["prepareFlow"]>>[0];
 
-type MatrixQaScenarioExecutorParams = {
+type MatrixQaFlowFixtureEnvironmentParams = {
   accountId: string;
   harness: MatrixQaHarness;
   observedEvents: MatrixQaObservedEvent[];
@@ -36,7 +37,7 @@ function isStaleConfigPatchError(error: unknown) {
 }
 
 async function patchGatewayConfig(params: {
-  gateway: TransportScenarioInput["gateway"];
+  gateway: FlowPreparationInput["gateway"];
   patch: Record<string, unknown>;
   replacePaths?: string[];
   restartDelayMs?: number;
@@ -71,7 +72,7 @@ async function patchGatewayConfig(params: {
 
 async function waitForMatrixAccountReady(params: {
   accountId: string;
-  gateway: TransportScenarioInput["gateway"];
+  gateway: FlowPreparationInput["gateway"];
   timeoutMs: number;
 }) {
   const deadline = Date.now() + params.timeoutMs;
@@ -115,12 +116,17 @@ async function waitForMatrixAccountReady(params: {
   );
 }
 
-export function createMatrixQaScenarioExecutor(params: MatrixQaScenarioExecutorParams) {
+export type MatrixQaFlowFixtureApi = {
+  getContext: (options?: { requireCanary?: boolean }) => Promise<MatrixQaScenarioContext>;
+};
+
+export function createMatrixQaFlowFixtureEnvironment(params: MatrixQaFlowFixtureEnvironmentParams) {
   const syncState = {};
   const syncStreams: Partial<Record<"driver" | "observer", MatrixQaRoomObserver>> = {};
   let canary: MatrixQaCanaryArtifact | undefined;
+  let currentContext: MatrixQaScenarioContext | undefined;
 
-  return async (input: TransportScenarioInput) => {
+  const prepareFlow = async (input: FlowPreparationInput) => {
     const configOverrides = readMatrixConfigOverrides(input.config);
     const configSnapshot = (await input.gateway.call("config.get", {}, { timeoutMs: 60_000 })) as {
       config?: OpenClawConfig;
@@ -152,7 +158,7 @@ export function createMatrixQaScenarioExecutor(params: MatrixQaScenarioExecutorP
       timeoutMs: input.timeoutMs,
     });
 
-    const context = {
+    currentContext = {
       baseUrl: params.harness.baseUrl,
       canary,
       driverAccessToken: params.provisioning.driver.accessToken,
@@ -249,20 +255,21 @@ export function createMatrixQaScenarioExecutor(params: MatrixQaScenarioExecutorP
           gateway: input.gateway,
           timeoutMs: opts?.timeoutMs ?? input.timeoutMs,
         }),
-    };
-
-    if (!canary && input.scenarioId.startsWith("matrix-reaction-")) {
-      canary = await runMatrixQaCanary(context);
-      context.canary = canary;
-    }
-
-    const result = await runMatrixQaScenario(
-      { id: input.scenarioId, timeoutMs: input.timeoutMs, title: input.scenarioId },
-      context,
-    );
-    return {
-      artifacts: result.artifacts as Record<string, unknown>,
-      details: result.details,
-    };
+    } satisfies MatrixQaScenarioContext;
   };
+
+  const fixtureApi: MatrixQaFlowFixtureApi = {
+    async getContext(options) {
+      if (!currentContext) {
+        throw new Error("Matrix QA scenario fixture used before transport preparation");
+      }
+      if (options?.requireCanary && !canary) {
+        canary = await runMatrixQaCanary(currentContext);
+      }
+      currentContext.canary = canary;
+      return currentContext;
+    },
+  };
+
+  return { fixtureApi, prepareFlow };
 }
