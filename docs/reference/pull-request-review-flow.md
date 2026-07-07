@@ -81,9 +81,9 @@ next-step checklist for that PR.
 3. Add the requested proof, using evidence that matches the change.
 4. Resolve addressed review conversations yourself. Reply and leave a
    conversation open only when you need maintainer or reviewer judgment.
-5. Ask for a re-review only after the branch, PR description, and evidence are
-   current. A few update and review cycles between the author, maintainer, and
-   ClawSweeper are normal.
+5. Ask for a re-review only after the branch, PR description, evidence, and
+   relevant CI results are current. A few update and review cycles between the
+   author, maintainer, and ClawSweeper are normal.
 6. Keep discussion on the PR when possible. Move to `#clawtributors` on Discord
    only when the PR needs maintainer coordination, automation appears blocked,
    or the next decision is hard to settle in GitHub comments. Include the PR
