@@ -1489,13 +1489,21 @@ describe("package artifact reuse", () => {
     expect(qaWorkflow).not.toContain("github.event_name != 'workflow_call'");
     const matrixJob = workflowJob(QA_LIVE_TRANSPORTS_WORKFLOW, "run_live_matrix");
     const conditionalOpenAiSecret =
-      "${{ (inputs.expected_sha == '' || inputs.matrix_provider_mode == 'live-frontier') && secrets.OPENAI_API_KEY || '' }}";
+      "${{ (inputs.expected_sha != '' && inputs.matrix_provider_mode == 'live-frontier' || inputs.expected_sha == '' && github.event_name != 'workflow_dispatch') && secrets.OPENAI_API_KEY || '' }}";
     expect(workflowStep(matrixJob, "Validate required QA credential env").env?.OPENAI_API_KEY).toBe(
       conditionalOpenAiSecret,
     );
     expect(workflowStep(matrixJob, "Run Matrix live lane").env?.OPENAI_API_KEY).toBe(
       conditionalOpenAiSecret,
     );
+    expect(workflowStep(matrixJob, "Run Matrix live lane").env).toMatchObject({
+      MATRIX_PROVIDER_MODE:
+        "${{ inputs.expected_sha != '' && inputs.matrix_provider_mode || github.event_name == 'workflow_dispatch' && 'mock-openai' || 'live-frontier' }}",
+      MATRIX_PRIMARY_MODEL:
+        "${{ inputs.expected_sha != '' && inputs.matrix_primary_model || github.event_name == 'workflow_dispatch' && 'mock-openai/gpt-5.5' || env.OPENCLAW_CI_OPENAI_MODEL }}",
+      MATRIX_ALTERNATE_MODEL:
+        "${{ inputs.expected_sha != '' && inputs.matrix_alternate_model || github.event_name == 'workflow_dispatch' && 'mock-openai/gpt-5.5-alt' || env.OPENCLAW_CI_OPENAI_FALLBACK_MODEL }}",
+    });
     expect(qaWorkflow).toContain("continue-on-error: ${{ inputs.matrix_advisory }}");
     expect(qaWorkflow).toContain("status: ${{ steps.record_status.outputs.status }}");
     expect(qaWorkflow).not.toContain('matrix_runner="legacy"');

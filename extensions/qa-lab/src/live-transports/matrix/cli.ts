@@ -35,6 +35,7 @@ export const matrixQaCliRegistration: LiveTransportQaCliRegistration =
   createLiveTransportQaCliRegistration({
     commandName: "matrix",
     adapterFactory: matrixQaAdapterFactory,
+    defaultProviderMode: "mock-openai",
     description: "Run the Docker-backed Matrix live QA lane against a disposable homeserver",
     outputDirHelp: "Matrix QA artifact directory",
     profileHelp: "QA Lab Matrix profile: all, fast, release, or transport (default: all)",
