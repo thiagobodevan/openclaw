@@ -124,7 +124,7 @@ disabled.
 }
 ```
 
-Good worker prompts:
+Good text-worker prompts:
 
 - "Summarize this issue body into problem, impact, and acceptance criteria."
 - "Return JSON with `intent`, `risk`, and `recommended_next_step`."
