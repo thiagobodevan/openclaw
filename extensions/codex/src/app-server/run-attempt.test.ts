@@ -1226,8 +1226,12 @@ describe("runCodexAppServerAttempt", () => {
     expect(inputText).not.toContain("## OpenClaw Skills");
     expect(inputText).not.toContain("<available_skills>");
     expect(inputText).toBe("hello");
-    const [llmInputPayload] = mockCall(llmInput, "llm_input") as [{ prompt?: string }, unknown];
+    const [llmInputPayload] = mockCall(llmInput, "llm_input") as [
+      { historyMessages?: unknown[]; prompt?: string },
+      unknown,
+    ];
     expect(llmInputPayload.prompt).toBe(inputText);
+    expect(llmInputPayload.historyMessages).toEqual([]);
     const trajectoryEvents = (
       await fs.readFile(path.join(tempDir, "trajectory", "session-1.jsonl"), "utf8")
     )
@@ -2209,11 +2213,19 @@ describe("runCodexAppServerAttempt", () => {
 
     expect(beforePromptBuild).toHaveBeenCalledOnce();
     const [hookInput, hookContext] = mockCall(beforePromptBuild, "before_prompt_build") as [
-      { messages?: Array<{ role?: string }>; prompt?: string },
+      {
+        messages?: Array<{ content?: Array<{ text?: string; type?: string }>; role?: string }>;
+        prompt?: string;
+      },
       { runId?: string; sessionId?: string },
     ];
     expect(hookInput.prompt).toBe("hello");
-    expect(hookInput.messages).toEqual([]);
+    expect(hookInput.messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "previous turn" }],
+      }),
+    ]);
     expect(hookContext.runId).toBe("run-1");
     expect(hookContext.sessionId).toBe("session-1");
     const threadStart = harness.requests.find((request) => request.method === "thread/start");
@@ -2323,8 +2335,15 @@ describe("runCodexAppServerAttempt", () => {
 
   it("keeps thread-start developer instructions stable when adding fresh-thread continuity", async () => {
     let hookCalls = 0;
-    const beforePromptBuild = vi.fn(async () => {
+    type HookInputForTest = {
+      messages?: Array<{ content?: Array<{ text?: string; type?: string }>; role?: string }>;
+    };
+    const beforePromptBuild = vi.fn(async (event: unknown) => {
       hookCalls += 1;
+      (event as HookInputForTest).messages?.push({
+        role: "assistant",
+        content: [{ type: "text", text: `hook-side mutation ${hookCalls}` }],
+      });
       return {
         systemPrompt: `custom codex system ${hookCalls}`,
         prependContext: `queued context ${hookCalls}`,
@@ -2348,7 +2367,17 @@ describe("runCodexAppServerAttempt", () => {
     await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
     await run;
 
-    expect(beforePromptBuild).toHaveBeenCalled();
+    expect(beforePromptBuild).toHaveBeenCalledTimes(2);
+    const [, secondHookInput] = beforePromptBuild.mock.calls.map(
+      ([event]) => event as HookInputForTest,
+    );
+    const secondHookMessageTexts =
+      secondHookInput?.messages?.flatMap(
+        (message) => message.content?.map((part) => part.text ?? "") ?? [],
+      ) ?? [];
+    expect(secondHookMessageTexts).toContain("prior visible context");
+    expect(secondHookMessageTexts).toContain("prior assistant context");
+    expect(secondHookMessageTexts).not.toContain("hook-side mutation 1");
     const threadStart = harness.requests.find((request) => request.method === "thread/start");
     const threadStartParams = threadStart?.params as { developerInstructions?: string } | undefined;
     expect(threadStartParams?.developerInstructions).toContain("custom codex system 1");
@@ -2359,6 +2388,7 @@ describe("runCodexAppServerAttempt", () => {
       "";
     expect(inputText).toContain("queued context");
     expect(inputText).toContain("prior visible context");
+    expect(inputText).not.toContain("hook-side mutation");
   });
 
   it("does not replay mirrored history already covered by an existing Codex binding", async () => {
