@@ -2252,6 +2252,7 @@ describe("runCodexAppServerAttempt", () => {
     ];
     expect(llmInputPayload.prompt).toBe("queued context\n\nhello\n\ntail context");
     expect(llmInputPayload.historyMessages).toEqual([]);
+    expect(JSON.stringify(llmInputPayload)).not.toContain("previous turn");
   });
 
   it("projects bounded continuity when starting Codex without a native thread binding", async () => {
