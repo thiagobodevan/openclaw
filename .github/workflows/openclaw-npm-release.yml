@@ -57,6 +57,40 @@ env:
   NPM_CONFIG_LOGLEVEL: verbose
 
 jobs:
+  diagnose_preflight_install:
+    if: ${{ inputs.preflight_only }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download prepared core and AI tarballs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: openclaw/openclaw
+          run-id: "28895201497"
+          name: openclaw-npm-preflight-v2026.6.33
+          path: artifact
+
+      - name: Reproduce packed install with complete npm diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          core="$(find artifact -type f -name 'openclaw-2026.6.33.tgz' -print -quit)"
+          ai="$(find artifact -type f -name 'openclaw-ai-2026.6.33.tgz' -print -quit)"
+          test -n "$core"
+          test -n "$ai"
+          mkdir -p install "$RUNNER_TEMP/npm-logs"
+          core="$(realpath "$core")"
+          ai="$(realpath "$ai")"
+          printf '{\n  "private": true,\n  "dependencies": {\n    "@openclaw/ai": "file:%s",\n    "openclaw": "file:%s"\n  }\n}\n' "$ai" "$core" > install/package.json
+          if ! npm install --prefix install --ignore-scripts --no-audit --no-fund --loglevel=silly --logs-dir="$RUNNER_TEMP/npm-logs"; then
+            find "$RUNNER_TEMP/npm-logs" -type f -maxdepth 1 -print -exec sed -n '1,320p' {} \;
+            exit 1
+          fi
+          install/node_modules/.bin/openclaw --version
+
   candidate_baselines:
     if: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, '[preflight-result]') }}
     runs-on: ubuntu-latest
@@ -135,7 +169,7 @@ jobs:
   # openclaw/releases/.github/workflows/openclaw-npm-dist-tags.yml
   # so this source workflow can stay focused on OIDC publish only.
   preflight_openclaw_npm:
-    if: ${{ inputs.preflight_only }}
+    if: ${{ inputs.preflight_only && false }}
     # Preflight builds the full release package before publish; ubuntu-latest can OOM in tsdown.
     runs-on: ubuntu-latest
     permissions:
