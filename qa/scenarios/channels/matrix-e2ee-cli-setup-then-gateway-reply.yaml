@@ -1,0 +1,41 @@
+title: Matrix E2EE CLI setup leaves the gateway able to reply in encrypted rooms
+scenario:
+  id: matrix-e2ee-cli-setup-then-gateway-reply
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-and-identity
+  objective: "Preserve the retired qa-matrix behavior: Matrix E2EE CLI setup leaves the gateway able
+    to reply in encrypted rooms."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-e2ee-cli-setup-then-gateway-reply with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix E2EE CLI setup leaves the gateway able to reply in encrypted rooms
+    timeoutMs: 180000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        encryption: false
+        startupVerification: off
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: true
+            key: e2ee-cli-setup-then-gateway-reply
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA E2EE CLI Setup Gateway Reply Room
+            requireMention: true
+

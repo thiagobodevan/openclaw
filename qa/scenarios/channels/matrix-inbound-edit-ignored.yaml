@@ -1,0 +1,26 @@
+title: Matrix inbound edits cannot turn ignored messages into triggers
+scenario:
+  id: matrix-inbound-edit-ignored
+  surface: channels
+  coverage:
+    primary:
+      - channels.message-actions
+  objective: "Preserve the retired qa-matrix behavior: Matrix inbound edits cannot turn ignored
+    messages into triggers."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-inbound-edit-ignored with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix inbound edits cannot turn ignored messages into triggers
+    timeoutMs: 8000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+

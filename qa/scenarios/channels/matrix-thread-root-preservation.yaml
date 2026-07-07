@@ -1,5 +1,4 @@
 title: Matrix thread root preservation
-
 scenario:
   id: matrix-thread-root-preservation
   surface: channels
@@ -16,49 +15,10 @@ scenario:
     - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
     - extensions/matrix/src/matrix/monitor/threads.ts
   execution:
-    kind: flow
+    kind: transport
     channel: matrix
-    suiteIsolation: isolated
+    summary: Matrix threaded replies keep the original root event
+    timeoutMs: 60000
+    retryCount: 0
     config:
       requiredChannelDriver: live
-      marker: MATRIX-QA-THREAD-ROOT-PRESERVED
-
-flow:
-  steps:
-    - name: preserves the original root across nested thread input
-      actions:
-        - resetTransport: true
-        - sendInbound:
-            conversation: { id: main, kind: group }
-            senderId: driver
-            senderName: QA Driver
-            text: thread root fixture
-          saveAs: root
-        - sendInbound:
-            conversation: { id: main, kind: group }
-            senderId: driver
-            senderName: QA Driver
-            text: nested thread fixture
-            threadId: { ref: root.id }
-            replyToId: { ref: root.id }
-          saveAs: nested
-        - sendInbound:
-            conversation: { id: main, kind: group }
-            senderId: driver
-            senderName: QA Driver
-            text:
-              expr: "`@openclaw Reply exactly: ${config.marker}`"
-            threadId: { ref: root.id }
-            replyToId: { ref: nested.id }
-        - waitForOutbound:
-            conversation: { id: main, kind: group }
-            textIncludes: { ref: config.marker }
-            threadId: { ref: root.id }
-            timeoutMs:
-              expr: liveTurnTimeoutMs(env, 60000)
-          saveAs: outbound
-        - assert:
-            expr: outbound.threadId === root.id
-            message:
-              expr: "`expected root ${root.id}, got ${outbound.threadId ?? '<none>'}`"
-      detailsExpr: "`${outbound.threadId}: ${outbound.text}`"

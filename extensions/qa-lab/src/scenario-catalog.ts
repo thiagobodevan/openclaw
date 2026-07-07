@@ -82,6 +82,15 @@ const qaFlowScenarioExecutionSchema = z.object({
   config: qaScenarioConfigSchema.optional(),
 });
 
+const qaTransportScenarioExecutionSchema = z.object({
+  kind: z.literal("transport"),
+  summary: z.string().trim().min(1).optional(),
+  channel: qaScenarioChannelSchema,
+  config: qaScenarioConfigSchema.optional(),
+  timeoutMs: z.number().int().positive(),
+  retryCount: z.number().int().min(0).max(1).default(0),
+});
+
 const qaTestFileScenarioExecutionBaseSchema = z.object({
   summary: z.string().trim().min(1).optional(),
   channel: qaScenarioChannelSchema.optional(),
@@ -102,6 +111,7 @@ const qaTestFileScenarioExecutionSchema = z.discriminatedUnion("kind", [
 
 const qaScenarioExecutionSchema = z.union([
   qaFlowScenarioExecutionSchema,
+  qaTransportScenarioExecutionSchema,
   qaTestFileScenarioExecutionSchema,
 ]);
 

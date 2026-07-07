@@ -532,11 +532,13 @@ type ScenarioEvidenceRef = {
 };
 
 function scenarioEvidenceKind(scenario: QaSeedScenarioWithSource): QaScorecardEvidenceKind {
-  return scenario.execution.kind === "flow" ? "qa-scenario" : scenario.execution.kind;
+  return scenario.execution.kind === "flow" || scenario.execution.kind === "transport"
+    ? "qa-scenario"
+    : scenario.execution.kind;
 }
 
 function scenarioEvidencePath(scenario: QaSeedScenarioWithSource) {
-  return scenario.execution.kind === "flow" ? null : scenario.execution.path;
+  return "path" in scenario.execution ? scenario.execution.path : null;
 }
 
 function collectScenarioEvidenceByCoverageId(params: {

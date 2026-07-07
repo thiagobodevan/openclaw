@@ -1,4 +1,4 @@
-// Qa Lab Matrix test support module implements e2ee client behavior.
+// QA Lab Matrix substrate implements E2EE client behavior.
 import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -23,13 +23,10 @@ import type {
   PluginStateKeyedStore,
   PluginStateSyncKeyedStore,
 } from "openclaw/plugin-sdk/plugin-state-runtime";
-import { buildMatrixQaMessageContent } from "../../live-transports/matrix/substrate/client.js";
-import {
-  findMatrixQaObservedEventMatch,
-  normalizeMatrixQaObservedEvent,
-} from "../../live-transports/matrix/substrate/events.js";
-import type { MatrixQaObservedEvent } from "../../live-transports/matrix/substrate/events.js";
-import type { MatrixQaRoomEventWaitResult } from "../../live-transports/matrix/substrate/sync.js";
+import { buildMatrixQaMessageContent } from "./client.js";
+import { findMatrixQaObservedEventMatch, normalizeMatrixQaObservedEvent } from "./events.js";
+import type { MatrixQaObservedEvent } from "./events.js";
+import type { MatrixQaRoomEventWaitResult } from "./sync.js";
 
 type MatrixQaE2eeActorId = "driver" | "observer" | `driver-${string}` | `cli-${string}`;
 

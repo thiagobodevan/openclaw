@@ -178,6 +178,7 @@ export type QaSuiteRunParams = {
   primaryModel?: string;
   alternateModel?: string;
   fastMode?: boolean;
+  failFast?: boolean;
   thinkingDefault?: QaThinkingLevel;
   claudeCliAuthMode?: QaCliBackendAuthMode;
   scenarioIds?: string[];
@@ -446,6 +447,49 @@ async function runScenarioDefinition(
   env: QaSuiteEnvironment,
   scenario: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"][number],
 ) {
+  if (scenario.execution.kind === "transport") {
+    const execution = scenario.execution;
+    const runTransportScenario = env.transport.runScenario;
+    if (!runTransportScenario) {
+      throw new Error(`transport ${env.transport.id} cannot run scenario: ${scenario.id}`);
+    }
+    return await runScenario(scenario.title, [
+      {
+        name: execution.summary ?? scenario.title,
+        run: async () => {
+          let timeout: NodeJS.Timeout | undefined;
+          const result = await Promise.race([
+            runTransportScenario({
+              config: execution.config ?? {},
+              gateway: env.gateway,
+              outputDir: env.outputDir,
+              scenarioId: scenario.id,
+              timeoutMs: execution.timeoutMs,
+            }),
+            new Promise<never>((_, reject) => {
+              timeout = setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `transport scenario ${scenario.id} timed out after ${execution.timeoutMs}ms`,
+                    ),
+                  ),
+                execution.timeoutMs,
+              );
+            }),
+          ]).finally(() => {
+            if (timeout) {
+              clearTimeout(timeout);
+            }
+          });
+          return (
+            result.details ??
+            (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)
+          );
+        },
+      },
+    ]);
+  }
   const api = createScenarioFlowApi(env, scenario);
   if (!scenario.execution.flow) {
     throw new Error(`scenario missing flow: ${scenario.id}`);
@@ -1281,11 +1325,13 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
     params?.adapterOptions?.sutAccountId?.trim() || "sut",
   );
   const gatewayRuntimeOptions = collectQaSuiteGatewayRuntimeOptions(selectedScenarios);
-  const concurrency = normalizeQaSuiteConcurrency(
-    params?.concurrency,
-    selectedScenarios.length,
-    params?.channelDriverSelection ? 1 : defaultQaSuiteConcurrencyForTransport(transportId),
-  );
+  const concurrency = params?.failFast
+    ? 1
+    : normalizeQaSuiteConcurrency(
+        params?.concurrency,
+        selectedScenarios.length,
+        params?.channelDriverSelection ? 1 : defaultQaSuiteConcurrencyForTransport(transportId),
+      );
   const progressEnabled = shouldLogQaSuiteProgress();
   const gatewayHeapCheckpointsEnabled = shouldCaptureGatewayHeapCheckpoints();
   writeQaSuiteProgress(
@@ -1350,7 +1396,10 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
       channelDriver: params?.channelDriver,
       channelId: params?.channelId,
       channelDriverSelection: params?.channelDriverSelection,
-      adapterOptions: params?.adapterOptions,
+      adapterOptions: {
+        ...params?.adapterOptions,
+        scenarioIds: selectedScenarios.map((scenario) => scenario.id),
+      },
       cleanupOnFailure: ownsLab ? () => lab.stop() : undefined,
       outputDir,
       state: lab.state,
@@ -1526,7 +1575,10 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
             return scenarioResult;
           }
         },
-        { startStaggerMs: workerStartStaggerMs },
+        {
+          startStaggerMs: workerStartStaggerMs,
+          shouldStop: (result) => params?.failFast === true && result.status === "fail",
+        },
       );
       await artifactWriteQueue;
       const finishedAt = new Date();
@@ -1614,7 +1666,10 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
     channelDriver: params?.channelDriver,
     channelId: params?.channelId,
     channelDriverSelection: params?.channelDriverSelection,
-    adapterOptions: params?.adapterOptions,
+    adapterOptions: {
+      ...params?.adapterOptions,
+      scenarioIds: selectedScenarios.map((scenario) => scenario.id),
+    },
     cleanupOnFailure: ownsLab ? () => lab.stop() : undefined,
     outputDir,
     transportPolicy: collectQaSuiteTransportPolicy(selectedScenarios),
@@ -1676,6 +1731,7 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
       lab,
       mock: activeMock,
       gateway: activeGateway,
+      outputDir,
       // YAML scenarios should see the full staged gateway config, not just
       // the transport fragment. Routing/session/plugin assertions depend on it.
       cfg: activeGateway.cfg,
@@ -1762,14 +1818,16 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
         scenarios: [...liveScenarioOutcomes],
       });
 
-      const result = await runQaScenarioWithFlakeRetry(
-        () => runScenarioDefinition(activeEnv, scenario),
-        () =>
-          writeQaSuiteProgress(
-            progressEnabled,
-            `scenario retry (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}`,
-          ),
-      );
+      const runSelectedScenario = () => runScenarioDefinition(activeEnv, scenario);
+      const result =
+        scenario.execution.kind === "transport" && scenario.execution.retryCount === 0
+          ? await runSelectedScenario()
+          : await runQaScenarioWithFlakeRetry(runSelectedScenario, () =>
+              writeQaSuiteProgress(
+                progressEnabled,
+                `scenario retry (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}`,
+              ),
+            );
       sampleGatewayProcessRss(`scenario:${scenario.id}:finish`);
       scenarios.push(result);
       writeQaSuiteProgress(
@@ -1791,6 +1849,9 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
         startedAt: startedAt.toISOString(),
         scenarios: [...liveScenarioOutcomes],
       });
+      if (params?.failFast === true && result.status === "fail") {
+        break;
+      }
     }
 
     const runtimeParityCell =

@@ -1,5 +1,4 @@
 title: Matrix attachment-only mention gating
-
 scenario:
   id: matrix-attachment-only-ignored
   surface: channels
@@ -17,33 +16,22 @@ scenario:
   codeRefs:
     - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
   execution:
-    kind: flow
+    kind: transport
     channel: matrix
-    suiteIsolation: isolated
+    summary: Matrix attachment-only group media does not bypass mention gating
+    timeoutMs: 8000
+    retryCount: 0
     config:
       requiredChannelDriver: live
-
-flow:
-  steps:
-    - name: ignores attachment-only group traffic
-      actions:
-        - resetTransport: true
-        - set: outboundStartIndex
-          value:
-            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound').length"
-        - sendInbound:
-            conversation: { id: main, kind: group }
-            senderId: driver
-            senderName: QA Driver
-            text: ""
-            attachments:
-              - id: matrix-unmentioned-image
-                kind: image
-                mimeType: image/png
-                fileName: matrix-unmentioned.png
-                contentBase64:
-                  expr: imageUnderstandingValidPngBase64
-        - waitForNoOutbound:
-            quietMs: 8000
-            sinceIndex: { ref: outboundStartIndex }
-      details: Attachment-only Matrix traffic stayed gated.
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: media
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Media Room
+            requireMention: true

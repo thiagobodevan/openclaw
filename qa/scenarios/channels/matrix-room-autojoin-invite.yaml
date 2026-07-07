@@ -1,0 +1,28 @@
+title: Matrix invite auto-join accepts fresh group rooms
+scenario:
+  id: matrix-room-autojoin-invite
+  surface: channels
+  coverage:
+    primary:
+      - channels.reconnect
+  objective: "Preserve the retired qa-matrix behavior: Matrix invite auto-join accepts fresh group rooms."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-room-autojoin-invite with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix invite auto-join accepts fresh group rooms
+    timeoutMs: 60000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        autoJoin: always
+        groupPolicy: open
+

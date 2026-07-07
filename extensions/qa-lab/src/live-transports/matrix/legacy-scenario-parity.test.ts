@@ -1,4 +1,4 @@
-// QA Lab tests preserve the explicit disposition of every retired qa-matrix scenario id.
+// QA Lab tests preserve the migration target of every retired qa-matrix scenario id.
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readQaScenarioById } from "../../scenario-catalog.js";
@@ -49,7 +49,7 @@ const MATRIX_E2EE_COVERAGE = [
   "extensions/matrix/src/matrix/sdk/crypto-bootstrap.test.ts",
   "extensions/matrix/src/matrix/sdk/crypto-facade.test.ts",
   "extensions/matrix/src/matrix/sdk/verification-manager.test.ts",
-  "extensions/qa-lab/src/test-support/matrix/e2ee-client.test.ts",
+  "extensions/qa-lab/src/live-transports/matrix/substrate/e2ee-client.test.ts",
 ] as const;
 const MATRIX_E2EE_RECOVERY_COVERAGE = [
   "extensions/matrix/src/cli.test.ts",
@@ -550,7 +550,7 @@ const LEGACY_MATRIX_SCENARIO_DISPOSITIONS = [
   },
 ] as const satisfies readonly LegacyMatrixScenarioDisposition[];
 
-describe("retired qa-matrix scenario parity ledger", () => {
+describe("retired qa-matrix scenario migration ledger", () => {
   it("classifies all 94 legacy scenario ids exactly once", () => {
     const legacyIds = LEGACY_MATRIX_SCENARIO_DISPOSITIONS.map((entry) => entry.legacyId);
     expect(legacyIds).toHaveLength(94);
@@ -568,7 +568,14 @@ describe("retired qa-matrix scenario parity ledger", () => {
     }
   });
 
-  it("keeps stronger current-owner coverage for every non-migrated maintained behavior", () => {
+  it("now attaches every legacy behavior to a canonical QA Lab scenario", () => {
+    for (const entry of LEGACY_MATRIX_SCENARIO_DISPOSITIONS) {
+      const targetId = "targetId" in entry && entry.targetId ? entry.targetId : entry.legacyId;
+      expect(readQaScenarioById(targetId).id, entry.legacyId).toBe(targetId);
+    }
+  });
+
+  it("keeps the owner-test evidence used by the pre-follow-up coverage audit", () => {
     for (const entry of LEGACY_MATRIX_SCENARIO_DISPOSITIONS) {
       const targetId = "targetId" in entry ? entry.targetId : undefined;
       expect(entry.status === "migrated").toBe(Boolean(targetId));
@@ -583,7 +590,7 @@ describe("retired qa-matrix scenario parity ledger", () => {
     }
   });
 
-  it("retires only qa-matrix-specific destructive E2EE fault injection", () => {
+  it("records the destructive E2EE cases that were previously retired", () => {
     const retired = LEGACY_MATRIX_SCENARIO_DISPOSITIONS.filter(
       (entry) => entry.status === "retired",
     );

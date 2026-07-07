@@ -1,0 +1,43 @@
+title: Matrix approval target=both delivers channel and DM metadata once
+scenario:
+  id: matrix-approval-channel-target-both
+  surface: channels
+  coverage:
+    primary:
+      - channels.native-approval-prompts
+  objective: "Preserve the retired qa-matrix behavior: Matrix approval target=both delivers channel
+    and DM metadata once."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-approval-channel-target-both with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix approval target=both delivers channel and DM metadata once
+    timeoutMs: 90000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        approvalForwarding:
+          exec: true
+        dm:
+          enabled: true
+        execApprovals:
+          enabled: true
+          target: both
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - key: driver-dm
+            kind: dm
+            members:
+              - driver
+              - sut
+            name: Matrix QA Driver/SUT DM
+

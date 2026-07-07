@@ -1,0 +1,34 @@
+title: Matrix approval deny reaction resolves the metadata-bearing event
+scenario:
+  id: matrix-approval-deny-reaction
+  surface: channels
+  coverage:
+    primary:
+      - channels.native-approval-prompts
+  objective: "Preserve the retired qa-matrix behavior: Matrix approval deny reaction resolves the
+    metadata-bearing event."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-approval-deny-reaction with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix approval deny reaction resolves the metadata-bearing event
+    timeoutMs: 75000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        approvalForwarding:
+          exec: true
+        dm:
+          enabled: true
+        execApprovals:
+          enabled: true
+          target: channel
+

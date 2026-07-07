@@ -1,0 +1,38 @@
+title: Matrix initial catchup is followed by incremental replies
+scenario:
+  id: matrix-initial-catchup-then-incremental
+  surface: channels
+  coverage:
+    primary:
+      - channels.reconnect
+  objective: "Preserve the retired qa-matrix behavior: Matrix initial catchup is followed by
+    incremental replies."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-initial-catchup-then-incremental with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix initial catchup is followed by incremental replies
+    timeoutMs: 90000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: restart
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Restart Room
+            requireMention: true
+

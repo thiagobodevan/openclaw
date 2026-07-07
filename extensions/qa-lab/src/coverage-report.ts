@@ -165,7 +165,9 @@ function summarizeScenarioSearchMatch(scenario: QaSeedScenarioWithSource): QaSce
     codeRefs: [...(scenario.codeRefs ?? [])],
     executionKind: scenario.execution.kind,
     channel: scenario.execution.channel,
-    ...(scenario.execution.kind !== "flow" ? { executionPath: scenario.execution.path } : {}),
+    ...(scenario.execution.kind !== "flow" && "path" in scenario.execution
+      ? { executionPath: scenario.execution.path }
+      : {}),
     runtimeParityTier: scenario.runtimeParityTier,
     requiredProviderMode: stringifyConfigValue(config.requiredProviderMode),
     requiredChannelDriver: stringifyConfigValue(config.requiredChannelDriver),
@@ -485,9 +487,9 @@ function formatSuiteCommand(matches: readonly QaScenarioSearchMatch[]) {
   const scenarioArgs = matches.map((match) => `--scenario ${match.id}`).join(" ");
   const requiredDrivers = [
     ...new Set(
-      matches.map((match) => match.requiredChannelDriver).filter((driver): driver is string =>
-        Boolean(driver),
-      ),
+      matches
+        .map((match) => match.requiredChannelDriver)
+        .filter((driver): driver is string => Boolean(driver)),
     ),
   ];
   const driverArg =
@@ -495,9 +497,11 @@ function formatSuiteCommand(matches: readonly QaScenarioSearchMatch[]) {
       ? ` --channel-driver ${requiredDrivers[0]}`
       : "";
   const channels = [
-    ...new Set(matches.map((match) => match.channel).filter((channel): channel is string =>
-      Boolean(channel),
-    )),
+    ...new Set(
+      matches
+        .map((match) => match.channel)
+        .filter((channel): channel is string => Boolean(channel)),
+    ),
   ];
   const channelArg = driverArg && channels.length === 1 ? ` --channel ${channels[0]}` : "";
   return `pnpm openclaw qa suite${driverArg}${channelArg} ${scenarioArgs}`;

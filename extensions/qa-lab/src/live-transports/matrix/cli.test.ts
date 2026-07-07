@@ -7,38 +7,12 @@ const runQaMatrixCommand = vi.hoisted(() => vi.fn());
 vi.mock("./cli.runtime.js", () => ({ runQaMatrixCommand }));
 
 import { matrixQaAdapterFactory, matrixQaCliRegistration } from "./cli.js";
+import { MATRIX_QA_ALL_SCENARIO_IDS } from "./profiles.js";
 
 describe("QA Lab Matrix CLI registration", () => {
   it("keeps every canonical Matrix profile scenario on the live adapter", () => {
-    expect(matrixQaAdapterFactory.scenarioIds).toEqual([
-      "channel-chat-baseline",
-      "matrix-allowlist-hot-reload",
-      "channel-mention-gating",
-      "channel-sender-allowlist",
-      "channel-multi-actor-ordering",
-      "channel-secondary-conversation-isolation",
-      "channel-top-level-reply-shape",
-      "dm-chat-baseline",
-      "dm-per-room-session",
-      "dm-shared-session",
-      "matrix-dm-thread-reply-override",
-      "thread-follow-up",
-      "matrix-thread-root-preservation",
-      "matrix-thread-nested-reply-shape",
-      "thread-isolation",
-      "thread-reply-override",
-      "subagent-thread-spawn",
-      "matrix-mxid-prefixed-command-block",
-      "matrix-secondary-room-open-trigger",
-      "matrix-room-partial-streaming-preview",
-      "matrix-room-quiet-streaming-preview",
-      "matrix-room-image-understanding-attachment",
-      "matrix-attachment-only-ignored",
-      "matrix-unsupported-media-safe",
-      "matrix-restart-resume",
-      "matrix-restart-replay-dedupe",
-      "matrix-post-restart-room-continue",
-    ]);
+    expect(matrixQaAdapterFactory.scenarioIds).toEqual(MATRIX_QA_ALL_SCENARIO_IDS);
+    expect(matrixQaAdapterFactory.scenarioIds).toHaveLength(92);
   });
 
   it("exposes only canonical QA Lab selector flags", () => {
@@ -55,12 +29,12 @@ describe("QA Lab Matrix CLI registration", () => {
       "--alt-model",
       "--scenario",
       "--fast",
+      "--fail-fast",
       "--profile",
       "--sut-account",
     ]) {
       expect(optionNames).toContain(optionName);
     }
-    expect(optionNames).not.toContain("--fail-fast");
     expect(optionNames).not.toContain("--credential-source");
     expect(optionNames).not.toContain("--credential-role");
   });
@@ -82,7 +56,7 @@ describe("QA Lab Matrix CLI registration", () => {
     expect(runQaMatrixCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         profile: "release",
-        providerMode: "mock-openai",
+        providerMode: "live-frontier",
         scenarioIds: ["matrix-allowlist-hot-reload"],
       }),
     );

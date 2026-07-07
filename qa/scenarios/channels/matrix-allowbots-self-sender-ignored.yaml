@@ -1,0 +1,35 @@
+title: Matrix allowBots=true still ignores messages from the SUT user id
+scenario:
+  id: matrix-allowbots-self-sender-ignored
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-policy
+  objective: "Preserve the retired qa-matrix behavior: Matrix allowBots=true still ignores messages
+    from the SUT user id."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-allowbots-self-sender-ignored with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix allowBots=true still ignores messages from the SUT user id
+    timeoutMs: 8000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        allowBots: true
+        groupAllowRoles:
+          - driver
+          - observer
+          - sut
+        groupsByKey:
+          main:
+            requireMention: false
+

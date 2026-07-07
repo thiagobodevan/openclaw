@@ -1,0 +1,34 @@
+title: Matrix approval prompt preserves thread targeting metadata
+scenario:
+  id: matrix-approval-thread-target
+  surface: channels
+  coverage:
+    primary:
+      - channels.native-approval-prompts
+  objective: "Preserve the retired qa-matrix behavior: Matrix approval prompt preserves thread
+    targeting metadata."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-approval-thread-target with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix approval prompt preserves thread targeting metadata
+    timeoutMs: 75000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        approvalForwarding:
+          exec: true
+        dm:
+          enabled: true
+        execApprovals:
+          enabled: true
+          target: channel
+

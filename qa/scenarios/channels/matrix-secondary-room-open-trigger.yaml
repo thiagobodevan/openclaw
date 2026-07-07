@@ -1,5 +1,4 @@
 title: Matrix secondary room open trigger
-
 scenario:
   id: matrix-secondary-room-open-trigger
   surface: channels
@@ -15,51 +14,26 @@ scenario:
   codeRefs:
     - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
   execution:
-    kind: flow
+    kind: transport
     channel: matrix
-    suiteIsolation: isolated
+    summary: Matrix secondary room can opt out of mention gating
+    timeoutMs: 45000
+    retryCount: 0
     config:
       requiredChannelDriver: live
-      marker: MATRIX-QA-SECONDARY-OPEN-TRIGGER
-
-flow:
-  steps:
-    - name: accepts an unmentioned secondary-room turn
-      actions:
-        - set: secondaryRoomId
-          value:
-            expr: env.gateway.runtimeEnv.OPENCLAW_QA_MATRIX_SECONDARY_ROOM_ID
-        - set: sutAccountId
-          value:
-            expr: env.gateway.runtimeEnv.OPENCLAW_QA_MATRIX_SUT_ACCOUNT_ID
-        - assert:
-            expr: Boolean(secondaryRoomId)
-            message: Matrix adapter did not expose the secondary room id
-        - call: patchConfig
-          args:
-            - env: { ref: env }
-              patch:
-                channels:
-                  matrix:
-                    accounts:
-                      expr: "({ [sutAccountId]: { groups: { [secondaryRoomId]: { enabled: true, requireMention: false } } } })"
-                gateway:
-                  reload:
-                    mode: "off"
-              replacePaths:
-                - channels.matrix.accounts
-              restartDelayMs: 300000
-        - resetTransport: true
-        - sendInbound:
-            conversation: { id: secondary, kind: group }
-            senderId: driver
-            senderName: QA Driver
-            text:
-              expr: "`Reply exactly: ${config.marker}`"
-        - waitForOutbound:
-            conversation: { id: secondary, kind: group }
-            textIncludes: { ref: config.marker }
-            timeoutMs:
-              expr: liveTurnTimeoutMs(env, 60000)
-          saveAs: outbound
-      detailsExpr: outbound.text
+      matrixConfigOverrides:
+        groupsByKey:
+          secondary:
+            requireMention: false
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: secondary
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Secondary Room
+            requireMention: true

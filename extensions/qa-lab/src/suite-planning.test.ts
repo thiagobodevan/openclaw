@@ -161,6 +161,25 @@ describe("qa suite planning helpers", () => {
     expect(result).toEqual([10, 20, 30, 40]);
   });
 
+  it("stops sequential suite work after the first matching result", async () => {
+    const started: number[] = [];
+    const result = await mapQaSuiteWithConcurrency(
+      [1, 2, 3, 4],
+      1,
+      async (item) => {
+        started.push(item);
+        return { item, failed: item === 2 };
+      },
+      { shouldStop: (entry) => entry.failed },
+    );
+
+    expect(started).toEqual([1, 2]);
+    expect(result).toEqual([
+      { item: 1, failed: false },
+      { item: 2, failed: true },
+    ]);
+  });
+
   it("staggers scenario starts without reducing mapped concurrency", async () => {
     const sleeps: number[] = [];
     const releaseSleeps: Array<() => void> = [];

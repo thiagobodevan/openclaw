@@ -1,0 +1,43 @@
+title: Matrix voice notes can trigger mention gating through transcription
+scenario:
+  id: matrix-voice-preflight-mention
+  surface: channels
+  coverage:
+    primary:
+      - channels.media-rich-content
+  objective: "Preserve the retired qa-matrix behavior: Matrix voice notes can trigger mention gating
+    through transcription."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-voice-preflight-mention with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix voice notes can trigger mention gating through transcription
+    timeoutMs: 180000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        audio:
+          enabled: true
+        groupMentionPatterns:
+          - \S
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: media
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Media Room
+            requireMention: true
+

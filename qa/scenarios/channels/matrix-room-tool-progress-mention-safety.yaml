@@ -1,0 +1,28 @@
+title: Matrix streaming keeps tool-progress mentions inert
+scenario:
+  id: matrix-room-tool-progress-mention-safety
+  surface: channels
+  coverage:
+    primary:
+      - channels.streaming
+  objective: "Preserve the retired qa-matrix behavior: Matrix streaming keeps tool-progress mentions inert."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-room-tool-progress-mention-safety with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix streaming keeps tool-progress mentions inert
+    timeoutMs: 60000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        streaming: partial
+        toolProfile: coding
+

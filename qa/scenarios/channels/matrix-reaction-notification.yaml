@@ -1,0 +1,25 @@
+title: Matrix reactions on bot replies are observed
+scenario:
+  id: matrix-reaction-notification
+  surface: channels
+  coverage:
+    primary:
+      - channels.message-actions
+  objective: "Preserve the retired qa-matrix behavior: Matrix reactions on bot replies are observed."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-reaction-notification with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix reactions on bot replies are observed
+    timeoutMs: 45000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+

@@ -23,6 +23,7 @@ type QaRunnerTransportPolicy = {
 
 type QaRunnerAdapterOptions = {
   repoRoot?: string;
+  scenarioIds?: readonly string[];
   sutAccountId?: string;
   credentialSource?: string;
   credentialRole?: string;
@@ -33,6 +34,33 @@ type QaRunnerMessageRecorder = {
   addInboundMessage: (input: QaBusInboundMessageInput) => QaBusMessage | Promise<QaBusMessage>;
   addOutboundMessage: (input: QaBusOutboundMessageInput) => QaBusMessage | Promise<QaBusMessage>;
   editMessage: (input: QaBusEditMessageInput) => QaBusMessage | Promise<QaBusMessage>;
+};
+
+type QaRunnerTransportScenarioInput = {
+  config: Record<string, unknown>;
+  gateway: {
+    baseUrl: string;
+    tempRoot: string;
+    workspaceDir: string;
+    runtimeEnv: NodeJS.ProcessEnv;
+    call: (method: string, params?: unknown, options?: { timeoutMs?: number }) => Promise<unknown>;
+    restartAfterStateMutation?: (
+      mutateState: (context: {
+        configPath: string;
+        runtimeEnv: NodeJS.ProcessEnv;
+        stateDir: string;
+        tempRoot: string;
+      }) => Promise<void>,
+    ) => Promise<void>;
+  };
+  outputDir: string;
+  scenarioId: string;
+  timeoutMs: number;
+};
+
+type QaRunnerTransportScenarioResult = {
+  artifacts?: Record<string, unknown>;
+  details?: string;
 };
 
 type QaRunnerTransportAdapterDefinition = {
@@ -80,6 +108,7 @@ type QaRunnerTransportAdapterDefinition = {
     replyTo: string;
   };
   createRuntimeEnvPatch?: () => NodeJS.ProcessEnv;
+  runScenario?: (input: QaRunnerTransportScenarioInput) => Promise<QaRunnerTransportScenarioResult>;
   handleAction: (params: {
     action: "delete" | "edit" | "react" | "thread-create";
     args: Record<string, unknown>;

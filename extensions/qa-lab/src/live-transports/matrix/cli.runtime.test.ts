@@ -20,6 +20,7 @@ describe("QA Lab Matrix CLI runtime", () => {
       primaryModel: "mock-openai/gpt-5.5",
       alternateModel: "mock-openai/gpt-5.5-alt",
       fastMode: true,
+      failFast: true,
       profile: "release",
       sutAccountId: "matrix-sut",
     });
@@ -32,6 +33,7 @@ describe("QA Lab Matrix CLI runtime", () => {
       alternateModel: "mock-openai/gpt-5.5-alt",
       fastMode: true,
       allowFailures: undefined,
+      failFast: true,
       channelDriver: "live",
       channel: "matrix",
       concurrency: 1,
@@ -51,11 +53,19 @@ describe("QA Lab Matrix CLI runtime", () => {
     );
   });
 
-  it("rejects profiles that have not yet completed canonical migration", async () => {
-    await expect(runQaMatrixCommand({ profile: "e2ee-deep" })).rejects.toThrow(
-      'Unknown QA Lab Matrix profile "e2ee-deep"',
+  it("delegates restored E2EE profiles through the same live Matrix adapter host", async () => {
+    await runQaMatrixCommand({ profile: "e2ee-deep" });
+
+    expect(runQaSuiteCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "matrix",
+        channelDriver: "live",
+        scenarioIds: expect.arrayContaining([
+          "matrix-e2ee-state-loss-external-recovery-key",
+          "matrix-e2ee-server-device-deleted-relogin-recovers",
+        ]),
+      }),
     );
-    expect(runQaSuiteCommand).not.toHaveBeenCalled();
   });
 
   it("rejects unknown provider modes before suite dispatch", async () => {

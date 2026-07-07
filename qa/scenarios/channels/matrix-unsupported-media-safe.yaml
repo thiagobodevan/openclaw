@@ -1,5 +1,4 @@
 title: Matrix unsupported media safety
-
 scenario:
   id: matrix-unsupported-media-safe
   surface: channels
@@ -17,34 +16,22 @@ scenario:
   codeRefs:
     - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
   execution:
-    kind: flow
+    kind: transport
     channel: matrix
-    suiteIsolation: isolated
+    summary: Matrix unsupported media attachments do not block caption replies
+    timeoutMs: 45000
+    retryCount: 0
     config:
       requiredChannelDriver: live
-      marker: MATRIX-QA-UNSUPPORTED-MEDIA-SAFE
-
-flow:
-  steps:
-    - name: preserves caption handling for unsupported media
-      actions:
-        - resetTransport: true
-        - sendInbound:
-            conversation: { id: main, kind: group }
-            senderId: driver
-            senderName: QA Driver
-            text:
-              expr: "`@openclaw Ignore the unsupported attachment and reply exactly: ${config.marker}`"
-            attachments:
-              - id: matrix-unsupported-file
-                kind: file
-                mimeType: application/x-openclaw-unsupported
-                fileName: unsupported.openclaw
-                contentBase64: AAEC
-        - waitForOutbound:
-            conversation: { id: main, kind: group }
-            textIncludes: { ref: config.marker }
-            timeoutMs:
-              expr: liveTurnTimeoutMs(env, 60000)
-          saveAs: outbound
-      detailsExpr: outbound.text
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: media
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Media Room
+            requireMention: true

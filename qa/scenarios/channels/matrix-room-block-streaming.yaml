@@ -1,0 +1,51 @@
+title: Matrix block streaming preserves completed quiet preview blocks
+scenario:
+  id: matrix-room-block-streaming
+  surface: channels
+  coverage:
+    primary:
+      - channels.streaming
+  objective: "Preserve the retired qa-matrix behavior: Matrix block streaming preserves completed
+    quiet preview blocks."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-room-block-streaming with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix block streaming preserves completed quiet preview blocks
+    timeoutMs: 75000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        agentDefaults:
+          blockStreamingChunk:
+            breakPreference: newline
+            maxChars: 48
+            minChars: 1
+          blockStreamingCoalesce:
+            idleMs: 0
+            maxChars: 48
+            minChars: 1
+        blockStreaming: true
+        streaming: quiet
+        toolProfile: coding
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: block
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Block Streaming Room
+            requireMention: true
+

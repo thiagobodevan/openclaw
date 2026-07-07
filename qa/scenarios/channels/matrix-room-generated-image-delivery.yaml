@@ -1,0 +1,40 @@
+title: Matrix generated images deliver as real image attachments while streaming
+scenario:
+  id: matrix-room-generated-image-delivery
+  surface: channels
+  coverage:
+    primary:
+      - channels.media-rich-content
+  objective: "Preserve the retired qa-matrix behavior: Matrix generated images deliver as real image
+    attachments while streaming."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-room-generated-image-delivery with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix generated images deliver as real image attachments while streaming
+    timeoutMs: 180000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        streaming: quiet
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: media
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Media Room
+            requireMention: true
+

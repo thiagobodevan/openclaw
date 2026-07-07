@@ -1,0 +1,33 @@
+title: Matrix allowBots=mentions accepts mentioned configured bot messages
+scenario:
+  id: matrix-allowbots-mentions-mentioned-room
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-policy
+  objective: "Preserve the retired qa-matrix behavior: Matrix allowBots=mentions accepts mentioned
+    configured bot messages."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-allowbots-mentions-mentioned-room with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix allowBots=mentions accepts mentioned configured bot messages
+    timeoutMs: 45000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        allowBots: mentions
+        configuredBotRoles:
+          - observer
+        groupAllowRoles:
+          - driver
+          - observer
+

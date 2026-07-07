@@ -1,0 +1,39 @@
+title: Matrix E2EE DM verification notices stay scoped and complete SAS
+scenario:
+  id: matrix-e2ee-dm-sas-verification
+  surface: channels
+  coverage:
+    primary:
+      - channels.dm
+  objective: "Preserve the retired qa-matrix behavior: Matrix E2EE DM verification notices stay scoped
+    and complete SAS."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-e2ee-dm-sas-verification with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix E2EE DM verification notices stay scoped and complete SAS
+    timeoutMs: 90000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        encryption: true
+        startupVerification: off
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: true
+            key: e2ee-verification-dm
+            kind: dm
+            members:
+              - driver
+              - observer
+            name: Matrix QA E2EE Verification DM
+

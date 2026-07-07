@@ -1,0 +1,37 @@
+title: Matrix lane resumes after homeserver restart
+scenario:
+  id: matrix-homeserver-restart-resume
+  surface: channels
+  coverage:
+    primary:
+      - channels.reconnect
+  objective: "Preserve the retired qa-matrix behavior: Matrix lane resumes after homeserver restart."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-homeserver-restart-resume with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix lane resumes after homeserver restart
+    timeoutMs: 75000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: homeserver
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Homeserver Restart Room
+            requireMention: true
+

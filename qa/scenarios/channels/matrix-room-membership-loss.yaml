@@ -1,0 +1,37 @@
+title: Matrix room membership loss recovers after re-invite
+scenario:
+  id: matrix-room-membership-loss
+  surface: channels
+  coverage:
+    primary:
+      - channels.reconnect
+  objective: "Preserve the retired qa-matrix behavior: Matrix room membership loss recovers after re-invite."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-room-membership-loss with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix room membership loss recovers after re-invite
+    timeoutMs: 75000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: membership
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Membership Room
+            requireMention: true
+

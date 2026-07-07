@@ -24,6 +24,7 @@ export async function runQaMatrixCommand(opts: LiveTransportQaCommandOptions) {
     alternateModel: opts.alternateModel,
     fastMode: opts.fastMode,
     allowFailures: opts.allowFailures,
+    failFast: opts.failFast,
     channelDriver: "live",
     channel: "matrix",
     concurrency: 1,

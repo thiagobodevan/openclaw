@@ -1,0 +1,28 @@
+title: Matrix streaming finalizes previews after tool errors
+scenario:
+  id: matrix-room-tool-progress-error
+  surface: channels
+  coverage:
+    primary:
+      - channels.streaming
+  objective: "Preserve the retired qa-matrix behavior: Matrix streaming finalizes previews after tool errors."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-room-tool-progress-error with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix streaming finalizes previews after tool errors
+    timeoutMs: 60000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        streaming: quiet
+        toolProfile: coding
+

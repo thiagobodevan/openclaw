@@ -1,0 +1,41 @@
+title: Matrix E2EE server-side device deletion invalidates surviving local state
+scenario:
+  id: matrix-e2ee-server-device-deleted-local-state-intact
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-and-identity
+  objective: "Preserve the retired qa-matrix behavior: Matrix E2EE server-side device deletion
+    invalidates surviving local state."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-e2ee-server-device-deleted-local-state-intact with
+      the original Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix E2EE server-side device deletion invalidates surviving local state
+    timeoutMs: 120000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        encryption: true
+        startupVerification: off
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: true
+            key: e2ee-server-device-deleted-local-state-intact
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA E2EE Server Device Deleted Room
+            requireMention: true
+

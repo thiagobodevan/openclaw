@@ -134,6 +134,7 @@ type QaScenarioRunCommandOptions = QaScenarioProviderCommandOptions & {
   outputDir?: string;
   concurrency?: number;
   allowFailures?: boolean;
+  failFast?: boolean;
 };
 
 export type QaProfileCommandOptions = QaScenarioRunCommandOptions & {
@@ -763,6 +764,7 @@ export async function runQaProfileCommand(opts: QaProfileCommandOptions) {
       primaryModel: opts.primaryModel,
       alternateModel: opts.alternateModel,
       fastMode: opts.fastMode,
+      failFast: opts.failFast,
       scenarioIds: scenarios.map((scenario) => scenario.id),
       concurrency: opts.concurrency,
       allowFailures: opts.allowFailures,

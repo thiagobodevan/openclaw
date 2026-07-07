@@ -1372,6 +1372,9 @@ importers:
 
   extensions/qa-lab:
     dependencies:
+      '@openclaw/matrix':
+        specifier: workspace:*
+        version: link:../matrix
       '@copilotkit/aimock':
         specifier: 1.35.0
         version: 1.35.0(vitest@4.1.9)
@@ -1394,9 +1397,6 @@ importers:
       '@openclaw/discord':
         specifier: workspace:*
         version: link:../discord
-      '@openclaw/matrix':
-        specifier: workspace:*
-        version: link:../matrix
       '@openclaw/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

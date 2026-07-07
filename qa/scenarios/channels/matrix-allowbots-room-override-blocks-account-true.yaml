@@ -1,0 +1,37 @@
+title: Matrix room allowBots=false overrides account allowBots=true
+scenario:
+  id: matrix-allowbots-room-override-blocks-account-true
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-policy
+  objective: "Preserve the retired qa-matrix behavior: Matrix room allowBots=false overrides account
+    allowBots=true."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-allowbots-room-override-blocks-account-true with
+      the original Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix room allowBots=false overrides account allowBots=true
+    timeoutMs: 8000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        allowBots: true
+        configuredBotRoles:
+          - observer
+        groupAllowRoles:
+          - driver
+          - observer
+        groupsByKey:
+          main:
+            allowBots: false
+            requireMention: false
+

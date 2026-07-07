@@ -1,0 +1,33 @@
+title: Matrix plugin approval prompt carries plugin metadata
+scenario:
+  id: matrix-approval-plugin-metadata-single-event
+  surface: channels
+  coverage:
+    primary:
+      - channels.native-approval-prompts
+  objective: "Preserve the retired qa-matrix behavior: Matrix plugin approval prompt carries plugin metadata."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-approval-plugin-metadata-single-event with the
+      original Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix plugin approval prompt carries plugin metadata
+    timeoutMs: 75000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        approvalForwarding:
+          plugin: true
+        dm:
+          enabled: true
+        execApprovals:
+          enabled: true
+          target: channel
+

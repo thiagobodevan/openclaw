@@ -1,0 +1,41 @@
+title: Matrix E2EE sync cursor loss keeps crypto decryptability intact
+scenario:
+  id: matrix-e2ee-sync-state-loss-crypto-intact
+  surface: channels
+  coverage:
+    primary:
+      - channels.reconnect
+  objective: "Preserve the retired qa-matrix behavior: Matrix E2EE sync cursor loss keeps crypto
+    decryptability intact."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-e2ee-sync-state-loss-crypto-intact with the
+      original Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix E2EE sync cursor loss keeps crypto decryptability intact
+    timeoutMs: 150000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        encryption: true
+        startupVerification: off
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: true
+            key: e2ee-sync-state-loss-crypto-intact
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA E2EE Sync State Loss Room
+            requireMention: true
+

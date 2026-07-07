@@ -1,0 +1,38 @@
+title: Matrix stale sync replay is absorbed by inbound dedupe
+scenario:
+  id: matrix-stale-sync-replay-dedupe
+  surface: channels
+  coverage:
+    primary:
+      - channels.reconnect
+  objective: "Preserve the retired qa-matrix behavior: Matrix stale sync replay is absorbed by inbound
+    dedupe."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-stale-sync-replay-dedupe with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix stale sync replay is absorbed by inbound dedupe
+    timeoutMs: 90000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: stale-sync
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Stale Sync Room
+            requireMention: true
+

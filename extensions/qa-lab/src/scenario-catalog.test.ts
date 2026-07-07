@@ -90,8 +90,14 @@ describe("qa scenario catalog", () => {
       if (execution.kind === "flow") {
         throw new Error(`expected native execution scenario: ${scenario.id}`);
       }
-      expect(["playwright", "script", "vitest"]).toContain(execution.kind);
-      expect(fs.existsSync(execution.path), `${scenario.id} execution.path exists`).toBe(true);
+      if (execution.kind === "transport") {
+        expect(execution.channel).toBeTruthy();
+        expect(execution.timeoutMs).toBeGreaterThan(0);
+        expect(execution.retryCount).toBeGreaterThanOrEqual(0);
+      } else {
+        expect(["playwright", "script", "vitest"]).toContain(execution.kind);
+        expect(fs.existsSync(execution.path), `${scenario.id} execution.path exists`).toBe(true);
+      }
       expect(execution.flow).toBeUndefined();
     }
     expect(

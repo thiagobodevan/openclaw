@@ -1,0 +1,41 @@
+title: Matrix E2EE CLI encryption setup rejects an invalid recovery key
+scenario:
+  id: matrix-e2ee-cli-recovery-key-invalid
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-and-identity
+  objective: "Preserve the retired qa-matrix behavior: Matrix E2EE CLI encryption setup rejects an
+    invalid recovery key."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-e2ee-cli-recovery-key-invalid with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix E2EE CLI encryption setup rejects an invalid recovery key
+    timeoutMs: 120000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        encryption: true
+        startupVerification: off
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: true
+            key: e2ee-cli-recovery-key-invalid
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA E2EE CLI Invalid Recovery Key Room
+            requireMention: true
+

@@ -4,12 +4,18 @@ import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { buildQaTarget } from "openclaw/plugin-sdk/qa-channel";
 import type { QaRunnerCliRegistration } from "openclaw/plugin-sdk/qa-runner-runtime";
+import { readQaScenarioExecutionConfig } from "../../scenario-catalog.js";
+import { createMatrixQaScenarioExecutor } from "./scenarios/scenario-executor.js";
 import { createMatrixQaClient, provisionMatrixQaRoom } from "./substrate/client.js";
 import { buildMatrixQaConfig } from "./substrate/config.js";
 import type { MatrixQaObservedEvent } from "./substrate/events.js";
 import { startMatrixQaHarness } from "./substrate/harness.runtime.js";
 import { createMatrixQaRoomObserver } from "./substrate/sync.js";
-import type { MatrixQaProvisionedTopology, MatrixQaTopologySpec } from "./substrate/topology.js";
+import {
+  mergeMatrixQaTopologySpecs,
+  type MatrixQaProvisionedTopology,
+  type MatrixQaTopologySpec,
+} from "./substrate/topology.js";
 
 type AdapterFactory = NonNullable<QaRunnerCliRegistration["adapterFactory"]>;
 type FactoryContext = Parameters<AdapterFactory["create"]>[0];
@@ -29,23 +35,39 @@ const MATRIX_SHARED_FLOW_TOPOLOGY = {
       key: "secondary",
       kind: "group",
       members: ["driver", "observer", "sut"],
-      name: "OpenClaw Matrix QA Secondary Room",
+      name: "Matrix QA Secondary Room",
       requireMention: true,
     },
     {
       key: "driver-dm",
       kind: "dm",
       members: ["driver", "sut"],
-      name: "OpenClaw Matrix QA Driver DM",
+      name: "Matrix QA Driver/SUT DM",
     },
     {
       key: "driver-dm-shared",
       kind: "dm",
       members: ["driver", "sut"],
-      name: "OpenClaw Matrix QA Shared DM",
+      name: "Matrix QA Driver/SUT Shared DM",
     },
   ],
 } satisfies MatrixQaTopologySpec;
+
+function readMatrixQaScenarioTopology(scenarioId: string): MatrixQaTopologySpec | undefined {
+  const value = readQaScenarioExecutionConfig(scenarioId)?.matrixTopology;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as MatrixQaTopologySpec;
+}
+
+function resolveMatrixQaAdapterTopology(scenarioIds: readonly string[] | undefined) {
+  const scenarioTopologies = (scenarioIds ?? []).flatMap((scenarioId) => {
+    const topology = readMatrixQaScenarioTopology(scenarioId);
+    return topology ? [topology] : [];
+  });
+  return mergeMatrixQaTopologySpecs([MATRIX_SHARED_FLOW_TOPOLOGY, ...scenarioTopologies]);
+}
 
 function resolveMatrixQaAdapterRoom(
   topology: MatrixQaProvisionedTopology,
@@ -132,15 +154,15 @@ export async function createMatrixQaTransportAdapter(
       registrationToken: harness.registrationToken,
       roomName: `OpenClaw Matrix QA ${suffix}`,
       sutLocalpart: `qa-sut-${suffix}`,
-      topology: MATRIX_SHARED_FLOW_TOPOLOGY,
+      topology: resolveMatrixQaAdapterTopology(options.scenarioIds),
     });
   } catch (error) {
     await harness.stop().catch(() => undefined);
     throw error;
   }
   const accountId = options.sutAccountId?.trim() || "sut";
+  const observedEvents: MatrixQaObservedEvent[] = [];
   const roomObservers = provisioning.topology.rooms.map((room) => {
-    const observedEvents: MatrixQaObservedEvent[] = [];
     return {
       observedEvents,
       observer: createMatrixQaRoomObserver({
@@ -166,6 +188,7 @@ export async function createMatrixQaTransportAdapter(
     baseUrl: harness.baseUrl,
   });
   let stopped = false;
+  let gatewayClient: Parameters<AdapterDefinition["waitReady"]>[0]["gateway"] | undefined;
   let pollingError: Error | undefined;
   const logicalConversationByRoomId = new Map<
     string,
@@ -178,6 +201,12 @@ export async function createMatrixQaTransportAdapter(
   );
   const nativeEventIds = new Map<string, string>();
   const busMessageIds = new Map<string, string>();
+  const runScenario = createMatrixQaScenarioExecutor({
+    accountId,
+    harness,
+    observedEvents,
+    provisioning,
+  });
   const polling = Promise.all(
     roomObservers.map(async ({ observer, roomId }) => {
       for (;;) {
@@ -248,7 +277,7 @@ export async function createMatrixQaTransportAdapter(
     label: "Matrix live",
     accountId,
     requiredPluginIds: ["matrix"],
-    supportedActions: [],
+    supportedActions: ["delete", "edit", "react"],
     assertTransportHealthy() {
       if (pollingError) {
         throw pollingError;
@@ -336,16 +365,49 @@ export async function createMatrixQaTransportAdapter(
       OPENCLAW_QA_MATRIX_SECONDARY_ROOM_ID:
         provisioning.topology.rooms.find((room) => room.key === "secondary")?.roomId ?? "",
     }),
-    waitReady: async ({ gateway, timeoutMs, pollIntervalMs }) =>
-      await waitForMatrixChannelReady(gateway, accountId, timeoutMs, pollIntervalMs),
+    runScenario,
+    waitReady: async ({ gateway, timeoutMs, pollIntervalMs }) => {
+      gatewayClient = gateway;
+      await waitForMatrixChannelReady(gateway, accountId, timeoutMs, pollIntervalMs);
+    },
     buildAgentDelivery: () => ({
       channel: "matrix",
       to: provisioning.roomId,
       replyChannel: "matrix",
       replyTo: provisioning.roomId,
     }),
-    async handleAction() {
-      throw new Error("Matrix live QA adapter does not implement transport actions");
+    async handleAction({ action, args }) {
+      if (!gatewayClient) {
+        throw new Error("Matrix live QA adapter is not connected to its Gateway");
+      }
+      const normalizedArgs = { ...args };
+      for (const key of ["roomId", "channelId", "to"] as const) {
+        const value = normalizedArgs[key];
+        if (typeof value !== "string") {
+          continue;
+        }
+        const room = provisioning.topology.rooms.find(
+          (candidate) => candidate.key === value || candidate.roomId === value,
+        );
+        if (room) {
+          normalizedArgs[key] = room.roomId;
+        }
+      }
+      const messageId = normalizedArgs.messageId;
+      if (typeof messageId === "string") {
+        normalizedArgs.messageId = nativeEventIds.get(messageId) ?? messageId;
+      }
+      return await gatewayClient.call(
+        "message.action",
+        {
+          channel: "matrix",
+          action,
+          accountId,
+          params: normalizedArgs,
+          idempotencyKey: randomUUID(),
+        },
+        { timeoutMs: 60_000 },
+      );
     },
     createReportNotes: () => ["Uses the Matrix live adapter."],
     async cleanup() {

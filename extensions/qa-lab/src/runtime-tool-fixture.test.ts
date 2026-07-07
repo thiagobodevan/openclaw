@@ -12,6 +12,7 @@ async function makeEnv(overrides: Partial<QaSuiteRuntimeEnv> = {}): Promise<QaSu
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "runtime-tool-fixture-"));
   tempRoots.push(workspaceDir);
   return {
+    outputDir: workspaceDir,
     repoRoot: workspaceDir,
     providerMode: "mock-openai",
     primaryModel: "openai/gpt-5.5",

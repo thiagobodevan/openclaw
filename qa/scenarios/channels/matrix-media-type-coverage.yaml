@@ -1,0 +1,38 @@
+title: Matrix media attachments cover image, audio, video, PDF, and EPUB transport
+scenario:
+  id: matrix-media-type-coverage
+  surface: channels
+  coverage:
+    primary:
+      - channels.media-rich-content
+  objective: "Preserve the retired qa-matrix behavior: Matrix media attachments cover image, audio,
+    video, PDF, and EPUB transport."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-media-type-coverage with the original
+      Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix media attachments cover image, audio, video, PDF, and EPUB transport
+    timeoutMs: 90000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixTopology:
+        defaultRoomKey: main
+        rooms:
+          - encrypted: false
+            key: media
+            kind: group
+            members:
+              - driver
+              - observer
+              - sut
+            name: Matrix QA Media Room
+            requireMention: true
+

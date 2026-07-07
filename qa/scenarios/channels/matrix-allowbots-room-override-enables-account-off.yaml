@@ -1,0 +1,36 @@
+title: Matrix room allowBots=mentions overrides account allowBots off
+scenario:
+  id: matrix-allowbots-room-override-enables-account-off
+  surface: channels
+  coverage:
+    primary:
+      - channels.access-policy
+  objective: "Preserve the retired qa-matrix behavior: Matrix room allowBots=mentions overrides
+    account allowBots off."
+  successCriteria:
+    - The QA Lab Matrix adapter completes matrix-allowbots-room-override-enables-account-off with
+      the original Matrix-specific assertions.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/concepts/qa-live-matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/scenarios/scenario-runtime.ts
+  execution:
+    kind: transport
+    channel: matrix
+    summary: Matrix room allowBots=mentions overrides account allowBots off
+    timeoutMs: 45000
+    retryCount: 0
+    config:
+      requiredChannelDriver: live
+      matrixConfigOverrides:
+        configuredBotRoles:
+          - observer
+        groupAllowRoles:
+          - driver
+          - observer
+        groupsByKey:
+          main:
+            allowBots: mentions
+            requireMention: true
+

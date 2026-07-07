@@ -1,5 +1,4 @@
 title: Matrix MXID-prefixed control command gating
-
 scenario:
   id: matrix-mxid-prefixed-command-block
   surface: channels
@@ -18,31 +17,12 @@ scenario:
     - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
     - extensions/matrix/src/matrix/monitor/handler.ts
   execution:
-    kind: flow
+    kind: transport
     channel: matrix
-    suiteIsolation: isolated
-    summary: Exercise MXID-prefixed command authorization through the canonical Matrix adapter.
+    summary: Matrix MXID-prefixed control commands stay gated
+    timeoutMs: 8000
+    retryCount: 0
     config:
       requiredChannelDriver: live
-
-flow:
-  steps:
-    - name: blocks an observer control command
-      actions:
-        - call: waitForGatewayHealthy
-          args: [{ ref: env }, 60000]
-        - call: waitForTransportReady
-          args: [{ ref: env }, 60000]
-        - resetTransport: true
-        - set: outboundStartIndex
-          value:
-            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound').length"
-        - sendInbound:
-            conversation: { id: main, kind: group }
-            senderId: observer
-            senderName: QA Observer
-            text: "@openclaw /new"
-        - waitForNoOutbound:
-            quietMs: 8000
-            sinceIndex: { ref: outboundStartIndex }
-      details: Observer MXID-prefixed /new command remained blocked.
+      matrixConfigOverrides:
+        groupPolicy: open
