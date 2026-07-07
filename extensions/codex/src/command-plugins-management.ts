@@ -248,10 +248,13 @@ export function formatPluginList(
   return [
     "Codex sub-plugins in Openclaw config (~/.openclaw/openclaw.json):",
     "",
-    ...rows.flatMap((r) => [
-      `  ${r.state}  ${r.displayKey.padEnd(keyW)}  ${r.pluginName.padEnd(pluginW)}  [${r.marketplace}]`,
-      ...r.tools.map((tool) => `        ${tool.displayKey}: ${tool.enabled} [${tool.status}]`),
-    ]),
+    ...rows.flatMap((r) =>
+      [
+        `  ${r.state}  ${r.displayKey.padEnd(keyW)}  ${r.pluginName.padEnd(pluginW)}  [${r.marketplace}]`,
+      ].concat(
+        r.tools.map((tool) => `        ${tool.displayKey}: ${tool.enabled} [${tool.status}]`),
+      ),
+    ),
     "",
     ...(globalEnabled
       ? []

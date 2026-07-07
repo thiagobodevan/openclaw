@@ -938,7 +938,7 @@ function readPluginAppPolicyContext(
       typeof entry.allowDestructiveActions !== "boolean" ||
       destructiveApprovalMode === "invalid" ||
       tools === "invalid" ||
-      (entry.allowDestructiveActions === false &&
+      (!entry.allowDestructiveActions &&
         tools !== undefined &&
         Object.values(tools).some(Boolean)) ||
       !mcpServerNamesValid
