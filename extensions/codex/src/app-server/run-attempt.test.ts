@@ -2187,6 +2187,7 @@ describe("runCodexAppServerAttempt", () => {
   });
 
   it("applies before_prompt_build to Codex developer instructions and turn input", async () => {
+    const llmInput = vi.fn();
     const beforePromptBuild = vi.fn(async () => ({
       systemPrompt: "custom codex system",
       prependSystemContext: "pre system",
@@ -2195,7 +2196,10 @@ describe("runCodexAppServerAttempt", () => {
       appendContext: "tail context",
     }));
     initializeGlobalHookRunner(
-      createMockPluginRegistry([{ hookName: "before_prompt_build", handler: beforePromptBuild }]),
+      createMockPluginRegistry([
+        { hookName: "before_prompt_build", handler: beforePromptBuild },
+        { hookName: "llm_input", handler: llmInput },
+      ]),
     );
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
@@ -2242,6 +2246,11 @@ describe("runCodexAppServerAttempt", () => {
     expect(turnStartParams?.input).toEqual([
       { type: "text", text: "queued context\n\nhello\n\ntail context", text_elements: [] },
     ]);
+    const [llmInputPayload] = mockCall(llmInput, "llm_input") as [
+      { historyMessages?: unknown[] },
+      unknown,
+    ];
+    expect(llmInputPayload.historyMessages).toEqual([]);
   });
 
   it("projects bounded continuity when starting Codex without a native thread binding", async () => {
