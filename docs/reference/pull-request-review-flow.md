@@ -71,8 +71,8 @@ whether the author was asked for proof or other work.
 
 ## Improve a PR during review
 
-Once Barnacle, ClawSweeper, or a maintainer responds, use the feedback as the
-next-step checklist for that PR.
+Once Barnacle, ClawSweeper, or a maintainer responds, use that feedback as the
+next-step checklist for the PR.
 
 1. Read ClawSweeper's `Rank-up moves:` and `Proof guidance:` as the action list
    for that PR. Ratings and labels are review signals, not fixed merge targets.
