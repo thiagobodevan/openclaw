@@ -110,8 +110,8 @@ PR is still active, coordinate with the maintainer working on it.
 ## When automation stays quiet
 
 Automation may stay quiet when a maintainer is already handling the item, a
-request is still queued, the event is routine, or the ClawSweeper lane is not
-configured for the requested action.
+review or repair request is still queued, the event is routine, or the
+ClawSweeper lane is not configured for the requested action.
 
 It may also avoid action when a trusted workflow would need to run untrusted
 contributor code. In that case, maintainers use normal review or a safer
