@@ -3,6 +3,7 @@ import { type ChildProcessByStdio, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import {
@@ -145,6 +146,65 @@ async function resolveBuiltGatewayEntrypoint(cwd: string): Promise<string[] | nu
   return null;
 }
 
+function resolvePathEnvKey(env: NodeJS.ProcessEnv): string {
+  return Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+}
+
+async function readPinnedPnpmPackageManager(cwd: string): Promise<string | null> {
+  try {
+    const packageJson = JSON.parse(await fs.readFile(path.join(cwd, "package.json"), "utf8")) as {
+      packageManager?: unknown;
+    };
+    return typeof packageJson.packageManager === "string" &&
+      packageJson.packageManager.startsWith("pnpm@")
+      ? packageJson.packageManager
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function createGatewayEntrypointPrepareEnv(
+  cwd: string,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): Promise<{ env: NodeJS.ProcessEnv; cleanup: () => Promise<void> }> {
+  const env: NodeJS.ProcessEnv = { ...baseEnv, VITEST: "1" };
+  const packageManager = await readPinnedPnpmPackageManager(cwd);
+  if (!packageManager) {
+    return { env, cleanup: async () => {} };
+  }
+
+  const shimDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gateway-pnpm-"));
+  const shimPath = path.join(shimDir, process.platform === "win32" ? "pnpm.cjs" : "pnpm");
+  const shim = `#!/usr/bin/env node
+const { spawnSync } = require("node:child_process");
+const result = spawnSync("corepack", [${JSON.stringify(packageManager)}, ...process.argv.slice(2)], {
+  stdio: "inherit",
+});
+if (result.error) {
+  console.error(result.error.message);
+  process.exit(1);
+}
+process.exit(result.status ?? (result.signal ? 1 : 0));
+`;
+  await fs.writeFile(shimPath, shim, { encoding: "utf8", mode: 0o755 });
+
+  if (process.platform === "win32") {
+    const cmdPath = path.join(shimDir, "pnpm.cmd");
+    await fs.writeFile(cmdPath, `@echo off\r\nnode "%~dp0pnpm.cjs" %*\r\n`, "utf8");
+  }
+
+  const pathKey = resolvePathEnvKey(env);
+  env[pathKey] = [shimDir, env[pathKey]].filter(Boolean).join(path.delimiter);
+  env.npm_execpath = shimPath;
+  return {
+    env,
+    cleanup: async () => {
+      await fs.rm(shimDir, { recursive: true, force: true });
+    },
+  };
+}
+
 async function prepareGatewayEntrypoint(cwd: string): Promise<string[]> {
   const builtEntrypoint = await resolveBuiltGatewayEntrypoint(cwd);
   if (builtEntrypoint) {
@@ -153,35 +213,40 @@ async function prepareGatewayEntrypoint(cwd: string): Promise<string[]> {
 
   const stdout = createBoundedStringLog();
   const stderr = createBoundedStringLog();
+  const prepareEnv = await createGatewayEntrypointPrepareEnv(cwd);
   const child = spawn("node", ["scripts/run-node.mjs", "--help"], {
     cwd,
-    env: { ...process.env, VITEST: "1" },
+    env: prepareEnv.env,
     stdio: ["ignore", "pipe", "pipe"],
     detached: shouldUseOpenClawTestProcessGroup(),
   });
-  child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (d) => appendLogChunk(stdout, d));
-  child.stderr?.on("data", (d) => appendLogChunk(stderr, d));
+  try {
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (d) => appendLogChunk(stdout, d));
+    child.stderr?.on("data", (d) => appendLogChunk(stderr, d));
 
-  const completed = await Promise.race([
-    new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (code, signal) => resolve({ code, signal }));
-    }),
-    sleep(GATEWAY_ENTRYPOINT_PREPARE_TIMEOUT_MS).then(() => null),
-  ]);
+    const completed = await Promise.race([
+      new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", (code, signal) => resolve({ code, signal }));
+      }),
+      sleep(GATEWAY_ENTRYPOINT_PREPARE_TIMEOUT_MS).then(() => null),
+    ]);
 
-  if (completed === null) {
-    signalOpenClawTestProcess(child, "SIGKILL");
-    throw new Error(`timeout preparing gateway entrypoint\n${formatLogs(stdout, stderr)}`);
-  }
-  if (completed.code !== 0) {
-    throw new Error(
-      `failed preparing gateway entrypoint (code=${String(completed.code)} signal=${String(
-        completed.signal,
-      )})\n${formatLogs(stdout, stderr)}`,
-    );
+    if (completed === null) {
+      signalOpenClawTestProcess(child, "SIGKILL");
+      throw new Error(`timeout preparing gateway entrypoint\n${formatLogs(stdout, stderr)}`);
+    }
+    if (completed.code !== 0) {
+      throw new Error(
+        `failed preparing gateway entrypoint (code=${String(completed.code)} signal=${String(
+          completed.signal,
+        )})\n${formatLogs(stdout, stderr)}`,
+      );
+    }
+  } finally {
+    await prepareEnv.cleanup();
   }
 
   return (await resolveBuiltGatewayEntrypoint(cwd)) ?? ["scripts/run-node.mjs"];
@@ -534,6 +599,7 @@ function signalOpenClawTestProcess(
 
 export const testing = {
   appendLogChunk,
+  createGatewayEntrypointPrepareEnv,
   createBoundedStringLog,
   formatLogs,
   hasChildExited,

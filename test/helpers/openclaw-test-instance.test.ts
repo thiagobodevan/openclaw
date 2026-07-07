@@ -1,5 +1,6 @@
 // OpenClaw test instance tests cover spawned test instance lifecycle.
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createOpenClawTestInstance, testing } from "./openclaw-test-instance.js";
@@ -36,6 +37,33 @@ describe("openclaw test instance", () => {
     expect(testing.hasChildExited({ exitCode: null, signalCode: "SIGTERM" })).toBe(true);
     expect(testing.hasChildExited({ exitCode: 0, signalCode: null })).toBe(true);
     expect(testing.hasChildExited({ exitCode: null, signalCode: null })).toBe(false);
+  });
+
+  it("pins pnpm for gateway entrypoint preparation", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-gateway-prep-env-"));
+    const packageManager = "pnpm@11.2.2+sha512.test";
+    await fs.writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ packageManager }, null, 2),
+      "utf8",
+    );
+
+    const prepareEnv = await testing.createGatewayEntrypointPrepareEnv(root, {
+      PATH: "/usr/bin",
+    });
+    try {
+      const pathEntries = prepareEnv.env.PATH?.split(path.delimiter) ?? [];
+      expect(pathEntries[0]).toBe(path.dirname(prepareEnv.env.npm_execpath ?? ""));
+      expect(prepareEnv.env.VITEST).toBe("1");
+      expect(await fs.readFile(prepareEnv.env.npm_execpath ?? "", "utf8")).toContain(
+        JSON.stringify(packageManager),
+      );
+    } finally {
+      await prepareEnv.cleanup();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+
+    await expectPathMissing(prepareEnv.env.npm_execpath ?? "");
   });
 
   it("fails startup waits immediately after signaled gateway exits", async () => {
