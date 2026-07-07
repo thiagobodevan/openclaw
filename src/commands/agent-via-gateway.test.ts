@@ -1647,16 +1647,18 @@ describe("agentCliCommand", () => {
     });
   });
 
-  it("starts the diagnostics exporter for gateway to embedded fallback runs", async () => {
+  it("starts and flushes the diagnostics exporter for gateway to embedded fallback runs", async () => {
     await withTempStore(async () => {
       callGateway.mockRejectedValue(createGatewayClosedError());
-      startOneShotDiagnosticsExporters.mockResolvedValue(null);
+      const stop = vi.fn(async () => {});
+      startOneShotDiagnosticsExporters.mockResolvedValue({ stop });
       mockLocalAgentReply();
 
       await agentCliCommand({ message: "hi", to: "+1555" }, runtime);
 
       expect(agentCommand).toHaveBeenCalledTimes(1);
       expect(startOneShotDiagnosticsExporters).toHaveBeenCalledTimes(1);
+      expect(stop).toHaveBeenCalledTimes(1);
     });
   });
 
