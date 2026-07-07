@@ -1,0 +1,473 @@
+// QA Lab tests preserve the explicit disposition of every retired qa-matrix scenario id.
+import { describe, expect, it } from "vitest";
+import { readQaScenarioById } from "../../scenario-catalog.js";
+
+type LegacyMatrixScenarioDisposition = {
+  category:
+    | "canonical-replacement"
+    | "native-e2ee"
+    | "native-lifecycle-approval"
+    | "portable-flow-current-adapter"
+    | "portable-flow-message-capabilities"
+    | "portable-flow-topology-actors";
+  legacyId: string;
+  status: "migrated" | "planned";
+  targetId?: string;
+};
+
+const LEGACY_MATRIX_SCENARIO_DISPOSITIONS = [
+  {
+    legacyId: "matrix-thread-follow-up",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "thread-follow-up",
+  },
+  {
+    legacyId: "matrix-thread-root-preservation",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "matrix-thread-root-preservation",
+  },
+  {
+    legacyId: "matrix-thread-nested-reply-shape",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "matrix-thread-nested-reply-shape",
+  },
+  {
+    legacyId: "matrix-thread-isolation",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "thread-isolation",
+  },
+  {
+    legacyId: "matrix-subagent-thread-spawn",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "subagent-thread-spawn",
+  },
+  {
+    legacyId: "matrix-top-level-reply-shape",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "channel-top-level-reply-shape",
+  },
+  {
+    legacyId: "matrix-room-thread-reply-override",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "thread-reply-override",
+  },
+  {
+    legacyId: "matrix-room-partial-streaming-preview",
+    category: "portable-flow-message-capabilities",
+    status: "migrated",
+    targetId: "matrix-room-partial-streaming-preview",
+  },
+  {
+    legacyId: "matrix-room-quiet-streaming-preview",
+    category: "portable-flow-message-capabilities",
+    status: "migrated",
+    targetId: "matrix-room-quiet-streaming-preview",
+  },
+  {
+    legacyId: "matrix-room-tool-progress-preview",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-tool-progress-command-preview",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-tool-progress-preview-opt-out",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-tool-progress-error",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-tool-progress-mention-safety",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-block-streaming",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-image-understanding-attachment",
+    category: "portable-flow-message-capabilities",
+    status: "migrated",
+    targetId: "matrix-room-image-understanding-attachment",
+  },
+  {
+    legacyId: "matrix-room-generated-image-delivery",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-media-type-coverage",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-voice-preflight-mention",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-attachment-only-ignored",
+    category: "portable-flow-message-capabilities",
+    status: "migrated",
+    targetId: "matrix-attachment-only-ignored",
+  },
+  {
+    legacyId: "matrix-unsupported-media-safe",
+    category: "portable-flow-message-capabilities",
+    status: "migrated",
+    targetId: "matrix-unsupported-media-safe",
+  },
+  {
+    legacyId: "matrix-dm-reply-shape",
+    category: "portable-flow-topology-actors",
+    status: "migrated",
+    targetId: "dm-chat-baseline",
+  },
+  {
+    legacyId: "matrix-dm-shared-session-notice",
+    category: "portable-flow-topology-actors",
+    status: "migrated",
+    targetId: "dm-shared-session",
+  },
+  {
+    legacyId: "matrix-dm-thread-reply-override",
+    category: "portable-flow-topology-actors",
+    status: "migrated",
+    targetId: "matrix-dm-thread-reply-override",
+  },
+  {
+    legacyId: "matrix-dm-per-room-session-override",
+    category: "portable-flow-topology-actors",
+    status: "migrated",
+    targetId: "dm-per-room-session",
+  },
+  {
+    legacyId: "matrix-room-autojoin-invite",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-secondary-room-reply",
+    category: "portable-flow-topology-actors",
+    status: "migrated",
+    targetId: "channel-secondary-conversation-isolation",
+  },
+  {
+    legacyId: "matrix-secondary-room-open-trigger",
+    category: "portable-flow-topology-actors",
+    status: "migrated",
+    targetId: "matrix-secondary-room-open-trigger",
+  },
+  {
+    legacyId: "matrix-reaction-notification",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-reaction-threaded",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-reaction-not-a-reply",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-reaction-redaction-observed",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-approval-exec-metadata-single-event",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-approval-exec-metadata-chunked",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-approval-plugin-metadata-single-event",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-approval-deny-reaction",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-approval-thread-target",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-approval-channel-target-both",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-initial-catchup-then-incremental",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-stale-sync-replay-dedupe",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-room-membership-loss",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-homeserver-restart-resume",
+    category: "native-lifecycle-approval",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-mention-gating",
+    category: "canonical-replacement",
+    status: "migrated",
+    targetId: "channel-mention-gating",
+  },
+  {
+    legacyId: "matrix-allowbots-default-block",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-true-unmentioned-open-room",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-mentions-mentioned-room",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-mentions-unmentioned-open-room-block",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-mentions-dm-unmentioned",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-room-override-blocks-account-true",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-room-override-enables-account-off",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-allowbots-self-sender-ignored",
+    category: "portable-flow-topology-actors",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-mxid-prefixed-command-block",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "matrix-mxid-prefixed-command-block",
+  },
+  {
+    legacyId: "matrix-mention-metadata-spoof-block",
+    category: "portable-flow-current-adapter",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-observer-allowlist-override",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "matrix-allowlist-hot-reload",
+  },
+  {
+    legacyId: "matrix-allowlist-block",
+    category: "canonical-replacement",
+    status: "migrated",
+    targetId: "channel-sender-allowlist",
+  },
+  {
+    legacyId: "matrix-multi-actor-ordering",
+    category: "portable-flow-current-adapter",
+    status: "migrated",
+    targetId: "channel-multi-actor-ordering",
+  },
+  {
+    legacyId: "matrix-inbound-edit-ignored",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-inbound-edit-no-duplicate-trigger",
+    category: "portable-flow-message-capabilities",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-basic-reply", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-state-after-missing-encryption",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-thread-follow-up", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-bootstrap-success", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-recovery-key-lifecycle", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-recovery-owner-verification-required",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-cli-account-add-enable-e2ee",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-cli-encryption-setup", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-cli-encryption-setup-idempotent",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-cli-encryption-setup-bootstrap-failure",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-cli-recovery-key-setup", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-cli-recovery-key-invalid", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-cli-encryption-setup-multi-account",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-cli-setup-then-gateway-reply",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-cli-self-verification", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-state-loss-external-recovery-key",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-state-loss-stored-recovery-key",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-state-loss-no-recovery-key",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-stale-recovery-key-after-backup-reset",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-server-backup-deleted-local-state-intact",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-server-backup-deleted-local-reupload-restores",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-corrupt-crypto-idb-snapshot",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-server-device-deleted-local-state-intact",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-server-device-deleted-relogin-recovers",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-sync-state-loss-crypto-intact",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  {
+    legacyId: "matrix-e2ee-history-exists-backup-empty",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-device-sas-verification", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-qr-verification", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-stale-device-hygiene", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-dm-sas-verification", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-restart-resume", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-verification-notice-no-trigger",
+    category: "native-e2ee",
+    status: "planned",
+  },
+  { legacyId: "matrix-e2ee-artifact-redaction", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-media-image", category: "native-e2ee", status: "planned" },
+  { legacyId: "matrix-e2ee-key-bootstrap-failure", category: "native-e2ee", status: "planned" },
+  {
+    legacyId: "matrix-e2ee-wrong-account-recovery-key",
+    category: "native-e2ee",
+    status: "planned",
+  },
+] as const satisfies readonly LegacyMatrixScenarioDisposition[];
+
+describe("retired qa-matrix scenario parity ledger", () => {
+  it("classifies all 94 legacy scenario ids exactly once", () => {
+    const legacyIds = LEGACY_MATRIX_SCENARIO_DISPOSITIONS.map((entry) => entry.legacyId);
+    expect(legacyIds).toHaveLength(94);
+    expect(new Set(legacyIds).size).toBe(94);
+  });
+
+  it("keeps every completed migration attached to a canonical QA Lab scenario", () => {
+    const migrated = LEGACY_MATRIX_SCENARIO_DISPOSITIONS.filter(
+      (entry) => entry.status === "migrated",
+    );
+    expect(migrated.length).toBeGreaterThan(0);
+    for (const entry of migrated) {
+      expect(entry.targetId, entry.legacyId).toBeTruthy();
+      expect(readQaScenarioById(entry.targetId ?? "").id).toBe(entry.targetId);
+    }
+  });
+
+  it("does not call a planned scenario migrated without a canonical target", () => {
+    for (const entry of LEGACY_MATRIX_SCENARIO_DISPOSITIONS) {
+      expect(entry.status === "migrated").toBe(Boolean(entry.targetId));
+    }
+  });
+});

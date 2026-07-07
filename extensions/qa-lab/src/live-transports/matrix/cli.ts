@@ -5,7 +5,7 @@ import {
   type LiveTransportQaCliRegistration,
   type LiveTransportQaCommandOptions,
 } from "../shared/live-transport-cli.js";
-import { MATRIX_QA_RELEASE_SCENARIO_IDS } from "./profiles.js";
+import { MATRIX_QA_ALL_SCENARIO_IDS } from "./profiles.js";
 
 type MatrixQaCliRuntime = typeof import("./cli.runtime.js");
 type MatrixQaAdapterRuntime = typeof import("./adapter.runtime.js");
@@ -24,7 +24,7 @@ async function runQaMatrix(opts: LiveTransportQaCommandOptions) {
 export const matrixQaAdapterFactory: NonNullable<LiveTransportQaCliRegistration["adapterFactory"]> =
   {
     id: "matrix",
-    scenarioIds: MATRIX_QA_RELEASE_SCENARIO_IDS,
+    scenarioIds: MATRIX_QA_ALL_SCENARIO_IDS,
     matches: ({ channelId, driver }) => driver === "live" && channelId === "matrix",
     async create(context) {
       return await (await loadMatrixQaAdapterRuntime()).createMatrixQaTransportAdapter(context);

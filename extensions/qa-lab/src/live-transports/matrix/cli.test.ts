@@ -9,10 +9,35 @@ vi.mock("./cli.runtime.js", () => ({ runQaMatrixCommand }));
 import { matrixQaAdapterFactory, matrixQaCliRegistration } from "./cli.js";
 
 describe("QA Lab Matrix CLI registration", () => {
-  it("keeps the canonical Matrix release scenarios on the live adapter", () => {
+  it("keeps every canonical Matrix profile scenario on the live adapter", () => {
     expect(matrixQaAdapterFactory.scenarioIds).toEqual([
       "channel-chat-baseline",
       "matrix-allowlist-hot-reload",
+      "channel-mention-gating",
+      "channel-sender-allowlist",
+      "channel-multi-actor-ordering",
+      "channel-secondary-conversation-isolation",
+      "channel-top-level-reply-shape",
+      "dm-chat-baseline",
+      "dm-per-room-session",
+      "dm-shared-session",
+      "matrix-dm-thread-reply-override",
+      "thread-follow-up",
+      "matrix-thread-root-preservation",
+      "matrix-thread-nested-reply-shape",
+      "thread-isolation",
+      "thread-reply-override",
+      "subagent-thread-spawn",
+      "matrix-mxid-prefixed-command-block",
+      "matrix-secondary-room-open-trigger",
+      "matrix-room-partial-streaming-preview",
+      "matrix-room-quiet-streaming-preview",
+      "matrix-room-image-understanding-attachment",
+      "matrix-attachment-only-ignored",
+      "matrix-unsupported-media-safe",
+      "matrix-restart-resume",
+      "matrix-restart-replay-dedupe",
+      "matrix-post-restart-room-continue",
     ]);
   });
 

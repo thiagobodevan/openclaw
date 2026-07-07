@@ -1,0 +1,49 @@
+title: Matrix attachment-only mention gating
+
+scenario:
+  id: matrix-attachment-only-ignored
+  surface: channels
+  coverage:
+    primary:
+      - channels.mention-gating
+    secondary:
+      - channels.attachments
+  objective: Verify an attachment-only group message cannot bypass Matrix mention gating.
+  successCriteria:
+    - The driver uploads an image without text or mention metadata.
+    - Matrix produces no outbound reply.
+  docsRefs:
+    - docs/channels/matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
+  execution:
+    kind: flow
+    channel: matrix
+    suiteIsolation: isolated
+    config:
+      requiredChannelDriver: live
+
+flow:
+  steps:
+    - name: ignores attachment-only group traffic
+      actions:
+        - resetTransport: true
+        - set: outboundStartIndex
+          value:
+            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound').length"
+        - sendInbound:
+            conversation: { id: main, kind: group }
+            senderId: driver
+            senderName: QA Driver
+            text: ""
+            attachments:
+              - id: matrix-unmentioned-image
+                kind: image
+                mimeType: image/png
+                fileName: matrix-unmentioned.png
+                contentBase64:
+                  expr: imageUnderstandingValidPngBase64
+        - waitForNoOutbound:
+            quietMs: 8000
+            sinceIndex: { ref: outboundStartIndex }
+      details: Attachment-only Matrix traffic stayed gated.

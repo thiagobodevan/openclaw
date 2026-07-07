@@ -199,6 +199,21 @@ export async function createMatrixQaTransportAdapter(
         if (!logicalConversation) {
           continue;
         }
+        const replacedMessageId =
+          event.relatesTo?.relType === "m.replace" && event.relatesTo.eventId
+            ? busMessageIds.get(event.relatesTo.eventId)
+            : undefined;
+        if (replacedMessageId) {
+          const outbound = await context.messages.editMessage({
+            accountId,
+            messageId: replacedMessageId,
+            text,
+            timestamp: event.originServerTs,
+          });
+          nativeEventIds.set(outbound.id, event.eventId);
+          busMessageIds.set(event.eventId, outbound.id);
+          continue;
+        }
         const outbound = await context.messages.addOutboundMessage({
           accountId,
           to: buildQaTarget({
@@ -216,6 +231,7 @@ export async function createMatrixQaTransportAdapter(
             ? busMessageIds.get(event.relatesTo.inReplyToId)
             : undefined,
         });
+        nativeEventIds.set(outbound.id, event.eventId);
         busMessageIds.set(event.eventId, outbound.id);
       }
     }),
@@ -246,13 +262,42 @@ export async function createMatrixQaTransportAdapter(
       const actorClient = input.senderId === "observer" ? observerClient : driverClient;
       const hasPortableMention = input.text.includes("@openclaw");
       const body = input.text.replaceAll("@openclaw", provisioning.sut.userId);
-      const eventId = await actorClient.sendTextMessage({
-        body,
-        mentionUserIds: hasPortableMention ? [provisioning.sut.userId] : undefined,
-        replyToEventId: input.replyToId ? nativeEventIds.get(input.replyToId) : undefined,
-        roomId: room.roomId,
-        threadRootEventId: input.threadId ? nativeEventIds.get(input.threadId) : undefined,
-      });
+      const mentionUserIds = hasPortableMention ? [provisioning.sut.userId] : undefined;
+      const replyToEventId = input.replyToId ? nativeEventIds.get(input.replyToId) : undefined;
+      const threadRootEventId = input.threadId ? nativeEventIds.get(input.threadId) : undefined;
+      let eventId: string;
+      if (input.attachments?.length) {
+        const sentEventIds: string[] = [];
+        for (const [index, attachment] of input.attachments.entries()) {
+          if (!attachment.contentBase64) {
+            throw new Error(
+              `Matrix live QA attachment ${attachment.id} requires inline contentBase64`,
+            );
+          }
+          sentEventIds.push(
+            await actorClient.sendMediaMessage({
+              body: index === 0 ? body : undefined,
+              buffer: Buffer.from(attachment.contentBase64, "base64"),
+              contentType: attachment.mimeType,
+              fileName: attachment.fileName,
+              kind: attachment.kind,
+              mentionUserIds: index === 0 ? mentionUserIds : undefined,
+              replyToEventId,
+              roomId: room.roomId,
+              threadRootEventId,
+            }),
+          );
+        }
+        eventId = sentEventIds[0]!;
+      } else {
+        eventId = await actorClient.sendTextMessage({
+          body,
+          mentionUserIds,
+          replyToEventId,
+          roomId: room.roomId,
+          threadRootEventId,
+        });
+      }
       const message = await context.messages.addInboundMessage({
         ...input,
         accountId,
@@ -282,6 +327,12 @@ export async function createMatrixQaTransportAdapter(
     createRuntimeEnvPatch: () => ({
       OPENCLAW_QA_MATRIX_DRIVER_USER_ID: provisioning.driver.userId,
       OPENCLAW_QA_MATRIX_OBSERVER_USER_ID: provisioning.observer.userId,
+      OPENCLAW_QA_MATRIX_SUT_ACCOUNT_ID: accountId,
+      OPENCLAW_QA_MATRIX_MAIN_ROOM_ID:
+        provisioning.topology.rooms.find((room) => room.key === "main")?.roomId ??
+        provisioning.roomId,
+      OPENCLAW_QA_MATRIX_SECONDARY_ROOM_ID:
+        provisioning.topology.rooms.find((room) => room.key === "secondary")?.roomId ?? "",
     }),
     waitReady: async ({ gateway, timeoutMs, pollIntervalMs }) =>
       await waitForMatrixChannelReady(gateway, accountId, timeoutMs, pollIntervalMs),

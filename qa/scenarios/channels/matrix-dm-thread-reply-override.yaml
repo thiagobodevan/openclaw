@@ -1,0 +1,55 @@
+title: Matrix DM thread reply override
+
+scenario:
+  id: matrix-dm-thread-reply-override
+  surface: channels
+  coverage:
+    primary:
+      - channels.threads
+    secondary:
+      - channels.direct-messages
+  objective: Verify the Matrix DM thread override converts a top-level DM into a threaded reply.
+  gatewayConfigPatch:
+    channels:
+      matrix:
+        accounts:
+          $selectedAccount:
+            threadReplies: off
+            dm:
+              threadReplies: always
+  successCriteria:
+    - A top-level DM receives the exact marker.
+    - The outbound message uses the inbound DM event as its normalized thread root.
+  docsRefs:
+    - docs/channels/matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
+    - extensions/matrix/src/matrix/monitor/threads.ts
+  execution:
+    kind: flow
+    channel: matrix
+    suiteIsolation: isolated
+    config:
+      requiredChannelDriver: live
+      marker: MATRIX-QA-DM-THREAD-OVERRIDE
+
+flow:
+  steps:
+    - name: threads the DM reply on the triggering event
+      actions:
+        - resetTransport: true
+        - sendInbound:
+            conversation: { id: driver-dm, kind: direct }
+            senderId: driver
+            senderName: QA Driver
+            text:
+              expr: "`Reply exactly: ${config.marker}`"
+          saveAs: inbound
+        - waitForOutbound:
+            conversation: { id: driver-dm, kind: direct }
+            textIncludes: { ref: config.marker }
+            threadId: { ref: inbound.id }
+            timeoutMs:
+              expr: liveTurnTimeoutMs(env, 60000)
+          saveAs: outbound
+      detailsExpr: "`${outbound.threadId}: ${outbound.text}`"

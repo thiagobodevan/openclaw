@@ -51,7 +51,7 @@ describe("QA Lab Matrix CLI runtime", () => {
     );
   });
 
-  it("rejects removed private runner profiles", async () => {
+  it("rejects profiles that have not yet completed canonical migration", async () => {
     await expect(runQaMatrixCommand({ profile: "e2ee-deep" })).rejects.toThrow(
       'Unknown QA Lab Matrix profile "e2ee-deep"',
     );

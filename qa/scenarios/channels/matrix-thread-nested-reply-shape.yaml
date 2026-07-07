@@ -1,0 +1,64 @@
+title: Matrix nested thread reply shape
+
+scenario:
+  id: matrix-thread-nested-reply-shape
+  surface: channels
+  coverage:
+    primary:
+      - channels.threads
+  objective: Verify Matrix nested-thread reply fallback metadata targets the original root.
+  successCriteria:
+    - The driver mentions OpenClaw from a nested thread event.
+    - The outbound thread and fallback reply both normalize to the original root.
+  docsRefs:
+    - docs/channels/matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
+    - extensions/matrix/src/matrix/monitor/threads.ts
+  execution:
+    kind: flow
+    channel: matrix
+    suiteIsolation: isolated
+    config:
+      requiredChannelDriver: live
+      marker: MATRIX-QA-NESTED-REPLY-SHAPE
+
+flow:
+  steps:
+    - name: keeps fallback reply metadata on the root event
+      actions:
+        - resetTransport: true
+        - sendInbound:
+            conversation: { id: main, kind: group }
+            senderId: driver
+            senderName: QA Driver
+            text: nested shape root fixture
+          saveAs: root
+        - sendInbound:
+            conversation: { id: main, kind: group }
+            senderId: driver
+            senderName: QA Driver
+            text: nested shape intermediate fixture
+            threadId: { ref: root.id }
+            replyToId: { ref: root.id }
+          saveAs: nested
+        - sendInbound:
+            conversation: { id: main, kind: group }
+            senderId: driver
+            senderName: QA Driver
+            text:
+              expr: "`@openclaw Reply exactly: ${config.marker}`"
+            threadId: { ref: root.id }
+            replyToId: { ref: nested.id }
+        - waitForOutbound:
+            conversation: { id: main, kind: group }
+            textIncludes: { ref: config.marker }
+            threadId: { ref: root.id }
+            timeoutMs:
+              expr: liveTurnTimeoutMs(env, 60000)
+          saveAs: outbound
+        - assert:
+            expr: outbound.threadId === root.id && outbound.replyToId === root.id
+            message:
+              expr: "`expected thread/reply root ${root.id}, got thread=${outbound.threadId ?? '<none>'} reply=${outbound.replyToId ?? '<none>'}`"
+      detailsExpr: "`${outbound.threadId}/${outbound.replyToId}: ${outbound.text}`"

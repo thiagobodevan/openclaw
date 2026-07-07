@@ -1,0 +1,65 @@
+title: Matrix secondary room open trigger
+
+scenario:
+  id: matrix-secondary-room-open-trigger
+  surface: channels
+  coverage:
+    primary:
+      - channels.group-messages
+  objective: Verify a secondary Matrix room can disable mention gating without affecting routing.
+  successCriteria:
+    - The secondary room is patched to require no mention.
+    - An unmentioned turn receives the exact marker in that room.
+  docsRefs:
+    - docs/channels/matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
+  execution:
+    kind: flow
+    channel: matrix
+    suiteIsolation: isolated
+    config:
+      requiredChannelDriver: live
+      marker: MATRIX-QA-SECONDARY-OPEN-TRIGGER
+
+flow:
+  steps:
+    - name: accepts an unmentioned secondary-room turn
+      actions:
+        - set: secondaryRoomId
+          value:
+            expr: env.gateway.runtimeEnv.OPENCLAW_QA_MATRIX_SECONDARY_ROOM_ID
+        - set: sutAccountId
+          value:
+            expr: env.gateway.runtimeEnv.OPENCLAW_QA_MATRIX_SUT_ACCOUNT_ID
+        - assert:
+            expr: Boolean(secondaryRoomId)
+            message: Matrix adapter did not expose the secondary room id
+        - call: patchConfig
+          args:
+            - env: { ref: env }
+              patch:
+                channels:
+                  matrix:
+                    accounts:
+                      expr: "({ [sutAccountId]: { groups: { [secondaryRoomId]: { enabled: true, requireMention: false } } } })"
+                gateway:
+                  reload:
+                    mode: "off"
+              replacePaths:
+                - channels.matrix.accounts
+              restartDelayMs: 300000
+        - resetTransport: true
+        - sendInbound:
+            conversation: { id: secondary, kind: group }
+            senderId: driver
+            senderName: QA Driver
+            text:
+              expr: "`Reply exactly: ${config.marker}`"
+        - waitForOutbound:
+            conversation: { id: secondary, kind: group }
+            textIncludes: { ref: config.marker }
+            timeoutMs:
+              expr: liveTurnTimeoutMs(env, 60000)
+          saveAs: outbound
+      detailsExpr: outbound.text

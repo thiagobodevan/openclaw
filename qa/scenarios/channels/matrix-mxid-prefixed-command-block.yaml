@@ -1,0 +1,48 @@
+title: Matrix MXID-prefixed control command gating
+
+scenario:
+  id: matrix-mxid-prefixed-command-block
+  surface: channels
+  coverage:
+    primary:
+      - channels.command-authorization
+    secondary:
+      - channels.group-messages
+  objective: Verify an MXID-prefixed Matrix control command from an unapproved sender cannot trigger a reply.
+  successCriteria:
+    - The observer sends an explicitly mentioned /new command.
+    - The Matrix account remains silent because the observer is not allowlisted.
+  docsRefs:
+    - docs/channels/matrix.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
+    - extensions/matrix/src/matrix/monitor/handler.ts
+  execution:
+    kind: flow
+    channel: matrix
+    suiteIsolation: isolated
+    summary: Exercise MXID-prefixed command authorization through the canonical Matrix adapter.
+    config:
+      requiredChannelDriver: live
+
+flow:
+  steps:
+    - name: blocks an observer control command
+      actions:
+        - call: waitForGatewayHealthy
+          args: [{ ref: env }, 60000]
+        - call: waitForTransportReady
+          args: [{ ref: env }, 60000]
+        - resetTransport: true
+        - set: outboundStartIndex
+          value:
+            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound').length"
+        - sendInbound:
+            conversation: { id: main, kind: group }
+            senderId: observer
+            senderName: QA Observer
+            text: "@openclaw /new"
+        - waitForNoOutbound:
+            quietMs: 8000
+            sinceIndex: { ref: outboundStartIndex }
+      details: Observer MXID-prefixed /new command remained blocked.

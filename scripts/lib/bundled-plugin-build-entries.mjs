@@ -32,7 +32,7 @@ function parseBundledPluginBuildIdFilter(env = process.env) {
 }
 
 function readBundledPluginPackageJson(packageJsonPath, options = {}) {
-  if (!(options.hasPackageJson ?? fs.existsSync(packageJsonPath))) {
+  if (!(options.hasPackageJson ?? true) || !fs.existsSync(packageJsonPath)) {
     return null;
   }
   try {
@@ -147,6 +147,9 @@ function collectTrackedBundledPluginFiles(cwd) {
   const filesByPlugin = new Map();
   for (const rawLine of result.stdout.split("\n")) {
     const line = toPosixPath(rawLine.trim());
+    if (!line || !fs.existsSync(path.join(cwd, line))) {
+      continue;
+    }
     const match = new RegExp(`^${BUNDLED_PLUGIN_ROOT_DIR}/([^/]+)/(.+)$`).exec(line);
     if (!match) {
       continue;

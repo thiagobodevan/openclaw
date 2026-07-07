@@ -1,0 +1,61 @@
+title: Matrix image understanding attachment
+
+scenario:
+  id: matrix-room-image-understanding-attachment
+  surface: channels
+  coverage:
+    primary:
+      - media.image-understanding
+    secondary:
+      - channels.attachments
+  objective: Verify a Matrix image attachment reaches the model vision input path.
+  successCriteria:
+    - The Matrix adapter uploads and sends the image with the prompt.
+    - The mock provider records at least one image input for the unique prompt.
+    - The channel returns a visible image-description reply.
+  docsRefs:
+    - docs/channels/matrix.md
+    - docs/tools/media-overview.md
+  codeRefs:
+    - extensions/qa-lab/src/live-transports/matrix/adapter.runtime.ts
+  execution:
+    kind: flow
+    channel: matrix
+    suiteIsolation: isolated
+    config:
+      requiredChannelDriver: live
+      requiredProviderMode: mock-openai
+
+flow:
+  steps:
+    - name: delivers a real Matrix image to model vision
+      actions:
+        - assert:
+            expr: env.providerMode === config.requiredProviderMode
+            message: image-input inspection requires mock-openai
+        - resetTransport: true
+        - sendInbound:
+            conversation: { id: main, kind: group }
+            senderId: driver
+            senderName: QA Driver
+            text: "@openclaw Matrix image understanding check. Describe the attached image in one short sentence."
+            attachments:
+              - id: matrix-image-fixture
+                kind: image
+                mimeType: image/png
+                fileName: matrix-image-fixture.png
+                contentBase64:
+                  expr: imageUnderstandingValidPngBase64
+        - waitForOutbound:
+            conversation: { id: main, kind: group }
+            timeoutMs:
+              expr: liveTurnTimeoutMs(env, 60000)
+          saveAs: outbound
+        - set: imageRequest
+          value:
+            expr: "env.mock ? [...(await fetchJson(`${env.mock.baseUrl}/debug/requests`))].find((request) => String(request.prompt ?? '').includes('Matrix image understanding check')) : null"
+        - assert:
+            expr: "!env.mock || (imageRequest && (imageRequest.imageInputCount ?? 0) >= 1)"
+            message:
+              expr: "`expected Matrix image input at the provider, got ${String(imageRequest?.imageInputCount ?? 0)}`"
+      detailsExpr: outbound.text

@@ -44,12 +44,14 @@ There is no separate Matrix runner, scenario catalog, artifact format, or compat
 
 ## Profiles
 
-| Profile     | Scenarios                                                                                                               | Use                                  |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| `release`   | `channel-chat-baseline`, `matrix-allowlist-hot-reload`                                                                  | Release-critical focused proof       |
-| `fast`      | Same as `release`                                                                                                       | Short local or CI proof              |
-| `transport` | Release scenarios plus `matrix-restart-resume`, `matrix-restart-replay-dedupe`, and `matrix-post-restart-room-continue` | Full maintained Matrix scenario set  |
-| `all`       | Same as `transport`                                                                                                     | Default comprehensive Matrix profile |
+| Profile     | Scenarios                                                                                                                                                      | Use                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `release`   | `channel-chat-baseline`, `matrix-allowlist-hot-reload`                                                                                                         | Release-critical focused proof       |
+| `fast`      | Same as `release`                                                                                                                                              | Short local or CI proof              |
+| `transport` | Release scenarios plus portable mention, allowlist, actor-ordering, multi-room, DM, thread, streaming, media, command-gating, and restart scenarios (27 total) | Full migrated Matrix transport set   |
+| `all`       | Same as `transport`                                                                                                                                            | Default comprehensive Matrix profile |
+
+The repo also keeps a test-owned disposition ledger for every scenario retired with the old Matrix-only runner. A legacy scenario is added to these profiles only after it has a canonical QA Lab scenario and uses the shared Matrix adapter or a repo-backed native QA execution.
 
 Repeat `--scenario <id>` to bypass profile selection and run only named canonical QA Lab scenarios.
 

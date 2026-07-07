@@ -72,7 +72,7 @@ pnpm openclaw qa matrix --profile release
 ```
 
 - `fast` and `release`: focused release-critical scenarios.
-- `transport` and `all`: every maintained Matrix scenario.
+- `transport` and `all`: every Matrix scenario migrated to the canonical QA Lab host.
 - The selector delegates to the canonical QA Lab suite host and Matrix live
   adapter; do not create a Matrix-only runner, catalog, or artifact path.
 

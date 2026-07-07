@@ -45,9 +45,11 @@ function collectTrackedBundledPluginSourceCandidates(repoRoot) {
       pluginDir: path.join(repoRoot, "extensions", match[1]),
     };
     if (match[2] === "openclaw.plugin.json") {
-      current.manifestPath = path.join(repoRoot, line);
+      const manifestPath = path.join(repoRoot, line);
+      current.manifestPath = fs.existsSync(manifestPath) ? manifestPath : null;
     } else {
-      current.packageJsonPath = path.join(repoRoot, line);
+      const packageJsonPath = path.join(repoRoot, line);
+      current.packageJsonPath = fs.existsSync(packageJsonPath) ? packageJsonPath : null;
     }
     candidatesByDir.set(match[1], current);
   }

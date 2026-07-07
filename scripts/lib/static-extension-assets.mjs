@@ -108,7 +108,7 @@ export function discoverStaticExtensionAssets(params = {}) {
     rootDir,
     fsImpl,
   )) {
-    if (!(hasPackageJson ?? fsImpl.existsSync(packageJsonPath))) {
+    if (!(hasPackageJson ?? true) || !fsImpl.existsSync(packageJsonPath)) {
       continue;
     }
     const packageJson = readJsonFile(packageJsonPath, fsImpl);
