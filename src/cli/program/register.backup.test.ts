@@ -6,6 +6,10 @@ import { registerBackupCommand } from "./register.backup.js";
 const mocks = vi.hoisted(() => ({
   backupCreateCommand: vi.fn(),
   backupVerifyCommand: vi.fn(),
+  snapshotCreateCommand: vi.fn(),
+  snapshotListCommand: vi.fn(),
+  snapshotRestoreCommand: vi.fn(),
+  snapshotVerifyCommand: vi.fn(),
   runtime: {
     log: vi.fn(),
     error: vi.fn(),
@@ -15,6 +19,10 @@ const mocks = vi.hoisted(() => ({
 
 const backupCreateCommand = mocks.backupCreateCommand;
 const backupVerifyCommand = mocks.backupVerifyCommand;
+const snapshotCreateCommand = mocks.snapshotCreateCommand;
+const snapshotListCommand = mocks.snapshotListCommand;
+const snapshotRestoreCommand = mocks.snapshotRestoreCommand;
+const snapshotVerifyCommand = mocks.snapshotVerifyCommand;
 const runtime = mocks.runtime;
 
 vi.mock("../../commands/backup.js", () => ({
@@ -23,6 +31,13 @@ vi.mock("../../commands/backup.js", () => ({
 
 vi.mock("../../commands/backup-verify.js", () => ({
   backupVerifyCommand: mocks.backupVerifyCommand,
+}));
+
+vi.mock("../../commands/snapshot.js", () => ({
+  snapshotCreateCommand: mocks.snapshotCreateCommand,
+  snapshotListCommand: mocks.snapshotListCommand,
+  snapshotRestoreCommand: mocks.snapshotRestoreCommand,
+  snapshotVerifyCommand: mocks.snapshotVerifyCommand,
 }));
 
 vi.mock("../../runtime.js", () => ({
@@ -40,6 +55,10 @@ describe("registerBackupCommand", () => {
     vi.clearAllMocks();
     backupCreateCommand.mockResolvedValue(undefined);
     backupVerifyCommand.mockResolvedValue(undefined);
+    snapshotCreateCommand.mockResolvedValue(0);
+    snapshotListCommand.mockResolvedValue(0);
+    snapshotRestoreCommand.mockResolvedValue(0);
+    snapshotVerifyCommand.mockResolvedValue(0);
   });
 
   function expectForwardedOptions(command: typeof backupCreateCommand): Record<string, unknown> {
@@ -92,5 +111,136 @@ describe("registerBackupCommand", () => {
     const options = expectForwardedOptions(backupVerifyCommand);
     expect(options.archive).toBe("/tmp/openclaw-backup.tar.gz");
     expect(options.json).toBe(true);
+  });
+
+  it("registers the SQLite snapshot backup command group", () => {
+    const program = new Command();
+
+    registerBackupCommand(program);
+
+    const backup = program.commands.find((command) => command.name() === "backup");
+    const sqlite = backup?.commands.find((command) => command.name() === "sqlite");
+    const snapshot = sqlite?.commands.find((command) => command.name() === "snapshot");
+    expect(snapshot?.commands.map((command) => command.name()).toSorted()).toEqual([
+      "create",
+      "list",
+      "restore",
+      "verify",
+    ]);
+  });
+
+  it("runs SQLite snapshot create with forwarded options", async () => {
+    await runCli([
+      "backup",
+      "sqlite",
+      "snapshot",
+      "create",
+      "--db",
+      "/tmp/source.sqlite",
+      "--repository",
+      "/tmp/snapshots",
+      "--id",
+      "global",
+      "--kind",
+      "control-plane",
+      "--json",
+    ]);
+
+    expect(snapshotCreateCommand).toHaveBeenCalledWith(
+      {
+        db: "/tmp/source.sqlite",
+        repository: "/tmp/snapshots",
+        id: "global",
+        kind: "control-plane",
+        json: true,
+      },
+      runtime,
+    );
+  });
+
+  it("runs SQLite snapshot create for named OpenClaw targets", async () => {
+    await runCli([
+      "backup",
+      "sqlite",
+      "snapshot",
+      "create",
+      "--target",
+      "global",
+      "--repository",
+      "/tmp/snapshots",
+    ]);
+
+    expect(snapshotCreateCommand).toHaveBeenCalledWith(
+      {
+        target: "global",
+        repository: "/tmp/snapshots",
+      },
+      runtime,
+    );
+
+    await runCli([
+      "backup",
+      "sqlite",
+      "snapshot",
+      "create",
+      "--agent",
+      "main",
+      "--repository",
+      "/tmp/snapshots",
+    ]);
+
+    expect(snapshotCreateCommand).toHaveBeenLastCalledWith(
+      {
+        agent: "main",
+        repository: "/tmp/snapshots",
+      },
+      runtime,
+    );
+  });
+
+  it("runs SQLite snapshot list with forwarded options", async () => {
+    await runCli([
+      "backup",
+      "sqlite",
+      "snapshot",
+      "list",
+      "--repository",
+      "/tmp/snapshots",
+      "--json",
+    ]);
+
+    expect(snapshotListCommand).toHaveBeenCalledWith(
+      { repository: "/tmp/snapshots", json: true },
+      runtime,
+    );
+  });
+
+  it("runs SQLite snapshot verify with forwarded options", async () => {
+    await runCli(["backup", "sqlite", "snapshot", "verify", "/tmp/snapshots/one", "--json"]);
+
+    expect(snapshotVerifyCommand).toHaveBeenCalledWith(
+      "/tmp/snapshots/one",
+      { json: true },
+      runtime,
+    );
+  });
+
+  it("runs SQLite snapshot restore with forwarded options", async () => {
+    await runCli([
+      "backup",
+      "sqlite",
+      "snapshot",
+      "restore",
+      "/tmp/snapshots/one",
+      "--target",
+      "/tmp/restore.sqlite",
+      "--json",
+    ]);
+
+    expect(snapshotRestoreCommand).toHaveBeenCalledWith(
+      "/tmp/snapshots/one",
+      { target: "/tmp/restore.sqlite", json: true },
+      runtime,
+    );
   });
 });

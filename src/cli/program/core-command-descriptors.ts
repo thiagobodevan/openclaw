@@ -34,12 +34,7 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
   },
   {
     name: "backup",
-    description: "Create and verify local backup archives for OpenClaw state",
-    hasSubcommands: true,
-  },
-  {
-    name: "snapshot",
-    description: "Create, verify, list, and restore SQLite snapshots",
+    description: "Create archives and SQLite-safe backup artifacts for OpenClaw state",
     hasSubcommands: true,
   },
   {

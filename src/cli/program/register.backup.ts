@@ -4,6 +4,16 @@ import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
 import { theme } from "../../../packages/terminal-core/src/theme.js";
 import { backupVerifyCommand } from "../../commands/backup-verify.js";
 import { backupCreateCommand } from "../../commands/backup.js";
+import {
+  snapshotCreateCommand,
+  snapshotListCommand,
+  snapshotRestoreCommand,
+  snapshotVerifyCommand,
+  type SnapshotCreateOptions,
+  type SnapshotJsonOptions,
+  type SnapshotRepositoryOptions,
+  type SnapshotRestoreOptions,
+} from "../../commands/snapshot.js";
 import { defaultRuntime } from "../../runtime.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
 import { formatHelpExamples } from "../help-format.js";
@@ -12,7 +22,7 @@ import { formatHelpExamples } from "../help-format.js";
 export function registerBackupCommand(program: Command) {
   const backup = program
     .command("backup")
-    .description("Create and verify local backup archives for OpenClaw state")
+    .description("Create archives and SQLite-safe artifacts for OpenClaw state")
     .addHelpText(
       "after",
       () =>
@@ -89,6 +99,76 @@ export function registerBackupCommand(program: Command) {
           archive: archive as string,
           json: Boolean(opts.json),
         });
+      });
+    });
+
+  registerBackupSqliteSnapshotCommands(backup);
+}
+
+function registerBackupSqliteSnapshotCommands(backup: Command): void {
+  const sqlite = backup
+    .command("sqlite")
+    .description("SQLite-specific backup artifact helpers")
+    .action(() => {
+      sqlite.outputHelp();
+      process.exitCode = 1;
+    });
+
+  const snapshot = sqlite
+    .command("snapshot")
+    .description("Create, verify, list, and restore SQLite snapshot artifacts")
+    .action(() => {
+      snapshot.outputHelp();
+      process.exitCode = 1;
+    });
+
+  snapshot
+    .command("create")
+    .description("Create a consistent SQLite snapshot in a local repository")
+    .option("--db <path>", "SQLite database path")
+    .option("--target <target>", "OpenClaw database target (global)")
+    .option("--agent <id>", "OpenClaw agent id for the per-agent database")
+    .requiredOption("--repository <path>", "Snapshot repository directory")
+    .option("--id <id>", "Logical database id recorded in the manifest")
+    .option("--kind <kind>", "Logical database kind recorded in the manifest")
+    .option("--json", "Emit JSON output")
+    .action(async (options: SnapshotCreateOptions) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        process.exitCode = await snapshotCreateCommand(options, defaultRuntime);
+      });
+    });
+
+  snapshot
+    .command("verify")
+    .description("Verify a snapshot manifest, artifact hash, and SQLite integrity")
+    .argument("<snapshot>", "Snapshot directory")
+    .option("--json", "Emit JSON output")
+    .action(async (snapshotPath: string, options: SnapshotJsonOptions) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        process.exitCode = await snapshotVerifyCommand(snapshotPath, options, defaultRuntime);
+      });
+    });
+
+  snapshot
+    .command("restore")
+    .description("Restore a verified snapshot to a new SQLite database path")
+    .argument("<snapshot>", "Snapshot directory")
+    .requiredOption("--target <path>", "Target SQLite database path; must not already exist")
+    .option("--json", "Emit JSON output")
+    .action(async (snapshotPath: string, options: SnapshotRestoreOptions) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        process.exitCode = await snapshotRestoreCommand(snapshotPath, options, defaultRuntime);
+      });
+    });
+
+  snapshot
+    .command("list")
+    .description("List snapshots in a local repository")
+    .requiredOption("--repository <path>", "Snapshot repository directory")
+    .option("--json", "Emit JSON output")
+    .action(async (options: SnapshotRepositoryOptions) => {
+      await runCommandWithRuntime(defaultRuntime, async () => {
+        process.exitCode = await snapshotListCommand(options, defaultRuntime);
       });
     });
 }

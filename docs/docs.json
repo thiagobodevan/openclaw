@@ -1725,7 +1725,6 @@
                     "group": "Gateway and service",
                     "pages": [
                       "cli/backup",
-                      "cli/snapshot",
                       "cli/crestodian",
                       "cli/daemon",
                       "cli/doctor",
