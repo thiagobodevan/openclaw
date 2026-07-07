@@ -277,6 +277,7 @@ export async function createMatrixQaTransportAdapter(
     label: "Matrix live",
     accountId,
     requiredPluginIds: ["matrix"],
+    scenarioRetryCount: 0,
     supportedActions: ["delete", "edit", "react"],
     assertTransportHealthy() {
       if (pollingError) {

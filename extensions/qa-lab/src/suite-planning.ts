@@ -306,6 +306,8 @@ function shouldUseIsolatedQaSuiteScenarioWorkers(params: {
       params.scenarios.some(
         (scenario) =>
           isQaMergePatchObject(scenario.gatewayConfigPatch) ||
+          (scenario.execution.kind === "transport" &&
+            scenario.execution.providerMode !== undefined) ||
           (scenario.execution.kind === "flow" && scenario.execution.transportPolicy !== undefined),
       ))
   );

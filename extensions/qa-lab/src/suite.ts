@@ -1285,32 +1285,43 @@ async function captureGatewayHeapSnapshotCheckpoint(params: {
 export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuiteResult> {
   const startedAt = new Date();
   const repoRoot = path.resolve(params?.repoRoot ?? process.cwd());
-  const providerMode = normalizeQaProviderMode(
+  const requestedProviderMode = normalizeQaProviderMode(
     params?.providerMode ?? DEFAULT_QA_LIVE_PROVIDER_MODE,
   );
   const transportId = normalizeQaTransportId(params?.transportId);
-  const primaryModel = normalizeQaSuiteModelRef(
+  const requestedPrimaryModel = normalizeQaSuiteModelRef(
     params?.primaryModel,
-    defaultQaModelForMode(providerMode),
+    defaultQaModelForMode(requestedProviderMode),
   );
-  const alternateModel = normalizeQaSuiteModelRef(
+  const requestedAlternateModel = normalizeQaSuiteModelRef(
     params?.alternateModel,
-    defaultQaModelForMode(providerMode, true),
+    defaultQaModelForMode(requestedProviderMode, true),
   );
-  const fastMode =
-    typeof params?.fastMode === "boolean"
-      ? params.fastMode
-      : isQaFastModeEnabled({ primaryModel, alternateModel });
   const outputDir = await resolveQaSuiteOutputDir(repoRoot, params?.outputDir);
   const catalog = readQaBootstrapScenarioCatalog();
   const selectedScenarios = selectQaFlowSuiteScenarios({
     scenarios: catalog.scenarios,
     scenarioIds: params?.scenarioIds,
-    providerMode,
-    primaryModel,
+    providerMode: requestedProviderMode,
+    primaryModel: requestedPrimaryModel,
     channelDriver: params?.channelDriver ?? params?.channelDriverSelection?.channelDriver,
     claudeCliAuthMode: params?.claudeCliAuthMode,
   });
+  const selectedProviderMode =
+    selectedScenarios.length === 1 && selectedScenarios[0]?.execution.kind === "transport"
+      ? selectedScenarios[0].execution.providerMode
+      : undefined;
+  const providerMode = selectedProviderMode ?? requestedProviderMode;
+  const primaryModel = selectedProviderMode
+    ? defaultQaModelForMode(providerMode)
+    : requestedPrimaryModel;
+  const alternateModel = selectedProviderMode
+    ? defaultQaModelForMode(providerMode, true)
+    : requestedAlternateModel;
+  const fastMode =
+    typeof params?.fastMode === "boolean"
+      ? params.fastMode
+      : isQaFastModeEnabled({ primaryModel, alternateModel });
   const enabledPluginIds = [
     ...new Set([
       ...collectQaSuitePluginIds(selectedScenarios),
@@ -1819,8 +1830,12 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
       });
 
       const runSelectedScenario = () => runScenarioDefinition(activeEnv, scenario);
+      const scenarioRetryCount =
+        scenario.execution.kind === "transport"
+          ? scenario.execution.retryCount
+          : activeEnv.transport.scenarioRetryCount;
       const result =
-        scenario.execution.kind === "transport" && scenario.execution.retryCount === 0
+        scenarioRetryCount === 0
           ? await runSelectedScenario()
           : await runQaScenarioWithFlakeRetry(runSelectedScenario, () =>
               writeQaSuiteProgress(

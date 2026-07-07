@@ -22,6 +22,7 @@ describe("createQaStateBackedTransportAdapter", () => {
       label: "Live",
       accountId: "sut",
       requiredPluginIds: [],
+      scenarioRetryCount: 0,
       supportedActions: [],
       resetTransport,
       sendInbound: async (input) => state.addInboundMessage(input),
@@ -40,6 +41,7 @@ describe("createQaStateBackedTransportAdapter", () => {
     await adapter.reset();
 
     expect(resetTransport).toHaveBeenCalledOnce();
+    expect(adapter.scenarioRetryCount).toBe(0);
     expect(state.getSnapshot().messages).toHaveLength(0);
   });
 });

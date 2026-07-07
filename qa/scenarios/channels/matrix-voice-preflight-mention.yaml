@@ -18,6 +18,7 @@ scenario:
   execution:
     kind: transport
     channel: matrix
+    providerMode: live-frontier
     summary: Matrix voice notes can trigger mention gating through transcription
     timeoutMs: 180000
     retryCount: 0
@@ -40,4 +41,3 @@ scenario:
               - sut
             name: Matrix QA Media Room
             requireMention: true
-

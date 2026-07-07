@@ -86,6 +86,7 @@ const qaTransportScenarioExecutionSchema = z.object({
   kind: z.literal("transport"),
   summary: z.string().trim().min(1).optional(),
   channel: qaScenarioChannelSchema,
+  providerMode: z.enum(["aimock", "live-frontier", "mock-openai"]).optional(),
   config: qaScenarioConfigSchema.optional(),
   timeoutMs: z.number().int().positive(),
   retryCount: z.number().int().min(0).max(1).default(0),

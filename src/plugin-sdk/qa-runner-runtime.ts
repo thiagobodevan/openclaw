@@ -108,6 +108,7 @@ type QaRunnerTransportAdapterDefinition = {
     replyTo: string;
   };
   createRuntimeEnvPatch?: () => NodeJS.ProcessEnv;
+  scenarioRetryCount?: 0 | 1;
   runScenario?: (input: QaRunnerTransportScenarioInput) => Promise<QaRunnerTransportScenarioResult>;
   handleAction: (params: {
     action: "delete" | "edit" | "react" | "thread-create";

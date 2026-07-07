@@ -32,6 +32,22 @@ function makePlaywrightQaSuiteTestScenario(id: string): ReturnType<typeof makeQa
   };
 }
 
+function makeTransportQaSuiteTestScenario(
+  id: string,
+  providerMode?: "live-frontier" | "mock-openai",
+): ReturnType<typeof makeQaSuiteTestScenario> {
+  return {
+    ...makeQaSuiteTestScenario(id),
+    execution: {
+      kind: "transport",
+      channel: "matrix",
+      timeoutMs: 60_000,
+      retryCount: 0,
+      ...(providerMode ? { providerMode } : {}),
+    },
+  };
+}
+
 describe("qa suite planning helpers", () => {
   it("normalizes suite concurrency to a bounded integer", () => {
     const previous = process.env.OPENCLAW_QA_SUITE_CONCURRENCY;
@@ -503,6 +519,18 @@ describe("qa suite planning helpers", () => {
     ).toBe(false);
   });
 
+  it("isolates serial runs when a transport scenario changes provider mode", () => {
+    expect(
+      shouldUseIsolatedQaSuiteScenarioWorkers({
+        scenarios: [
+          makeTransportQaSuiteTestScenario("default"),
+          makeTransportQaSuiteTestScenario("live-override", "live-frontier"),
+        ],
+        concurrency: 1,
+      }),
+    ).toBe(true);
+  });
+
   it("isolates serial runs when transport policy would leak into another scenario", () => {
     expect(
       shouldUseIsolatedQaSuiteScenarioWorkers({
@@ -598,7 +626,7 @@ describe("qa suite planning helpers", () => {
         primaryModel: "mock-openai/gpt-5.5",
       }),
     ).toThrow(
-      "flow execution requires execution.kind: flow; unsupported scenario(s): playwright (playwright)",
+      "suite execution requires flow or transport scenarios; unsupported scenario(s): playwright (playwright)",
     );
   });
 
