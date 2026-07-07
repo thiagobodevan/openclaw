@@ -90,7 +90,7 @@ next-step checklist for the PR.
    link, current status, and the specific question or remaining evidence.
 
 Keep the PR body current. Comments are useful for discussion, but the PR
-description is the durable summary maintainers and automation come back to.
+description is the durable summary maintainers and automation revisit.
 
 Useful evidence includes focused test output, CI results, screenshots,
 recordings, terminal output, live observations, redacted logs, or artifact
