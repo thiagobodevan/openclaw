@@ -357,6 +357,9 @@
       "@openclaw/terminal-core/theme": [
         "../../dist/plugin-sdk/packages/terminal-core/src/theme.d.ts"
       ],
+      "@openclaw/workboard-contract": [
+        "../../packages/workboard-contract/src/index.ts"
+      ],
       "@openclaw/terminal-core/*": [
         "../../dist/plugin-sdk/packages/terminal-core/src/*.d.ts"
       ],
