@@ -89,7 +89,7 @@ next-step checklist for the PR.
    or the next decision is hard to settle in GitHub comments. Include the PR
    link, current status, and the specific question or remaining evidence.
 
-Keep the PR body current. Comments are useful for discussion, but the PR
+Keep the PR body current. Comments help with discussion, but the PR
 description is the durable summary maintainers and automation revisit.
 
 Useful evidence includes focused test output, CI results, screenshots,
