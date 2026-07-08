@@ -7023,7 +7023,7 @@ public struct SkillsSecurityVerdictsParams: Codable, Sendable {
 
     public init(
         agentid: String? = nil,
-        items: [[String: AnyCodable]]?)
+        items: [[String: AnyCodable]]? = nil)
     {
         self.agentid = agentid
         self.items = items

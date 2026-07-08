@@ -1,8 +1,8 @@
 package ai.openclaw.app.ui
 
+import ai.openclaw.app.GatewayClawHubInstallReview
 import ai.openclaw.app.GatewayClawHubSkillSearchState
 import ai.openclaw.app.GatewayClawHubSkillSummary
-import ai.openclaw.app.GatewayClawHubInstallReview
 import ai.openclaw.app.GatewaySkillSummary
 import ai.openclaw.app.MainViewModel
 import ai.openclaw.app.ui.design.ClawDetailRow
@@ -53,6 +53,8 @@ internal fun SkillsSettingsScreen(
   val skillMutationKeys by viewModel.skillMutationKeys.collectAsState()
   val clawHubSearchState by viewModel.clawHubSkillSearchState.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
+  val operatorAdminScopeAvailable by viewModel.operatorAdminScopeAvailable.collectAsState()
+  val canManageSkills = isConnected && operatorAdminScopeAvailable
   val skills = skillsSummary.skills
   val readyCount = skills.count { skillReady(it) }
   val needsSetupCount = skills.count { skillNeedsSetup(it) }
@@ -80,6 +82,7 @@ internal fun SkillsSettingsScreen(
       skill = selectedSkill,
       skillKey = skillKey,
       isConnected = isConnected,
+      canManageSkills = canManageSkills,
       isMutating = skillKey in skillMutationKeys,
       onSkillEnabledChange = viewModel::setSkillEnabled,
       onBack = { selectedSkillKey = null },
@@ -113,6 +116,15 @@ internal fun SkillsSettingsScreen(
     skillsErrorText?.let { errorText ->
       ClawPanel {
         Text(text = errorText, style = ClawTheme.type.body, color = ClawTheme.colors.warning)
+      }
+    }
+    if (isConnected && !operatorAdminScopeAvailable) {
+      ClawPanel {
+        Text(
+          text = "Skill toggles and ClawHub installs require operator.admin. Reconnect with an admin-capable gateway token.",
+          style = ClawTheme.type.body,
+          color = ClawTheme.colors.warning,
+        )
       }
     }
     SkillStatusFilterPanel(
@@ -151,7 +163,7 @@ internal fun SkillsSettingsScreen(
       else ->
         SkillsPanel(
           skills = visibleSkills,
-          isConnected = isConnected,
+          canManageSkills = canManageSkills,
           mutatingSkillKeys = skillMutationKeys,
           onSkillClick = { selectedSkillKey = it.skillKey },
           onSkillEnabledChange = viewModel::setSkillEnabled,
@@ -161,6 +173,7 @@ internal fun SkillsSettingsScreen(
       state = clawHubSearchState,
       query = clawHubQuery,
       isConnected = isConnected,
+      canManageSkills = canManageSkills,
       onQueryChange = { clawHubQuery = it },
       onSearch = { viewModel.searchClawHubSkills(clawHubQuery) },
       onInstall = viewModel::reviewClawHubSkillInstall,
@@ -177,6 +190,7 @@ internal fun SkillsSettingsScreen(
   clawHubSearchState.installReview?.let { review ->
     ClawHubInstallReviewDialog(
       review = review,
+      canManageSkills = canManageSkills,
       onDismiss = viewModel::dismissClawHubSkillInstallReview,
       onInstall = {
         viewModel.dismissClawHubSkillInstallReview()
@@ -193,6 +207,7 @@ internal fun SkillsSettingsScreen(
 @Composable
 private fun ClawHubInstallReviewDialog(
   review: GatewayClawHubInstallReview,
+  canManageSkills: Boolean,
   onDismiss: () -> Unit,
   onInstall: () -> Unit,
 ) {
@@ -225,7 +240,7 @@ private fun ClawHubInstallReviewDialog(
     },
     confirmButton = {
       if (!review.blocked) {
-        TextButton(onClick = onInstall) {
+        TextButton(onClick = onInstall, enabled = canManageSkills) {
           Text(text = if (review.requiresRiskAcknowledgement) "Acknowledge and install" else "Install")
         }
       }
@@ -289,6 +304,7 @@ private fun SkillDetailSettingsScreen(
   skill: GatewaySkillSummary?,
   skillKey: String,
   isConnected: Boolean,
+  canManageSkills: Boolean,
   isMutating: Boolean,
   onSkillEnabledChange: (String, Boolean) -> Unit,
   onBack: () -> Unit,
@@ -312,7 +328,7 @@ private fun SkillDetailSettingsScreen(
       )
       SkillSwitchPanel(
         skill = summary,
-        isConnected = isConnected,
+        canManageSkills = canManageSkills,
         isMutating = isMutating,
         onSkillEnabledChange = onSkillEnabledChange,
       )
@@ -347,7 +363,7 @@ private fun InstalledSkillSearchPanel(
 @Composable
 private fun SkillSwitchPanel(
   skill: GatewaySkillSummary,
-  isConnected: Boolean,
+  canManageSkills: Boolean,
   isMutating: Boolean,
   onSkillEnabledChange: (String, Boolean) -> Unit,
 ) {
@@ -364,7 +380,7 @@ private fun SkillSwitchPanel(
       Switch(
         checked = !skill.disabled,
         onCheckedChange = { onSkillEnabledChange(skill.skillKey, it) },
-        enabled = isConnected && !isMutating,
+        enabled = canManageSkills && !isMutating,
       )
     }
   }
@@ -419,7 +435,7 @@ private fun SkillDetailPanel(
 @Composable
 private fun SkillsPanel(
   skills: List<GatewaySkillSummary>,
-  isConnected: Boolean,
+  canManageSkills: Boolean,
   mutatingSkillKeys: Set<String>,
   onSkillClick: (GatewaySkillSummary) -> Unit,
   onSkillEnabledChange: (String, Boolean) -> Unit,
@@ -427,7 +443,7 @@ private fun SkillsPanel(
   ClawListPanel(items = skills) { skill ->
     SkillListRow(
       skill = skill,
-      isConnected = isConnected,
+      canManageSkills = canManageSkills,
       isMutating = skill.skillKey in mutatingSkillKeys,
       onClick = { onSkillClick(skill) },
       onSkillEnabledChange = onSkillEnabledChange,
@@ -438,7 +454,7 @@ private fun SkillsPanel(
 @Composable
 private fun SkillListRow(
   skill: GatewaySkillSummary,
-  isConnected: Boolean,
+  canManageSkills: Boolean,
   isMutating: Boolean,
   onClick: () -> Unit,
   onSkillEnabledChange: (String, Boolean) -> Unit,
@@ -454,7 +470,7 @@ private fun SkillListRow(
         Switch(
           checked = !skill.disabled,
           onCheckedChange = { onSkillEnabledChange(skill.skillKey, it) },
-          enabled = isConnected && !isMutating,
+          enabled = canManageSkills && !isMutating,
         )
         Icon(
           imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -471,6 +487,7 @@ private fun ClawHubSkillSearchPanel(
   state: GatewayClawHubSkillSearchState,
   query: String,
   isConnected: Boolean,
+  canManageSkills: Boolean,
   onQueryChange: (String) -> Unit,
   onSearch: () -> Unit,
   onInstall: (GatewayClawHubSkillSummary) -> Unit,
@@ -503,7 +520,7 @@ private fun ClawHubSkillSearchPanel(
         ClawSecondaryButton(
           text = "Acknowledge risk and install",
           onClick = { onAcknowledgeInstall(slug, state.acknowledgeVersion) },
-          enabled = isConnected && slug !in state.installingSlugs,
+          enabled = canManageSkills && slug !in state.installingSlugs,
         )
       }
       state.messageText?.let { messageText ->
@@ -515,7 +532,7 @@ private fun ClawHubSkillSearchPanel(
     ClawListPanel(items = state.results) { result ->
       ClawHubSkillRow(
         result = result,
-        isConnected = isConnected,
+        canManageSkills = canManageSkills,
         reviewing = result.slug == state.reviewingSlug,
         installing = result.slug in state.installingSlugs,
         onInstall = onInstall,
@@ -527,7 +544,7 @@ private fun ClawHubSkillSearchPanel(
 @Composable
 private fun ClawHubSkillRow(
   result: GatewayClawHubSkillSummary,
-  isConnected: Boolean,
+  canManageSkills: Boolean,
   reviewing: Boolean,
   installing: Boolean,
   onInstall: (GatewayClawHubSkillSummary) -> Unit,
@@ -538,13 +555,14 @@ private fun ClawHubSkillRow(
     leading = { ClawTextBadge(text = "CH") },
     trailing = {
       ClawSecondaryButton(
-        text = when {
-          reviewing -> "Reviewing"
-          installing -> "Installing"
-          else -> "Install"
-        },
+        text =
+          when {
+            reviewing -> "Reviewing"
+            installing -> "Installing"
+            else -> "Install"
+          },
         onClick = { onInstall(result) },
-        enabled = isConnected && !reviewing && !installing,
+        enabled = canManageSkills && !reviewing && !installing,
       )
     },
   )

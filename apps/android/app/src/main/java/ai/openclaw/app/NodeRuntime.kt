@@ -4510,6 +4510,10 @@ class NodeRuntime private constructor(
       _skillsErrorText.value = "Connect the gateway to update skills."
       return
     }
+    if (!operatorAdminScopeAvailable.value) {
+      _skillsErrorText.value = "This gateway connection needs operator.admin to update skills."
+      return
+    }
     publishGatewayData(gatewayScope) {
       _skillMutationKeys.value = _skillMutationKeys.value + skillKey
       _skillsErrorText.value = null
@@ -4613,6 +4617,18 @@ class NodeRuntime private constructor(
           reviewingSlug = null,
           installReview = null,
           errorText = "Connect the gateway to review ClawHub skills before installing.",
+          messageText = null,
+        )
+      return
+    }
+    if (!operatorAdminScopeAvailable.value) {
+      _clawHubSkillSearchState.value =
+        _clawHubSkillSearchState.value.copy(
+          acknowledgeSlug = null,
+          acknowledgeVersion = null,
+          installReview = null,
+          reviewingSlug = null,
+          errorText = "This gateway connection needs operator.admin to install ClawHub skills.",
           messageText = null,
         )
       return
@@ -4750,6 +4766,18 @@ class NodeRuntime private constructor(
           acknowledgeSlug = null,
           acknowledgeVersion = null,
           errorText = "Connect the gateway to install ClawHub skills.",
+          messageText = null,
+        )
+      return
+    }
+    if (!operatorAdminScopeAvailable.value) {
+      _clawHubSkillSearchState.value =
+        _clawHubSkillSearchState.value.copy(
+          acknowledgeSlug = null,
+          acknowledgeVersion = null,
+          installReview = null,
+          reviewingSlug = null,
+          errorText = "This gateway connection needs operator.admin to install ClawHub skills.",
           messageText = null,
         )
       return
