@@ -2,10 +2,14 @@
 import fs from "node:fs";
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { stripAnsi } from "../../../packages/terminal-core/src/ansi.js";
-import { buildNpmInstallRecordFields } from "../../cli/npm-resolution.js";
-import { resolveOfficialExternalNpmPackageTrust } from "../../cli/plugin-install-plan.js";
+import {
+  formatNonClawHubInstallWarning,
+  NON_CLAWHUB_INSTALL_ACK_FLAG,
+  type NonClawHubInstallSourceClass,
+} from "../../cli/non-clawhub-install-acknowledgement.js";
 import {
   createPluginInstallLogger,
+  parseNpmPackPrefixPath,
   resolveFileNpmSpecToLocalPath,
 } from "../../cli/plugins-command-helpers.js";
 import {
@@ -24,14 +28,8 @@ import { parseClawHubPluginSpec } from "../../infra/clawhub.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { buildClawHubPluginInstallRecordFields } from "../../plugins/clawhub-install-records.js";
 import { CLAWHUB_INSTALL_ERROR_CODE, installPluginFromClawHub } from "../../plugins/clawhub.js";
-import { installPluginFromGitSpec, parseGitPluginSpec } from "../../plugins/git-install.js";
-import { installPluginFromNpmSpec, installPluginFromPath } from "../../plugins/install.js";
+import { parseGitPluginSpec } from "../../plugins/git-install.js";
 import { loadInstalledPluginIndexInstallRecords } from "../../plugins/installed-plugin-index-records.js";
-import {
-  getOfficialExternalPluginCatalogEntryForPackage,
-  resolveOfficialExternalPluginId,
-  resolveOfficialExternalPluginInstall,
-} from "../../plugins/official-external-plugin-catalog.js";
 import type { PluginRecord } from "../../plugins/registry.js";
 import {
   buildAllPluginInspectReports,
@@ -192,26 +190,17 @@ function looksLikeLocalPluginInstallSpec(raw: string): boolean {
   );
 }
 
-function findTrustedCatalogPackageInstall(packageName: string):
-  | {
-      pluginId: string;
-      npmSpec?: string;
-      expectedIntegrity?: string;
-    }
-  | undefined {
-  const entry = getOfficialExternalPluginCatalogEntryForPackage(packageName);
-  if (!entry) {
-    return undefined;
-  }
-  const pluginId = resolveOfficialExternalPluginId(entry);
-  if (!pluginId) {
-    return undefined;
-  }
-  const install = resolveOfficialExternalPluginInstall(entry);
+function rejectNonClawHubChatInstall(params: {
+  sourceClass: NonClawHubInstallSourceClass;
+  spec: string;
+}): { ok: false; error: string } {
+  const warning = formatNonClawHubInstallWarning({
+    sourceClass: params.sourceClass,
+    spec: params.spec,
+  });
   return {
-    pluginId,
-    ...(install?.npmSpec ? { npmSpec: install.npmSpec } : {}),
-    ...(install?.expectedIntegrity ? { expectedIntegrity: install.expectedIntegrity } : {}),
+    ok: false,
+    error: `${warning}\nThe /plugins chat command cannot acknowledge non-ClawHub install provenance; run the local openclaw plugins install command with ${NON_CLAWHUB_INSTALL_ACK_FLAG} from a trusted shell after reviewing the source.`,
   };
 }
 
@@ -230,26 +219,18 @@ async function installPluginFromPluginsCommand(params: {
   const resolved = resolveUserPath(normalized);
 
   if (fs.existsSync(resolved)) {
-    const result = await installPluginFromPath({
-      path: resolved,
-      config: params.config,
-      logger: createPluginInstallLogger(),
+    return rejectNonClawHubChatInstall({
+      sourceClass: resolveArchiveKind(resolved) ? "local-archive" : "local-path",
+      spec: params.raw,
     });
-    if (!result.ok) {
-      return { ok: false, error: result.error };
-    }
-    const source: "archive" | "path" = resolveArchiveKind(resolved) ? "archive" : "path";
-    await persistPluginInstall({
-      snapshot: params.snapshot,
-      pluginId: result.pluginId,
-      install: {
-        source,
-        sourcePath: resolved,
-        installPath: result.targetDir,
-        version: result.version,
-      },
+  }
+
+  const npmPackPath = parseNpmPackPrefixPath(params.raw);
+  if (npmPackPath !== null) {
+    return rejectNonClawHubChatInstall({
+      sourceClass: "npm-pack",
+      spec: params.raw,
     });
-    return { ok: true, pluginId: result.pluginId };
   }
 
   if (looksLikeLocalPluginInstallSpec(params.raw)) {
@@ -262,29 +243,10 @@ async function installPluginFromPluginsCommand(params: {
     return { ok: false, error: `unsupported git: plugin spec: ${params.raw}` };
   }
   if (gitSpec) {
-    const result = await installPluginFromGitSpec({
+    return rejectNonClawHubChatInstall({
+      sourceClass: "git",
       spec: params.raw,
-      config: params.config,
-      logger: createPluginInstallLogger(),
     });
-    if (!result.ok) {
-      return { ok: false, error: result.error };
-    }
-    await persistPluginInstall({
-      snapshot: params.snapshot,
-      pluginId: result.pluginId,
-      install: {
-        source: "git",
-        spec: params.raw,
-        installPath: result.targetDir,
-        version: result.version,
-        resolvedAt: result.git.resolvedAt,
-        gitUrl: result.git.url,
-        gitRef: result.git.ref,
-        gitCommit: result.git.commit,
-      },
-    });
-    return { ok: true, pluginId: result.pluginId };
   }
 
   const clawhubSpec = parseClawHubPluginSpec(params.raw);
@@ -327,39 +289,10 @@ async function installPluginFromPluginsCommand(params: {
     return { ok: true, pluginId: result.pluginId, warnings };
   }
 
-  const officialNpmTrust = resolveOfficialExternalNpmPackageTrust({
-    npmSpec: params.raw,
-    findOfficialExternalPackage: findTrustedCatalogPackageInstall,
-  });
-  const result = await installPluginFromNpmSpec({
+  return rejectNonClawHubChatInstall({
+    sourceClass: "npm",
     spec: params.raw,
-    config: params.config,
-    ...(officialNpmTrust
-      ? {
-          expectedPluginId: officialNpmTrust.pluginId,
-          ...(officialNpmTrust.expectedIntegrity
-            ? { expectedIntegrity: officialNpmTrust.expectedIntegrity }
-            : {}),
-          trustedSourceLinkedOfficialInstall: true,
-        }
-      : {}),
-    logger: createPluginInstallLogger(),
   });
-  if (!result.ok) {
-    return { ok: false, error: result.error };
-  }
-  const installRecord = buildNpmInstallRecordFields({
-    spec: params.raw,
-    installPath: result.targetDir,
-    version: result.version,
-    resolution: result.npmResolution,
-  });
-  await persistPluginInstall({
-    snapshot: params.snapshot,
-    pluginId: result.pluginId,
-    install: installRecord,
-  });
-  return { ok: true, pluginId: result.pluginId };
 }
 
 async function loadPluginCommandState(

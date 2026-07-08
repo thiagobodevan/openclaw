@@ -106,6 +106,22 @@ function expectPersistedInstall(pluginId: string, expectedInstall: Record<string
   expectObjectFields(persisted.install, expectedInstall);
 }
 
+function expectNonClawHubChatInstallRejected(
+  result: NonNullable<Awaited<ReturnType<typeof handlePluginsCommand>>>,
+  expectedSource: string,
+): void {
+  expect(result.shouldContinue).toBe(false);
+  expect(result.reply?.text).toContain(expectedSource);
+  expect(result.reply?.text).toContain("outside ClawHub review");
+  expect(result.reply?.text).toContain("cannot acknowledge non-ClawHub install provenance");
+  expect(result.reply?.text).toContain("--acknowledge-non-clawhub-install");
+  expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
+  expect(installPluginFromPathMock).not.toHaveBeenCalled();
+  expect(installPluginFromClawHubMock).not.toHaveBeenCalled();
+  expect(installPluginFromGitSpecMock).not.toHaveBeenCalled();
+  expect(persistPluginInstallMock).not.toHaveBeenCalled();
+}
+
 describe("handleCommands /plugins install", () => {
   afterEach(async () => {
     installPluginFromNpmSpecMock.mockReset();
@@ -116,82 +132,40 @@ describe("handleCommands /plugins install", () => {
     await workspaceHarness.cleanupWorkspaces();
   });
 
-  it("passes the active config to npm install policy preflight", async () => {
-    const policyConfig: OpenClawConfig = {
-      commands: {
-        text: true,
-        plugins: true,
-      },
-      plugins: {
-        enabled: true,
-      },
-      security: {
-        installPolicy: {
-          enabled: true,
-          exec: {
-            source: "exec",
-            command: process.execPath,
-            args: ["-e", "process.exit(1)"],
-            allowInsecurePath: true,
-          },
-        },
-      },
-    };
-    installPluginFromNpmSpecMock.mockResolvedValue({
-      ok: true,
-      pluginId: "policy-plugin",
-      targetDir: "/tmp/policy-plugin",
-      version: "1.0.0",
-      extensions: ["index.js"],
-      npmResolution: {
-        name: "@acme/policy-plugin",
-        version: "1.0.0",
-        resolvedSpec: "@acme/policy-plugin@1.0.0",
-      },
-    });
-    persistPluginInstallMock.mockResolvedValue({});
-
-    await withTempHome("openclaw-command-plugins-home-", async (home) => {
-      await fs.writeFile(
-        path.join(home, ".openclaw", "openclaw.json"),
-        `${JSON.stringify(policyConfig, null, 2)}\n`,
-      );
+  it("rejects npm chat installs before package installer side effects", async () => {
+    await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
-      const params = buildPluginsParams(
-        "/plugins install @acme/policy-plugin@1.0.0",
-        workspaceDir,
-        { cfg: policyConfig },
-      );
+      const params = buildPluginsParams("/plugins install @acme/policy-plugin@1.0.0", workspaceDir);
 
       const result = await handlePluginsCommand(params, true);
 
       if (result === null) {
         throw new Error("expected plugin install result");
       }
-      expect(result.reply?.text).toContain('Installed plugin "policy-plugin"');
-      expectObjectFields(mockFirstObjectArg(installPluginFromNpmSpecMock), {
-        spec: "@acme/policy-plugin@1.0.0",
-        config: policyConfig,
-      });
-      expectPersistedInstall("policy-plugin", {
-        source: "npm",
-        spec: "@acme/policy-plugin@1.0.0",
-        installPath: "/tmp/policy-plugin",
-        version: "1.0.0",
-      });
+      expectNonClawHubChatInstallRejected(
+        result,
+        "Installing plugin from npm registry: @acme/policy-plugin@1.0.0",
+      );
     });
   });
 
-  it("installs a plugin from a local path", async () => {
-    installPluginFromPathMock.mockResolvedValue({
-      ok: true,
-      pluginId: "path-install-plugin",
-      targetDir: "/tmp/path-install-plugin",
-      version: "0.0.1",
-      extensions: ["index.js"],
-    });
-    persistPluginInstallMock.mockResolvedValue({});
+  it("rejects npm-pack chat installs before package installer side effects", async () => {
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams("/plugins install npm-pack:/tmp/demo.tgz", workspaceDir);
 
+      const result = await handlePluginsCommand(params, true);
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+      expectNonClawHubChatInstallRejected(
+        result,
+        "Installing plugin from local npm-pack archive: npm-pack:/tmp/demo.tgz",
+      );
+    });
+  });
+
+  it("rejects local path chat installs before package installer side effects", async () => {
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
       const pluginDir = path.join(workspaceDir, "fixtures", "path-install-plugin");
@@ -202,14 +176,29 @@ describe("handleCommands /plugins install", () => {
       if (result === null) {
         throw new Error("expected plugin install result");
       }
-      expect(result.reply?.text).toContain('Installed plugin "path-install-plugin"');
-      expect(mockFirstObjectArg(installPluginFromPathMock).path).toBe(pluginDir);
-      expectPersistedInstall("path-install-plugin", {
-        source: "path",
-        sourcePath: pluginDir,
-        installPath: "/tmp/path-install-plugin",
-        version: "0.0.1",
-      });
+      expectNonClawHubChatInstallRejected(
+        result,
+        `Installing plugin from local path: ${pluginDir}`,
+      );
+    });
+  });
+
+  it("rejects local archive chat installs before package installer side effects", async () => {
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const pluginArchive = path.join(workspaceDir, "fixtures", "archive-install-plugin.tgz");
+      await fs.mkdir(path.dirname(pluginArchive), { recursive: true });
+      await fs.writeFile(pluginArchive, "not-a-real-archive");
+
+      const params = buildPluginsParams(`/plugins install ${pluginArchive}`, workspaceDir);
+      const result = await handlePluginsCommand(params, true);
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+      expectNonClawHubChatInstallRejected(
+        result,
+        `Installing plugin from local archive: ${pluginArchive}`,
+      );
     });
   });
 
@@ -239,16 +228,7 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
-  it("allows gateway clients with operator.admin to install plugins", async () => {
-    installPluginFromPathMock.mockResolvedValue({
-      ok: true,
-      pluginId: "gateway-admin-plugin",
-      targetDir: "/tmp/gateway-admin-plugin",
-      version: "0.0.1",
-      extensions: ["index.js"],
-    });
-    persistPluginInstallMock.mockResolvedValue({});
-
+  it("rejects non-ClawHub gateway client installs even with operator.admin", async () => {
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
       const pluginDir = path.join(workspaceDir, "fixtures", "gateway-admin-plugin");
@@ -262,14 +242,13 @@ describe("handleCommands /plugins install", () => {
       const result = await handlePluginsCommand(params, true);
 
       expect(result?.shouldContinue).toBe(false);
-      expect(result?.reply?.text).toContain('Installed plugin "gateway-admin-plugin"');
-      expect(mockFirstObjectArg(installPluginFromPathMock).path).toBe(pluginDir);
-      expectPersistedInstall("gateway-admin-plugin", {
-        source: "path",
-        sourcePath: pluginDir,
-        installPath: "/tmp/gateway-admin-plugin",
-        version: "0.0.1",
-      });
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+      expectNonClawHubChatInstallRejected(
+        result,
+        `Installing plugin from local path: ${pluginDir}`,
+      );
     });
   });
 
@@ -521,22 +500,7 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
-  it("installs from an explicit git: spec", async () => {
-    installPluginFromGitSpecMock.mockResolvedValue({
-      ok: true,
-      pluginId: "git-demo",
-      targetDir: "/tmp/git-demo",
-      version: "1.2.3",
-      extensions: ["index.js"],
-      git: {
-        url: "https://github.com/acme/git-demo.git",
-        ref: "v1.2.3",
-        commit: "abc123",
-        resolvedAt: "2026-04-30T12:00:00.000Z",
-      },
-    });
-    persistPluginInstallMock.mockResolvedValue({});
-
+  it("rejects explicit git: chat installs before installer side effects", async () => {
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
       const params = buildPluginsParams(
@@ -547,19 +511,7 @@ describe("handleCommands /plugins install", () => {
       if (result === null) {
         throw new Error("expected plugin install result");
       }
-      expect(result.reply?.text).toContain('Installed plugin "git-demo"');
-      expect(mockFirstObjectArg(installPluginFromGitSpecMock).spec).toBe(
-        "git:github.com/acme/git-demo@v1.2.3",
-      );
-      expectPersistedInstall("git-demo", {
-        source: "git",
-        spec: "git:github.com/acme/git-demo@v1.2.3",
-        installPath: "/tmp/git-demo",
-        version: "1.2.3",
-        gitUrl: "https://github.com/acme/git-demo.git",
-        gitRef: "v1.2.3",
-        gitCommit: "abc123",
-      });
+      expectNonClawHubChatInstallRejected(result, "git:github.com/acme/git-demo@v1.2.3");
     });
   });
 
@@ -601,23 +553,7 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
-  it("trusts catalog npm package installs with alternate selectors", async () => {
-    installPluginFromNpmSpecMock.mockResolvedValue({
-      ok: true,
-      pluginId: "wecom-openclaw-plugin",
-      targetDir: "/tmp/wecom-openclaw-plugin",
-      version: "2026.4.23",
-      extensions: ["index.js"],
-      npmResolution: {
-        name: "@wecom/wecom-openclaw-plugin",
-        version: "2026.4.23",
-        resolvedSpec: "@wecom/wecom-openclaw-plugin@2026.4.23",
-        integrity: "sha512-wecom",
-        resolvedAt: "2026-05-04T20:00:00.000Z",
-      },
-    });
-    persistPluginInstallMock.mockResolvedValue({});
-
+  it("rejects catalog npm package chat installs with alternate selectors", async () => {
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
       const params = buildPluginsParams(
@@ -628,22 +564,10 @@ describe("handleCommands /plugins install", () => {
       if (result === null) {
         throw new Error("expected plugin install result");
       }
-      expect(result.reply?.text).toContain('Installed plugin "wecom-openclaw-plugin"');
-      const npmInstallArgs = mockFirstObjectArg(installPluginFromNpmSpecMock);
-      expectObjectFields(npmInstallArgs, {
-        spec: "@wecom/wecom-openclaw-plugin@latest",
-        expectedPluginId: "wecom-openclaw-plugin",
-        trustedSourceLinkedOfficialInstall: true,
-      });
-      expect(npmInstallArgs.expectedIntegrity).toBeUndefined();
-      expectPersistedInstall("wecom-openclaw-plugin", {
-        source: "npm",
-        spec: "@wecom/wecom-openclaw-plugin@latest",
-        installPath: "/tmp/wecom-openclaw-plugin",
-        version: "2026.4.23",
-        resolvedName: "@wecom/wecom-openclaw-plugin",
-        resolvedVersion: "2026.4.23",
-      });
+      expectNonClawHubChatInstallRejected(
+        result,
+        "Installing plugin from npm registry: @wecom/wecom-openclaw-plugin@latest",
+      );
     });
   });
 });
