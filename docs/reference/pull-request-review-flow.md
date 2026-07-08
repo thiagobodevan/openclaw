@@ -132,7 +132,7 @@ Before asking for help, check:
 - the latest review request was made as a PR comment:
   `@clawsweeper re-review`;
 - a maintainer or contributor is not already actively working on the PR;
-- the request is not still within the normal ClawSweeper queue delay.
+- the latest request is not still within the normal ClawSweeper queue delay.
 
 If there is still no ClawSweeper response several hours after the PR is current,
 or if the PR appears blocked by automation, ask in `#clawtributors` on Discord.
