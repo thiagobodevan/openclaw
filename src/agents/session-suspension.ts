@@ -107,6 +107,13 @@ function scheduleLaneAutoResume(laneId: string, delayMs: number, resumeConcurren
   laneResumeTimers.set(laneId, timer);
 }
 
+export function clearSessionSuspensionAutoResumeTimers(): void {
+  for (const timer of laneResumeTimers.values()) {
+    clearTimeout(timer);
+  }
+  laneResumeTimers.clear();
+}
+
 export async function suspendSession(params: SessionSuspensionParams) {
   if (!params.cfg) {
     return;

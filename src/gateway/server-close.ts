@@ -6,6 +6,7 @@ import type { WebSocketServer } from "ws";
 import { disposeAllSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { disposeRegisteredAgentHarnesses } from "../agents/harness/registry.js";
 import { createAgentRunRestartAbortError } from "../agents/run-termination.js";
+import { clearSessionSuspensionAutoResumeTimers } from "../agents/session-suspension.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
 import { createInternalHookEvent, triggerInternalHook } from "../hooks/internal-hooks.js";
 import type { HeartbeatRunner } from "../infra/heartbeat-runner.js";
@@ -826,6 +827,13 @@ export function createGatewayCloseHandler(
           ),
         );
       }
+      await shutdownStep(
+        "session-suspension",
+        () => {
+          clearSessionSuspensionAutoResumeTimers();
+        },
+        warnings,
+      );
       if (params.bonjourStop) {
         await shutdownStep("bonjour", () => params.bonjourStop!(), warnings);
       }

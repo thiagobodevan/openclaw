@@ -40,6 +40,8 @@ async function suspendLane(ttlMs: number, cfg: OpenClawConfig, laneId: CommandLa
 
 describe("session suspension", () => {
   afterEach(async () => {
+    const { clearSessionSuspensionAutoResumeTimers } = await import("./session-suspension.js");
+    clearSessionSuspensionAutoResumeTimers();
     if (vi.isFakeTimers()) {
       await vi.runOnlyPendingTimersAsync();
       vi.clearAllTimers();
@@ -103,6 +105,24 @@ describe("session suspension", () => {
       CommandLane.Cron,
       1,
     );
+  });
+
+  it("clears pending auto-resume timers without restoring lane concurrency", async () => {
+    vi.useFakeTimers();
+    const { clearSessionSuspensionAutoResumeTimers } = await import("./session-suspension.js");
+
+    await suspendLane(
+      100,
+      { agents: { defaults: { maxConcurrent: 4 } } } as OpenClawConfig,
+      CommandLane.Main,
+    );
+
+    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledWith(CommandLane.Main, 0);
+    clearSessionSuspensionAutoResumeTimers();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(commandQueueMocks.setCommandLaneConcurrency).toHaveBeenCalledTimes(1);
   });
 
   it("clamps oversized suspension TTLs for timers and persisted resume time", async () => {

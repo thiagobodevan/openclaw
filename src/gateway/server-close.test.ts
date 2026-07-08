@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listChannelPlugins: vi.fn((): Array<{ id: "telegram" | "discord" }> => []),
   disposeAgentHarnesses: vi.fn(async () => undefined),
   disposeAllSessionMcpRuntimes: vi.fn(async () => undefined),
+  clearSessionSuspensionAutoResumeTimers: vi.fn(),
   triggerInternalHook: vi.fn<TriggerInternalHookMock>(async (_eventValue) => undefined),
   disposeAllBundleLspRuntimes: vi.fn(async () => undefined),
 }));
@@ -53,6 +54,10 @@ vi.mock("../agents/agent-bundle-mcp-tools.js", async () => ({
     "../agents/agent-bundle-mcp-tools.js",
   )),
   disposeAllSessionMcpRuntimes: mocks.disposeAllSessionMcpRuntimes,
+}));
+
+vi.mock("../agents/session-suspension.js", () => ({
+  clearSessionSuspensionAutoResumeTimers: mocks.clearSessionSuspensionAutoResumeTimers,
 }));
 
 vi.mock("../agents/agent-bundle-lsp-runtime.js", async () => ({
@@ -156,6 +161,7 @@ describe("createGatewayCloseHandler", () => {
     mocks.disposeAgentHarnesses.mockResolvedValue(undefined);
     mocks.disposeAllSessionMcpRuntimes.mockClear();
     mocks.disposeAllSessionMcpRuntimes.mockResolvedValue(undefined);
+    mocks.clearSessionSuspensionAutoResumeTimers.mockClear();
     mocks.triggerInternalHook.mockReset();
     mocks.triggerInternalHook.mockResolvedValue(undefined);
     mocks.disposeAllBundleLspRuntimes.mockClear();
@@ -183,6 +189,14 @@ describe("createGatewayCloseHandler", () => {
     expect(deps.cron.stop).toHaveBeenCalledTimes(1);
     expect(deps.heartbeatRunner.stop).toHaveBeenCalledTimes(1);
     expect(deps.chatRunState.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears session suspension auto-resume timers during shutdown", async () => {
+    const close = createGatewayCloseHandler(createGatewayCloseTestDeps());
+
+    await close({ reason: "test" });
+
+    expect(mocks.clearSessionSuspensionAutoResumeTimers).toHaveBeenCalledTimes(1);
   });
 
   it("stops plugin services before channel runtimes", async () => {
