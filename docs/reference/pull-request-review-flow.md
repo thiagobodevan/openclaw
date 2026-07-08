@@ -8,7 +8,7 @@ title: "Pull request review flow"
 sidebarTitle: "PR review flow"
 ---
 
-This page explains the review flow after an OpenClaw pull request is open: what
+This page explains the review flow after you open an OpenClaw pull request: what
 Barnacle and ClawSweeper do, how to improve the PR from their feedback, and what
 to check when nothing appears to happen.
 
