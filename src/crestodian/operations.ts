@@ -1,5 +1,6 @@
 // Crestodian operations parse, approve, execute, and audit setup-helper commands.
 import type { ConfigSetOptions } from "../cli/config-set-input.js";
+import { looksLikeLocalInstallSpec } from "../cli/install-spec.js";
 import {
   formatNonClawHubInstallWarning,
   type NonClawHubInstallAcknowledgementOptions,
@@ -11,6 +12,7 @@ import {
   type InferenceBackendKind,
 } from "../commands/onboard-inference.js";
 import { isSensitiveConfigPath } from "../config/sensitive-paths.js";
+import { validateRegistryNpmSpec } from "../infra/npm-registry-spec.js";
 import { buildAgentMainSessionKey, normalizeAgentId } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { TuiResult } from "../tui/tui-types.js";
@@ -398,6 +400,35 @@ function validateCrestodianPluginInstallSpec(spec: string): string | null {
   }
   if (/^(?:\.{1,2}\/|\/|~\/|file:|git(?:\+ssh|\+https)?:|https?:)/i.test(trimmed)) {
     // Crestodian does not install local paths or URLs; those can execute arbitrary package code.
+    return "Crestodian plugin install accepts npm or ClawHub package specs only.";
+  }
+  if (
+    looksLikeLocalInstallSpec(trimmed, [
+      ".ts",
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".tgz",
+      ".tar.gz",
+      ".tar",
+      ".zip",
+    ])
+  ) {
+    return "Crestodian plugin install accepts npm or ClawHub package specs only.";
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("clawhub:")) {
+    return null;
+  }
+  const npmSpec = lower.startsWith("npm:") ? trimmed.slice("npm:".length).trim() : trimmed;
+  if (!npmSpec) {
+    return "Crestodian plugin install accepts one npm or ClawHub package spec.";
+  }
+  if (npmSpec.includes(":")) {
+    return "Crestodian plugin install accepts npm or ClawHub package specs only.";
+  }
+  const npmError = validateRegistryNpmSpec(npmSpec);
+  if (npmError) {
     return "Crestodian plugin install accepts npm or ClawHub package specs only.";
   }
   return null;
@@ -853,13 +884,11 @@ async function executePluginInstall(
   runtime: RuntimeEnv,
   opts: ExecuteOptions,
 ): Promise<CrestodianOperationResult> {
-  if (opts.approved) {
-    const validationError = validateCrestodianPluginInstallSpec(operation.spec);
-    if (validationError) {
-      runtime.error(validationError);
-      runtime.exit(1);
-      return { applied: false };
-    }
+  const validationError = validateCrestodianPluginInstallSpec(operation.spec);
+  if (validationError) {
+    runtime.error(validationError);
+    runtime.exit(1);
+    return { applied: false };
   }
   const result = await applyPersistentOperation({
     auditOperation: "plugin.install",

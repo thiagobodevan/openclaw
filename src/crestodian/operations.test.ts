@@ -620,6 +620,42 @@ describe("parseCrestodianOperation", () => {
     });
   });
 
+  it.each([
+    ["npm-pack archive", "npm-pack:/tmp/demo.tgz"],
+    ["local archive token", "demo.tgz"],
+    ["git URL", "git:https://github.com/acme/demo.git"],
+  ])(
+    "rejects %s plugin installs before approval can acknowledge provenance",
+    async (_label, spec) => {
+      const { runtime, lines } = createCrestodianTestRuntime();
+      const runPluginInstall = vi.fn(async (installSpec: string, pluginRuntime: RuntimeEnv) => {
+        pluginRuntime.log(`installed ${installSpec}`);
+      });
+
+      await expect(
+        executeCrestodianOperation({ kind: "plugin-install", spec }, runtime, {
+          deps: { runPluginInstall },
+        }),
+      ).rejects.toThrow("exit 1");
+      expect(lines.at(-1)).toBe(
+        "Crestodian plugin install accepts npm or ClawHub package specs only.",
+      );
+      expect(runPluginInstall).not.toHaveBeenCalled();
+
+      lines.length = 0;
+      await expect(
+        executeCrestodianOperation({ kind: "plugin-install", spec }, runtime, {
+          approved: true,
+          deps: { runPluginInstall },
+        }),
+      ).rejects.toThrow("exit 1");
+      expect(lines.at(-1)).toBe(
+        "Crestodian plugin install accepts npm or ClawHub package specs only.",
+      );
+      expect(runPluginInstall).not.toHaveBeenCalled();
+    },
+  );
+
   it("uninstalls plugins only after approval and audits the write", async () => {
     const tempDir = opTempDirs.make("crestodian-plugin-uninstall-");
     setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
