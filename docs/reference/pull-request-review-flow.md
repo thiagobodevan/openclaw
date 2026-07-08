@@ -10,7 +10,7 @@ sidebarTitle: "PR review flow"
 
 This page explains the review flow after you open or update an OpenClaw pull
 request: what Barnacle and ClawSweeper do, how to improve the PR from their
-feedback, and what to check when nothing appears to happen.
+feedback, and what to check when automation stays quiet.
 
 Barnacle and ClawSweeper help maintainers keep the review queue usable. They do
 not replace maintainer judgment.
