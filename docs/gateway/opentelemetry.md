@@ -82,7 +82,7 @@ stdout, or `both` for both.
   Gateway executes, including `openclaw agent` turns dispatched to it.
 - **One-shot local runs** (`openclaw agent --local`, and Gateway-to-embedded
   fallback runs) execute in the CLI process. When OTel export and the plugin
-  are enabled, the CLI starts the exporter for that run and flushes buffered
+  are enabled, the CLI starts a per-run exporter instance and flushes buffered
   spans, metrics, and logs before the process exits; a flush is abandoned
   after 10 seconds so an unreachable collector cannot hang the CLI.
   In JSON output mode, these one-shot runs suppress only the stdout JSONL log
