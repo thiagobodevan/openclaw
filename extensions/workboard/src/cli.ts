@@ -4,9 +4,9 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { addGatewayClientOptions, callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
 import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { WorkboardCard } from "../contract.js";
 import { resolveWorkboardCardByIdOrPrefix } from "./card-lookup.js";
 import type { WorkboardDispatchResult, WorkboardStore } from "./store.js";
-import type { WorkboardCard } from "./types.js";
 
 type JsonOptions = {
   json?: boolean;

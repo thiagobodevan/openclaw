@@ -1,278 +1,100 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+import {
+  WORKBOARD_ATTEMPT_STATUSES,
+  WORKBOARD_DIAGNOSTIC_KINDS,
+  WORKBOARD_DIAGNOSTIC_SEVERITIES,
+  WORKBOARD_EVENT_KINDS,
+  WORKBOARD_EXECUTION_ENGINES,
+  WORKBOARD_EXECUTION_MODES,
+  WORKBOARD_EXECUTION_STATUSES,
+  WORKBOARD_LINK_TYPES,
+  WORKBOARD_NOTIFICATION_KINDS,
+  WORKBOARD_PRIORITIES,
+  WORKBOARD_PROOF_STATUSES,
+  WORKBOARD_STATUSES,
+  WORKBOARD_TEMPLATE_IDS,
+  type WorkboardArtifact,
+  type WorkboardAttachment,
+  type WorkboardAttemptStatus,
+  type WorkboardAutomation,
+  type WorkboardCard,
+  type WorkboardClaim,
+  type WorkboardComment,
+  type WorkboardDiagnostic,
+  type WorkboardDiagnosticAction,
+  type WorkboardDiagnosticKind,
+  type WorkboardDiagnosticSeverity,
+  type WorkboardEvent,
+  type WorkboardEventKind,
+  type WorkboardExecution,
+  type WorkboardExecutionEngine,
+  type WorkboardExecutionMode,
+  type WorkboardExecutionStatus,
+  type WorkboardLink,
+  type WorkboardLinkType,
+  type WorkboardMetadata,
+  type WorkboardNotification,
+  type WorkboardNotificationKind,
+  type WorkboardPriority,
+  type WorkboardProof,
+  type WorkboardProofStatus,
+  type WorkboardRunAttempt,
+  type WorkboardStaleState,
+  type WorkboardStatus,
+  type WorkboardTemplateId,
+  type WorkboardWorkerLog,
+  type WorkboardWorkerProtocol,
+  type WorkboardWorkspace,
+} from "@openclaw/workboard/contract.js";
 import { GatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
 import type { GatewaySessionRow } from "../../api/types.ts";
 import { requestSessionCreate } from "../sessions/index.ts";
 // Control UI controller manages workboard gateway state.
 
-export const WORKBOARD_STATUSES = [
-  "triage",
-  "backlog",
-  "todo",
-  "scheduled",
-  "ready",
-  "running",
-  "review",
-  "blocked",
-  "done",
-] as const;
-
-export const WORKBOARD_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
-const WORKBOARD_EXECUTION_ENGINES = ["codex", "claude"] as const;
-const WORKBOARD_EXECUTION_MODES = ["autonomous", "manual"] as const;
-const WORKBOARD_EXECUTION_STATUSES = ["idle", "running", "review", "blocked", "done"] as const;
-const WORKBOARD_EVENT_KINDS = [
-  "created",
-  "edited",
-  "moved",
-  "linked",
-  "specified",
-  "decomposed",
-  "claimed",
-  "heartbeat",
-  "execution_updated",
-  "attempt_started",
-  "attempt_updated",
-  "comment_added",
-  "link_added",
-  "proof_added",
-  "artifact_added",
-  "attachment_added",
-  "diagnostic",
-  "notification",
-  "dispatch",
-  "orchestration",
-  "protocol_violation",
-  "archived",
-  "unarchived",
-  "stale",
-] as const;
-export const WORKBOARD_ATTEMPT_STATUSES = [
-  "running",
-  "succeeded",
-  "failed",
-  "blocked",
-  "stopped",
-] as const;
-export const WORKBOARD_LINK_TYPES = [
-  "parent",
-  "child",
-  "blocks",
-  "blocked_by",
-  "relates_to",
-] as const;
-export const WORKBOARD_PROOF_STATUSES = ["passed", "failed", "skipped", "unknown"] as const;
-export const WORKBOARD_TEMPLATE_IDS = ["bugfix", "docs", "release", "pr_review", "plugin"] as const;
-export const WORKBOARD_DIAGNOSTIC_SEVERITIES = ["warning", "error", "critical"] as const;
+export {
+  WORKBOARD_ATTEMPT_STATUSES,
+  WORKBOARD_DIAGNOSTIC_SEVERITIES,
+  WORKBOARD_LINK_TYPES,
+  WORKBOARD_PRIORITIES,
+  WORKBOARD_PROOF_STATUSES,
+  WORKBOARD_STATUSES,
+  WORKBOARD_TEMPLATE_IDS,
+};
+export type {
+  WorkboardArtifact,
+  WorkboardAttachment,
+  WorkboardAttemptStatus,
+  WorkboardAutomation,
+  WorkboardCard,
+  WorkboardComment,
+  WorkboardDiagnostic,
+  WorkboardDiagnosticSeverity,
+  WorkboardEvent,
+  WorkboardEventKind,
+  WorkboardExecution,
+  WorkboardExecutionEngine,
+  WorkboardExecutionMode,
+  WorkboardExecutionStatus,
+  WorkboardLink,
+  WorkboardLinkType,
+  WorkboardMetadata,
+  WorkboardNotification,
+  WorkboardPriority,
+  WorkboardProof,
+  WorkboardProofStatus,
+  WorkboardRunAttempt,
+  WorkboardStaleState,
+  WorkboardStatus,
+  WorkboardTemplateId,
+  WorkboardWorkerLog,
+  WorkboardWorkerProtocol,
+  WorkboardWorkspace,
+};
 
 const WORKBOARD_ENGINE_MODELS = {
   codex: "openai/gpt-5.5",
   claude: "anthropic/claude-sonnet-4-6",
 } as const;
-
-export type WorkboardStatus = (typeof WORKBOARD_STATUSES)[number];
-export type WorkboardPriority = (typeof WORKBOARD_PRIORITIES)[number];
-export type WorkboardExecutionEngine = (typeof WORKBOARD_EXECUTION_ENGINES)[number];
-export type WorkboardExecutionMode = (typeof WORKBOARD_EXECUTION_MODES)[number];
-export type WorkboardExecutionStatus = (typeof WORKBOARD_EXECUTION_STATUSES)[number];
-export type WorkboardEventKind = (typeof WORKBOARD_EVENT_KINDS)[number];
-export type WorkboardAttemptStatus = (typeof WORKBOARD_ATTEMPT_STATUSES)[number];
-export type WorkboardLinkType = (typeof WORKBOARD_LINK_TYPES)[number];
-export type WorkboardProofStatus = (typeof WORKBOARD_PROOF_STATUSES)[number];
-export type WorkboardTemplateId = (typeof WORKBOARD_TEMPLATE_IDS)[number];
-export type WorkboardDiagnosticSeverity = (typeof WORKBOARD_DIAGNOSTIC_SEVERITIES)[number];
-
-export type WorkboardExecution = {
-  id: string;
-  kind: "agent-session";
-  engine: WorkboardExecutionEngine;
-  mode: WorkboardExecutionMode;
-  status: WorkboardExecutionStatus;
-  model: string;
-  sessionKey?: string;
-  runId?: string;
-  startedAt: number;
-  updatedAt: number;
-};
-
-export type WorkboardEvent = {
-  id: string;
-  kind: WorkboardEventKind;
-  at: number;
-  fromStatus?: WorkboardStatus;
-  toStatus?: WorkboardStatus;
-  sessionKey?: string;
-  runId?: string;
-};
-
-export type WorkboardRunAttempt = {
-  id: string;
-  status: WorkboardAttemptStatus;
-  startedAt: number;
-  endedAt?: number;
-  engine?: WorkboardExecutionEngine;
-  mode?: WorkboardExecutionMode;
-  model?: string;
-  sessionKey?: string;
-  runId?: string;
-  error?: string;
-};
-
-export type WorkboardComment = {
-  id: string;
-  body: string;
-  createdAt: number;
-  updatedAt?: number;
-};
-
-export type WorkboardLink = {
-  id: string;
-  type: WorkboardLinkType;
-  createdAt: number;
-  targetCardId?: string;
-  title?: string;
-  url?: string;
-};
-
-export type WorkboardProof = {
-  id: string;
-  status: WorkboardProofStatus;
-  createdAt: number;
-  label?: string;
-  command?: string;
-  url?: string;
-  note?: string;
-};
-
-export type WorkboardStaleState = {
-  detectedAt: number;
-  lastSessionUpdatedAt?: number;
-  reason: string;
-};
-
-type WorkboardClaim = {
-  ownerId: string;
-  token?: string;
-  claimedAt: number;
-  lastHeartbeatAt: number;
-  expiresAt?: number;
-};
-
-export type WorkboardArtifact = {
-  id: string;
-  createdAt: number;
-  label?: string;
-  url?: string;
-  path?: string;
-  mimeType?: string;
-};
-
-export type WorkboardAttachment = {
-  id: string;
-  cardId: string;
-  createdAt: number;
-  fileName: string;
-  byteSize: number;
-  mimeType?: string;
-  note?: string;
-};
-
-export type WorkboardWorkerLog = {
-  id: string;
-  createdAt: number;
-  level: "info" | "warning" | "error";
-  message: string;
-  sessionKey?: string;
-  runId?: string;
-};
-
-export type WorkboardWorkerProtocol = {
-  state: "idle" | "running" | "completed" | "blocked" | "violated";
-  updatedAt: number;
-  detail?: string;
-};
-
-export type WorkboardDiagnostic = {
-  kind: string;
-  severity: WorkboardDiagnosticSeverity;
-  title: string;
-  detail: string;
-  firstSeenAt: number;
-  lastSeenAt: number;
-  count: number;
-};
-
-export type WorkboardNotification = {
-  id: string;
-  kind: string;
-  createdAt: number;
-  message: string;
-  sessionKey?: string;
-  runId?: string;
-};
-
-export type WorkboardWorkspace = {
-  kind: "scratch" | "dir" | "worktree";
-  path?: string;
-  branch?: string;
-};
-
-export type WorkboardAutomation = {
-  tenant?: string;
-  boardId?: string;
-  createdByCardId?: string;
-  idempotencyKey?: string;
-  skills?: string[];
-  workspace?: WorkboardWorkspace;
-  maxRuntimeSeconds?: number;
-  maxRetries?: number;
-  scheduledAt?: number;
-  summary?: string;
-  createdCardIds?: string[];
-  dispatchCount?: number;
-  lastDispatchAt?: number;
-};
-
-export type WorkboardMetadata = {
-  attempts?: WorkboardRunAttempt[];
-  comments?: WorkboardComment[];
-  links?: WorkboardLink[];
-  proof?: WorkboardProof[];
-  artifacts?: WorkboardArtifact[];
-  attachments?: WorkboardAttachment[];
-  workerLogs?: WorkboardWorkerLog[];
-  workerProtocol?: WorkboardWorkerProtocol;
-  automation?: WorkboardAutomation;
-  claim?: WorkboardClaim;
-  diagnostics?: WorkboardDiagnostic[];
-  notifications?: WorkboardNotification[];
-  templateId?: WorkboardTemplateId;
-  archivedAt?: number;
-  stale?: WorkboardStaleState;
-  lifecycleStatusSourceUpdatedAt?: number;
-  failureCount?: number;
-};
-
-export type WorkboardCard = {
-  id: string;
-  title: string;
-  notes?: string;
-  status: WorkboardStatus;
-  priority: WorkboardPriority;
-  labels: string[];
-  agentId?: string;
-  sessionKey?: string;
-  runId?: string;
-  taskId?: string;
-  sourceUrl?: string;
-  execution?: WorkboardExecution;
-  position: number;
-  createdAt: number;
-  updatedAt: number;
-  startedAt?: number;
-  completedAt?: number;
-  events?: WorkboardEvent[];
-  metadata?: WorkboardMetadata;
-};
 
 type WorkboardLifecycleState =
   | "unlinked"
@@ -1114,6 +936,12 @@ function normalizeAutomation(value: unknown): WorkboardAutomation | undefined {
             : undefined,
         ...(typeof value.workspace.path === "string" ? { path: value.workspace.path } : {}),
         ...(typeof value.workspace.branch === "string" ? { branch: value.workspace.branch } : {}),
+        ...(typeof value.workspace.sourcePath === "string"
+          ? { sourcePath: value.workspace.sourcePath }
+          : {}),
+        ...(typeof value.workspace.sourceBranch === "string"
+          ? { sourceBranch: value.workspace.sourceBranch }
+          : {}),
       }
     : undefined;
   const automation: WorkboardAutomation = {
@@ -1140,6 +968,23 @@ function normalizeAutomation(value: unknown): WorkboardAutomation | undefined {
     ...(typeof value.lastDispatchAt === "number" ? { lastDispatchAt: value.lastDispatchAt } : {}),
   };
   return Object.keys(automation).length ? automation : undefined;
+}
+
+function normalizeDiagnosticAction(value: unknown): WorkboardDiagnosticAction | null {
+  if (
+    !isRecord(value) ||
+    (value.kind !== "claim" &&
+      value.kind !== "unblock" &&
+      value.kind !== "promote" &&
+      value.kind !== "reclaim" &&
+      value.kind !== "reassign" &&
+      value.kind !== "add_proof" &&
+      value.kind !== "open_session") ||
+    typeof value.label !== "string"
+  ) {
+    return null;
+  }
+  return { kind: value.kind, label: value.label };
 }
 
 function normalizeMetadata(value: unknown): WorkboardMetadata | undefined {
@@ -1330,24 +1175,34 @@ function normalizeMetadata(value: unknown): WorkboardMetadata | undefined {
           : {}),
       }
     : undefined;
-  const claim = isRecord(value.claim)
-    ? {
-        ownerId: typeof value.claim.ownerId === "string" ? value.claim.ownerId : "",
-        ...(typeof value.claim.token === "string" ? { token: value.claim.token } : {}),
-        claimedAt: typeof value.claim.claimedAt === "number" ? value.claim.claimedAt : 0,
-        lastHeartbeatAt:
-          typeof value.claim.lastHeartbeatAt === "number" ? value.claim.lastHeartbeatAt : 0,
-        ...(typeof value.claim.expiresAt === "number" ? { expiresAt: value.claim.expiresAt } : {}),
-      }
-    : undefined;
+  const claim: WorkboardClaim | undefined =
+    isRecord(value.claim) &&
+    typeof value.claim.ownerId === "string" &&
+    typeof value.claim.token === "string" &&
+    typeof value.claim.claimedAt === "number" &&
+    typeof value.claim.lastHeartbeatAt === "number"
+      ? {
+          ownerId: value.claim.ownerId,
+          token: value.claim.token,
+          claimedAt: value.claim.claimedAt,
+          lastHeartbeatAt: value.claim.lastHeartbeatAt,
+          ...(typeof value.claim.expiresAt === "number"
+            ? { expiresAt: value.claim.expiresAt }
+            : {}),
+        }
+      : undefined;
   const diagnostics = Array.isArray(value.diagnostics)
     ? value.diagnostics.flatMap((entry): WorkboardDiagnostic[] => {
-        if (!isRecord(entry) || typeof entry.kind !== "string" || typeof entry.title !== "string") {
+        if (
+          !isRecord(entry) ||
+          !WORKBOARD_DIAGNOSTIC_KINDS.includes(entry.kind as WorkboardDiagnosticKind) ||
+          typeof entry.title !== "string"
+        ) {
           return [];
         }
         return [
           {
-            kind: entry.kind,
+            kind: entry.kind as WorkboardDiagnosticKind,
             severity: WORKBOARD_DIAGNOSTIC_SEVERITIES.includes(
               entry.severity as WorkboardDiagnosticSeverity,
             )
@@ -1358,6 +1213,11 @@ function normalizeMetadata(value: unknown): WorkboardMetadata | undefined {
             firstSeenAt: typeof entry.firstSeenAt === "number" ? entry.firstSeenAt : Date.now(),
             lastSeenAt: typeof entry.lastSeenAt === "number" ? entry.lastSeenAt : Date.now(),
             count: typeof entry.count === "number" ? entry.count : 1,
+            actions: Array.isArray(entry.actions)
+              ? entry.actions
+                  .map(normalizeDiagnosticAction)
+                  .filter((action): action is WorkboardDiagnosticAction => action !== null)
+              : [],
           },
         ];
       })
@@ -1367,7 +1227,7 @@ function normalizeMetadata(value: unknown): WorkboardMetadata | undefined {
         if (
           !isRecord(entry) ||
           typeof entry.id !== "string" ||
-          typeof entry.kind !== "string" ||
+          !WORKBOARD_NOTIFICATION_KINDS.includes(entry.kind as WorkboardNotificationKind) ||
           typeof entry.message !== "string" ||
           typeof entry.createdAt !== "number"
         ) {
@@ -1376,9 +1236,10 @@ function normalizeMetadata(value: unknown): WorkboardMetadata | undefined {
         return [
           {
             id: entry.id,
-            kind: entry.kind,
+            kind: entry.kind as WorkboardNotificationKind,
             message: entry.message,
             createdAt: entry.createdAt,
+            ...(typeof entry.sequence === "number" ? { sequence: entry.sequence } : {}),
             ...(typeof entry.sessionKey === "string" ? { sessionKey: entry.sessionKey } : {}),
             ...(typeof entry.runId === "string" ? { runId: entry.runId } : {}),
           },
@@ -1414,7 +1275,7 @@ function normalizeMetadata(value: unknown): WorkboardMetadata | undefined {
     ...(workerLogs.length ? { workerLogs } : {}),
     ...(workerProtocol ? { workerProtocol } : {}),
     ...(automation ? { automation } : {}),
-    ...(claim?.ownerId && claim.claimedAt ? { claim } : {}),
+    ...(claim ? { claim } : {}),
     ...(diagnostics.length ? { diagnostics } : {}),
     ...(notifications.length ? { notifications } : {}),
     ...(WORKBOARD_TEMPLATE_IDS.includes(value.templateId as WorkboardTemplateId)

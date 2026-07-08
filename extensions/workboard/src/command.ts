@@ -1,5 +1,6 @@
 // Workboard plugin module implements command behavior.
 import type { OpenClawPluginApi } from "../api.js";
+import type { WorkboardCard } from "../contract.js";
 import { resolveWorkboardCardByIdOrPrefix } from "./card-lookup.js";
 import {
   dispatchAndStartWorkboardCards,
@@ -7,7 +8,6 @@ import {
   type WorkboardWorktreeRuntime,
 } from "./dispatcher.js";
 import type { WorkboardStore } from "./store.js";
-import type { WorkboardCard } from "./types.js";
 
 const ADMIN_SCOPE = "operator.admin";
 const WRITE_SCOPE = "operator.write";

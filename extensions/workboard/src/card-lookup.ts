@@ -1,5 +1,5 @@
 // Workboard plugin module implements card lookup behavior.
-import type { WorkboardCard } from "./types.js";
+import type { WorkboardCard } from "../contract.js";
 
 type WorkboardCardLookupResult =
   | { card: WorkboardCard; error?: undefined }

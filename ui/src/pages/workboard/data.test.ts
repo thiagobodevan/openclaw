@@ -101,6 +101,72 @@ describe("workboard controller", () => {
     expect(getWorkboardState(host).cards).toEqual([sampleCard]);
   });
 
+  it("preserves contract-owned Workboard metadata", async () => {
+    const host = {};
+    const client = createClient({
+      "workboard.cards.list": {
+        cards: [
+          {
+            ...sampleCard,
+            metadata: {
+              automation: {
+                workspace: {
+                  kind: "worktree",
+                  path: "/tmp/worktree",
+                  branch: "work/card-1",
+                  sourcePath: "/repo",
+                  sourceBranch: "main",
+                },
+              },
+              claim: {
+                ownerId: "agent:main",
+                token: "[redacted]",
+                claimedAt: 10,
+                lastHeartbeatAt: 11,
+              },
+              diagnostics: [
+                {
+                  kind: "missing_proof",
+                  severity: "warning",
+                  title: "Proof missing",
+                  detail: "Attach focused validation.",
+                  firstSeenAt: 12,
+                  lastSeenAt: 13,
+                  count: 1,
+                  actions: [{ kind: "add_proof", label: "Add proof" }],
+                },
+              ],
+              notifications: [
+                {
+                  id: "notification-1",
+                  kind: "completed",
+                  createdAt: 14,
+                  sequence: 3,
+                  message: "Card completed",
+                },
+              ],
+            },
+          },
+        ],
+        statuses: ["todo", "done"],
+      },
+    });
+
+    await loadWorkboard({ host, client: client as never, force: true });
+
+    expect(getWorkboardState(host).cards[0]?.metadata).toMatchObject({
+      automation: {
+        workspace: {
+          sourcePath: "/repo",
+          sourceBranch: "main",
+        },
+      },
+      claim: { token: "[redacted]" },
+      diagnostics: [{ actions: [{ kind: "add_proof", label: "Add proof" }] }],
+      notifications: [{ sequence: 3 }],
+    });
+  });
+
   it("refreshes diagnostics before listing cards when requested", async () => {
     const host = {};
     const client = createClient({

@@ -1996,6 +1996,9 @@ importers:
       '@openclaw/normalization-core':
         specifier: workspace:*
         version: link:../packages/normalization-core
+      '@openclaw/workboard':
+        specifier: workspace:*
+        version: link:../extensions/workboard
       '@openclaw/uirouter':
         specifier: 0.1.0
         version: 0.1.0

@@ -7,4 +7,4 @@ export type {
   WorkboardListResult,
   WorkboardPriority,
   WorkboardStatus,
-} from "./src/types.js";
+} from "./contract.js";

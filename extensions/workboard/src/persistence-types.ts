@@ -4,7 +4,7 @@ import type {
   WorkboardBoardMetadata,
   WorkboardCard,
   WorkboardNotificationSubscription,
-} from "./types.js";
+} from "../contract.js";
 
 export type PersistedWorkboardCard = {
   version: 1;

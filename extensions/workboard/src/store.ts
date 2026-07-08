@@ -6,14 +6,6 @@ import {
   resolveExpiresAtMsFromDurationMs,
 } from "openclaw/plugin-sdk/number-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
-import type {
-  PersistedWorkboardAttachment,
-  PersistedWorkboardBoard,
-  PersistedWorkboardCard,
-  PersistedWorkboardNotificationSubscription,
-  WorkboardKeyedStore,
-} from "./persistence-types.js";
-import { createWorkboardSqliteStores } from "./sqlite-store.js";
 import {
   WORKBOARD_DIAGNOSTIC_KINDS,
   WORKBOARD_DIAGNOSTIC_SEVERITIES,
@@ -62,7 +54,15 @@ import {
   type WorkboardWorkerLog,
   type WorkboardWorkerProtocol,
   type WorkboardWorkspace,
-} from "./types.js";
+} from "../contract.js";
+import type {
+  PersistedWorkboardAttachment,
+  PersistedWorkboardBoard,
+  PersistedWorkboardCard,
+  PersistedWorkboardNotificationSubscription,
+  WorkboardKeyedStore,
+} from "./persistence-types.js";
+import { createWorkboardSqliteStores } from "./sqlite-store.js";
 export type {
   PersistedWorkboardAttachment,
   PersistedWorkboardBoard,
