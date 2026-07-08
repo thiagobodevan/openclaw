@@ -8461,6 +8461,13 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Catchphrase
   - H2: Related
 
+## reference/templates/IDENTITY.md
+
+- Route: /reference/templates/IDENTITY
+- Headings:
+  - H1: IDENTITY.md - Who Am I?
+  - H2: Related
+
 ## reference/templates/SOUL.dev.md
 
 - Route: /reference/templates/SOUL.dev
@@ -8510,6 +8517,14 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 - Route: /reference/templates/USER.dev
 - Headings:
   - H1: USER.md - User Profile
+  - H2: Related
+
+## reference/templates/USER.md
+
+- Route: /reference/templates/USER
+- Headings:
+  - H1: USER.md - About Your Human
+  - H2: Context
   - H2: Related
 
 ## reference/test.md
