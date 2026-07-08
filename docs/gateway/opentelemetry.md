@@ -83,10 +83,10 @@ stdout, or `both` for both.
   dispatched to it.
 - **One-shot local runs** (`openclaw agent --local`, and Gateway-to-embedded
   fallback runs) execute in the CLI process. When OTel export is configured and
-  the plugin is enabled, the CLI starts one exporter instance for that run and
-  flushes buffered spans, metrics, and logs before the process exits; the CLI
-  stops waiting after 10 seconds so an unreachable collector cannot hang the
-  command.
+  the plugin is enabled, the CLI starts one exporter instance in that process
+  for the run and flushes buffered spans, metrics, and logs before the process
+  exits; the CLI stops waiting after 10 seconds so an unreachable collector
+  cannot hang the command.
   In JSON output mode, these one-shot runs suppress only the stdout JSONL log
   sink so command stdout stays reserved for the JSON response; OTLP traces,
   metrics, and logs continue when configured.
