@@ -78,8 +78,9 @@ stdout, or `both` for both.
 
 ## Which processes export
 
-- **Gateway** starts the exporter at startup and exports for every run the
-  Gateway executes, including `openclaw agent` turns dispatched to it.
+- **Gateway** starts the exporter at startup and exports from the Gateway
+  process for every run it executes, including `openclaw agent` turns
+  dispatched to it.
 - **One-shot local runs** (`openclaw agent --local`, and Gateway-to-embedded
   fallback runs) execute in the CLI process. When OTel export is configured and
   the plugin is enabled, the CLI starts one exporter instance for that run and
