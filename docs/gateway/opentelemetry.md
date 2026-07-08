@@ -86,8 +86,8 @@ stdout, or `both` for both.
   buffered spans, metrics, and logs before the process exits; a flush is
   abandoned after 10 seconds so an unreachable collector cannot hang the CLI.
   In JSON output mode, these one-shot runs suppress only the stdout JSONL log
-  sink so command stdout remains machine-readable; OTLP traces, metrics, and
-  logs continue when configured.
+  sink so command stdout stays reserved for the JSON response; OTLP traces,
+  metrics, and logs continue when configured.
 - Other CLI commands do not start the exporter.
 
 ## Configuration reference
