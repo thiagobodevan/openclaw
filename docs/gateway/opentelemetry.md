@@ -88,7 +88,7 @@ stdout, or `both` for both.
   In JSON output mode, these one-shot runs suppress only the stdout JSONL log
   sink so command stdout stays reserved for the JSON response; OTLP traces,
   metrics, and logs continue when configured.
-- Other CLI commands do not start the exporter.
+- Other CLI commands do not start this one-shot exporter path.
 
 ## Configuration reference
 
