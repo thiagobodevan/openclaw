@@ -94,6 +94,10 @@ next-step checklist for the PR.
 Keep the PR body current. Comments help with discussion, but the PR
 description is the durable summary maintainers and automation revisit.
 
+`status: ⏳ waiting on author` means the next action is with the PR author:
+update the branch, PR description, proof, or reply with the missing context
+before asking for another review.
+
 Useful evidence includes focused test output, CI results, screenshots,
 recordings, terminal output, live observations, redacted logs, or artifact
 links. For visual changes, include before and after screenshots when practical.
