@@ -129,7 +129,7 @@ Before asking for help, check:
 - the latest commit contains the requested change;
 - CI has finished, or the PR body explains why any remaining failure is
   unrelated to the PR;
-- the review request was made as a PR comment:
+- the latest review request was made as a PR comment:
   `@clawsweeper re-review`;
 - a maintainer or contributor is not already actively working on the PR;
 - the request is not still within the normal ClawSweeper queue delay.
