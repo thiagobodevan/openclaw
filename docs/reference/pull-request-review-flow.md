@@ -61,7 +61,7 @@ new PR comment:
 `@clawsweeper review` and `/review` are also routed to ClawSweeper. Be patient:
 asking again before the requested changes are present just adds queue noise.
 
-If ClawSweeper leaves review conversations, treat them like normal review
+When ClawSweeper leaves review conversations, treat them like normal review
 feedback and use the follow-up checklist below.
 
 If a human contributor or maintainer has taken over the PR and is actively
