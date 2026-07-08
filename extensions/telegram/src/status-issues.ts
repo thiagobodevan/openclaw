@@ -1,6 +1,6 @@
 // Telegram plugin module implements status issues behavior.
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountStatus,
   ChannelStatusIssue,
 } from "openclaw/plugin-sdk/channel-contract";
 import { formatCliCommand } from "openclaw/plugin-sdk/cli-runtime";
@@ -42,7 +42,7 @@ type TelegramGroupMembershipAuditSummary = {
   }>;
 };
 
-function readTelegramAccountStatus(value: ChannelAccountSnapshot): TelegramAccountStatus | null {
+function readTelegramAccountStatus(value: ChannelAccountStatus): TelegramAccountStatus | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -206,7 +206,7 @@ function readTelegramGroupMembershipAuditSummary(
 }
 
 export function collectTelegramStatusIssues(
-  accounts: ChannelAccountSnapshot[],
+  accounts: ChannelAccountStatus[],
 ): ChannelStatusIssue[] {
   const issues: ChannelStatusIssue[] = [];
   for (const entry of accounts) {

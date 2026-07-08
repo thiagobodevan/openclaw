@@ -1,6 +1,6 @@
 // Whatsapp plugin module implements status issues behavior.
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountStatus,
   ChannelStatusIssue,
 } from "openclaw/plugin-sdk/channel-contract";
 import { formatCliCommand } from "openclaw/plugin-sdk/cli-runtime";
@@ -26,7 +26,7 @@ type WhatsAppAccountStatus = {
 
 const RECENT_DISCONNECT_WARNING_WINDOW_MS = 15 * 60 * 1000;
 
-function readWhatsAppAccountStatus(value: ChannelAccountSnapshot): WhatsAppAccountStatus | null {
+function readWhatsAppAccountStatus(value: ChannelAccountStatus): WhatsAppAccountStatus | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -67,7 +67,7 @@ function isRecentDisconnect(disconnect: { at: number | null } | null, now = Date
 }
 
 export function collectWhatsAppStatusIssues(
-  accounts: ChannelAccountSnapshot[],
+  accounts: ChannelAccountStatus[],
 ): ChannelStatusIssue[] {
   return collectIssuesForEnabledAccounts({
     accounts,

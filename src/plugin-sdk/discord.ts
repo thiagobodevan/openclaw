@@ -4,7 +4,7 @@
  */
 
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountStatus,
   ChannelGroupContext,
   ChannelStatusIssue,
 } from "./channel-contract.js";
@@ -142,7 +142,7 @@ type RegisterBuiltDiscordComponentMessage = (params: {
 }) => void;
 
 type DiscordApiFacadeModule = {
-  collectDiscordStatusIssues: (accounts: ChannelAccountSnapshot[]) => ChannelStatusIssue[];
+  collectDiscordStatusIssues: (accounts: ChannelAccountStatus[]) => ChannelStatusIssue[];
   buildDiscordComponentMessage: BuildDiscordComponentMessage;
   discordOnboardingAdapter?: NonNullable<ChannelPlugin<ResolvedDiscordAccount>["setup"]>;
   inspectDiscordAccount: (params: { cfg: OpenClawConfig; accountId?: string | null }) => unknown;
@@ -223,7 +223,7 @@ export const discordOnboardingAdapter = createLazyFacadeObjectValue(
 
 /** Collect Discord account status issues from account snapshots. */
 export function collectDiscordStatusIssues(
-  accounts: ChannelAccountSnapshot[],
+  accounts: ChannelAccountStatus[],
 ): ChannelStatusIssue[] {
   return loadDiscordApiFacadeModule().collectDiscordStatusIssues(accounts);
 }

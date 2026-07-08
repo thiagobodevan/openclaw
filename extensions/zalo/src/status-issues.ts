@@ -1,6 +1,6 @@
 // Zalo plugin module implements status issues behavior.
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountStatus,
   ChannelStatusIssue,
 } from "openclaw/plugin-sdk/channel-contract";
 import {
@@ -10,7 +10,7 @@ import {
 
 const ZALO_STATUS_FIELDS = ["accountId", "enabled", "configured", "dmPolicy"] as const;
 
-export function collectZaloStatusIssues(accounts: ChannelAccountSnapshot[]): ChannelStatusIssue[] {
+export function collectZaloStatusIssues(accounts: ChannelAccountStatus[]): ChannelStatusIssue[] {
   const issues: ChannelStatusIssue[] = [];
   for (const entry of accounts) {
     const account = readStatusIssueFields(entry, ZALO_STATUS_FIELDS);

@@ -4,7 +4,7 @@
 import { vi } from "vitest";
 import { createRuntimeEnv } from "../testing.js";
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountSnapshotInput,
   ChannelGatewayContext,
   OpenClawConfig,
   RuntimeEnv,
@@ -16,9 +16,9 @@ export function createStartAccountContext<TAccount extends { accountId: string }
   abortSignal?: AbortSignal;
   cfg?: OpenClawConfig;
   runtime?: RuntimeEnv;
-  statusPatchSink?: (next: ChannelAccountSnapshot) => void;
+  statusPatchSink?: (next: ChannelAccountSnapshotInput) => void;
 }): ChannelGatewayContext<TAccount> {
-  const snapshot: ChannelAccountSnapshot = {
+  const snapshot: ChannelAccountSnapshotInput = {
     accountId: params.account.accountId,
     configured: true,
     enabled: true,

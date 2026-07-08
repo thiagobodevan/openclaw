@@ -1,6 +1,6 @@
 // Discord plugin module implements status issues behavior.
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountStatus,
   ChannelStatusIssue,
 } from "openclaw/plugin-sdk/channel-contract";
 import {
@@ -41,7 +41,7 @@ type DiscordPermissionsAuditSummary = {
   }>;
 };
 
-function readDiscordAccountStatus(value: ChannelAccountSnapshot): DiscordAccountStatus | null {
+function readDiscordAccountStatus(value: ChannelAccountStatus): DiscordAccountStatus | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -118,7 +118,7 @@ function readDiscordPermissionsAuditSummary(value: unknown): DiscordPermissionsA
 }
 
 export function collectDiscordStatusIssues(
-  accounts: ChannelAccountSnapshot[],
+  accounts: ChannelAccountStatus[],
 ): ChannelStatusIssue[] {
   const issues: ChannelStatusIssue[] = [];
   for (const entry of accounts) {

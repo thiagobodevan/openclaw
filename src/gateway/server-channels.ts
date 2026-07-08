@@ -2,7 +2,7 @@
 // Starts, stops, restarts, and snapshots plugin channel account runtimes.
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { type ChannelId, getChannelPlugin, listChannelPlugins } from "../channels/plugins/index.js";
-import type { ChannelAccountSnapshot } from "../channels/plugins/types.public.js";
+import type { ChannelAccountSnapshotInput } from "../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { startChannelApprovalHandlerBootstrap } from "../infra/approval-handler-bootstrap.js";
 import { type BackoffPolicy, computeBackoff, sleepWithAbort } from "../infra/backoff.js";
@@ -51,13 +51,13 @@ type ChannelRuntimeStore = {
   aborts: Map<string, AbortController>;
   starting: Map<string, Promise<void>>;
   tasks: Map<string, Promise<unknown>>;
-  runtimes: Map<string, ChannelAccountSnapshot>;
+  runtimes: Map<string, ChannelAccountSnapshotInput>;
 };
 
 function sanitizeAbortedTaskStatusPatch(
-  patch: ChannelAccountSnapshot,
-  current: ChannelAccountSnapshot,
-): ChannelAccountSnapshot {
+  patch: ChannelAccountSnapshotInput,
+  current: ChannelAccountSnapshotInput,
+): ChannelAccountSnapshotInput {
   const next = { ...patch };
   delete next.running;
   delete next.restartPending;
@@ -113,12 +113,12 @@ function createRuntimeStore(): ChannelRuntimeStore {
   };
 }
 
-function resolveDefaultRuntime(channelId: ChannelId): ChannelAccountSnapshot {
+function resolveDefaultRuntime(channelId: ChannelId): ChannelAccountSnapshotInput {
   const plugin = getChannelPlugin(channelId);
   return plugin?.status?.defaultRuntime ?? { accountId: DEFAULT_ACCOUNT_ID };
 }
 
-function cloneDefaultRuntime(channelId: ChannelId, accountId: string): ChannelAccountSnapshot {
+function cloneDefaultRuntime(channelId: ChannelId, accountId: string): ChannelAccountSnapshotInput {
   return { ...resolveDefaultRuntime(channelId), accountId };
 }
 
@@ -150,8 +150,8 @@ async function waitForChannelStopGracefully(task: Promise<unknown> | undefined, 
 }
 
 function applyDescribedAccountFields(
-  next: ChannelAccountSnapshot,
-  described: ChannelAccountSnapshot | undefined,
+  next: ChannelAccountSnapshotInput,
+  described: ChannelAccountSnapshotInput | undefined,
 ) {
   if (!described) {
     next.configured ??= true;
@@ -357,7 +357,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     return next;
   };
 
-  const getRuntime = (channelId: ChannelId, accountId: string): ChannelAccountSnapshot => {
+  const getRuntime = (channelId: ChannelId, accountId: string): ChannelAccountSnapshotInput => {
     const store = getStore(channelId);
     return store.runtimes.get(accountId) ?? cloneDefaultRuntime(channelId, accountId);
   };
@@ -365,8 +365,8 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
   const setRuntime = (
     channelId: ChannelId,
     accountId: string,
-    patch: ChannelAccountSnapshot,
-  ): ChannelAccountSnapshot => {
+    patch: ChannelAccountSnapshotInput,
+  ): ChannelAccountSnapshotInput => {
     const store = getStore(channelId);
     const current = getRuntime(channelId, accountId);
     const next = { ...current, ...patch, accountId };
@@ -377,9 +377,9 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
   const setRuntimeFromTaskStatus = (
     channelId: ChannelId,
     accountId: string,
-    patch: ChannelAccountSnapshot,
+    patch: ChannelAccountSnapshotInput,
     abortSignal?: AbortSignal,
-  ): ChannelAccountSnapshot => {
+  ): ChannelAccountSnapshotInput => {
     const safePatch = abortSignal?.aborted
       ? sanitizeAbortedTaskStatusPatch(patch, getRuntime(channelId, accountId))
       : patch;
@@ -389,8 +389,8 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
   const setStoppedRuntime = (
     channelId: ChannelId,
     accountId: string,
-    patch: Omit<ChannelAccountSnapshot, "accountId" | "running"> = {},
-  ): ChannelAccountSnapshot => {
+    patch: Omit<ChannelAccountSnapshotInput, "accountId" | "running"> = {},
+  ): ChannelAccountSnapshotInput => {
     const current = getRuntime(channelId, accountId);
     return setRuntime(channelId, accountId, {
       accountId,
@@ -1012,7 +1012,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         cfg,
       });
     const current = getRuntime(channelId, resolvedId);
-    const next: ChannelAccountSnapshot = {
+    const next: ChannelAccountSnapshotInput = {
       accountId: resolvedId,
       running: false,
       restartPending: false,
@@ -1036,7 +1036,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         cfg,
         accountIds,
       });
-      const accounts: Record<string, ChannelAccountSnapshot> = {};
+      const accounts: Record<string, ChannelAccountSnapshotInput> = {};
       for (const id of accountIds) {
         const account = plugin.config.resolveAccount(cfg, id);
         const enabled = plugin.config.isEnabled

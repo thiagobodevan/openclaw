@@ -1,7 +1,7 @@
 // Readiness checker tests cover startup grace, channel health, and stale socket decisions.
 import { describe, expect, it, vi } from "vitest";
 import type { ChannelId } from "../../channels/plugins/index.js";
-import type { ChannelAccountSnapshot } from "../../channels/plugins/types.js";
+import type { ChannelAccountSnapshotInput } from "../../channels/plugins/types.js";
 import type { ChannelManager, ChannelRuntimeSnapshot } from "../server-channels.js";
 import { createReadinessChecker } from "./readiness.js";
 
@@ -12,13 +12,13 @@ const FIVE_MIN_MS = 5 * 60_000;
 const THIRTY_ONE_MIN_MS = 31 * 60_000;
 
 function snapshotWith(
-  accounts: Record<string, Partial<ChannelAccountSnapshot>>,
+  accounts: Record<string, Partial<ChannelAccountSnapshotInput>>,
 ): ChannelRuntimeSnapshot {
   const channels: ChannelRuntimeSnapshot["channels"] = {};
   const channelAccounts: ChannelRuntimeSnapshot["channelAccounts"] = {};
 
   for (const [channelId, accountSnapshot] of Object.entries(accounts)) {
-    const resolved = { accountId: "default", ...accountSnapshot } as ChannelAccountSnapshot;
+    const resolved = { accountId: "default", ...accountSnapshot } as ChannelAccountSnapshotInput;
     channels[channelId as ChannelId] = resolved;
     channelAccounts[channelId as ChannelId] = { default: resolved };
   }
@@ -67,7 +67,7 @@ function withReadinessClock(run: () => void) {
 
 function createReadinessHarness(params: {
   startedAgoMs?: number;
-  accounts?: Record<string, Partial<ChannelAccountSnapshot>>;
+  accounts?: Record<string, Partial<ChannelAccountSnapshotInput>>;
   getStartupPending?: () => boolean;
   getStartupPendingReason?: Parameters<typeof createReadinessChecker>[0]["getStartupPendingReason"];
   getGatewayDraining?: Parameters<typeof createReadinessChecker>[0]["getGatewayDraining"];
@@ -95,8 +95,8 @@ function createReadinessHarness(params: {
 }
 
 function managedAccount(
-  overrides: Partial<ChannelAccountSnapshot> = {},
-): Partial<ChannelAccountSnapshot> {
+  overrides: Partial<ChannelAccountSnapshotInput> = {},
+): Partial<ChannelAccountSnapshotInput> {
   return {
     running: true,
     connected: true,
@@ -108,8 +108,8 @@ function managedAccount(
 }
 
 function stoppedAccount(
-  overrides: Partial<ChannelAccountSnapshot> = {},
-): Partial<ChannelAccountSnapshot> {
+  overrides: Partial<ChannelAccountSnapshotInput> = {},
+): Partial<ChannelAccountSnapshotInput> {
   return managedAccount({
     running: false,
     ...overrides,
@@ -117,7 +117,7 @@ function stoppedAccount(
 }
 
 function createLongRunningReadinessHarness(
-  accounts: Record<string, Partial<ChannelAccountSnapshot>>,
+  accounts: Record<string, Partial<ChannelAccountSnapshotInput>>,
 ) {
   return createReadinessHarness({
     startedAgoMs: THIRTY_ONE_MIN_MS,

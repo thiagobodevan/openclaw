@@ -8,7 +8,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { isRecord } from "../utils.js";
 import { asBoolean } from "../utils/boolean.js";
-import type { ChannelAccountSnapshot } from "./plugins/types.core.js";
+import type { ChannelAccountStatus } from "./plugins/types.core.js";
 
 const CREDENTIAL_STATUS_KEYS = [
   "tokenStatus",
@@ -50,11 +50,46 @@ function readStringArray(record: Record<string, unknown>, key: string): string[]
   return normalized.length > 0 ? normalized : undefined;
 }
 
+function readLastDisconnect(
+  record: Record<string, unknown>,
+): ChannelAccountStatus["lastDisconnect"] | undefined {
+  const value = record.lastDisconnect;
+  if (value === null || typeof value === "string") {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const at = readNumber(value, "at");
+  if (at === undefined) {
+    return undefined;
+  }
+  const status = readNumber(value, "status");
+  const error = normalizeOptionalString(value.error);
+  const loggedOut = readBoolean(value, "loggedOut");
+  return {
+    at,
+    ...(status !== undefined ? { status } : {}),
+    ...(error ? { error } : {}),
+    ...(loggedOut !== undefined ? { loggedOut } : {}),
+  };
+}
+
 function readCredentialStatus(record: Record<string, unknown>, key: CredentialStatusKey) {
   const value = record[key];
   return value === "available" || value === "configured_unavailable" || value === "missing"
     ? value
     : undefined;
+}
+
+function setSnapshotField<Key extends keyof ChannelAccountStatus>(
+  snapshot: Partial<ChannelAccountStatus>,
+  key: Key,
+  value: ChannelAccountStatus[Key] | undefined,
+) {
+  if (value !== undefined) {
+    Object.assign(snapshot, { [key]: value });
+  }
 }
 
 /**
@@ -133,7 +168,7 @@ export function hasResolvedCredentialValue(account: unknown): boolean {
 export function projectCredentialSnapshotFields(
   account: unknown,
 ): Pick<
-  Partial<ChannelAccountSnapshot>,
+  Partial<ChannelAccountStatus>,
   | "tokenSource"
   | "botTokenSource"
   | "appTokenSource"
@@ -182,84 +217,73 @@ export function projectCredentialSnapshotFields(
  * Projects status-safe account fields for read-only channel/account snapshots.
  *
  * This is the boundary between runtime account objects and status renderers; keep it explicit so
- * new channel fields do not accidentally expose webhook URLs, public keys, or raw credentials.
+ * new channel fields do not accidentally expose webhook URLs or raw credentials.
  */
 export function projectSafeChannelAccountSnapshotFields(
   account: unknown,
-): Partial<ChannelAccountSnapshot> {
+): Partial<ChannelAccountStatus> {
   const record = isRecord(account) ? account : null;
   if (!record) {
     return {};
   }
-  const name = normalizeOptionalString(record.name);
-  const statusState = normalizeOptionalString(record.statusState);
-  const healthState = normalizeOptionalString(record.healthState);
-  const mode = normalizeOptionalString(record.mode);
-  const dmPolicy = normalizeOptionalString(record.dmPolicy);
+  const snapshot = projectCredentialSnapshotFields(account);
+  setSnapshotField(snapshot, "name", normalizeOptionalString(record.name));
+  setSnapshotField(snapshot, "enabled", readBoolean(record, "enabled"));
+  setSnapshotField(snapshot, "configured", readBoolean(record, "configured"));
+  setSnapshotField(snapshot, "linked", readBoolean(record, "linked"));
+  setSnapshotField(snapshot, "running", readBoolean(record, "running"));
+  setSnapshotField(snapshot, "connected", readBoolean(record, "connected"));
+  setSnapshotField(snapshot, "restartPending", readBoolean(record, "restartPending"));
+  setSnapshotField(snapshot, "reconnectAttempts", readNumber(record, "reconnectAttempts"));
+  setSnapshotField(snapshot, "lastConnectedAt", readNullableNumber(record, "lastConnectedAt"));
+  setSnapshotField(snapshot, "lastDisconnect", readLastDisconnect(record));
+  for (const key of [
+    "lastInboundAt",
+    "lastOutboundAt",
+    "lastMessageAt",
+    "lastEventAt",
+    "lastTransportActivityAt",
+    "lastStartAt",
+    "lastStopAt",
+    "lastRunActivityAt",
+    "lastProbeAt",
+  ] as const) {
+    setSnapshotField(snapshot, key, readNullableNumber(record, key));
+  }
+  setSnapshotField(
+    snapshot,
+    "lastError",
+    record.lastError === null ? null : normalizeOptionalString(record.lastError),
+  );
+  setSnapshotField(snapshot, "statusState", normalizeOptionalString(record.statusState));
+  setSnapshotField(snapshot, "healthState", normalizeOptionalString(record.healthState));
+  setSnapshotField(snapshot, "terminalDisconnect", readBoolean(record, "terminalDisconnect"));
+  setSnapshotField(snapshot, "busy", readBoolean(record, "busy"));
+  setSnapshotField(snapshot, "activeRuns", readNumber(record, "activeRuns"));
+  setSnapshotField(snapshot, "mode", normalizeOptionalString(record.mode));
+  setSnapshotField(snapshot, "dmPolicy", normalizeOptionalString(record.dmPolicy));
+  setSnapshotField(snapshot, "allowFrom", readStringArray(record, "allowFrom"));
+  for (const key of ["credentialSource", "secretSource", "audienceType", "audience"] as const) {
+    setSnapshotField(snapshot, key, normalizeOptionalString(record[key]));
+  }
   const baseUrl = normalizeOptionalString(record.baseUrl);
-  const cliPath = normalizeOptionalString(record.cliPath);
-  const dbPath = normalizeOptionalString(record.dbPath);
-
-  return {
-    ...(name ? { name } : {}),
-    ...(readBoolean(record, "linked") !== undefined
-      ? { linked: readBoolean(record, "linked") }
-      : {}),
-    ...(readBoolean(record, "running") !== undefined
-      ? { running: readBoolean(record, "running") }
-      : {}),
-    ...(readBoolean(record, "connected") !== undefined
-      ? { connected: readBoolean(record, "connected") }
-      : {}),
-    ...(readBoolean(record, "restartPending") !== undefined
-      ? { restartPending: readBoolean(record, "restartPending") }
-      : {}),
-    ...(readNumber(record, "reconnectAttempts") !== undefined
-      ? { reconnectAttempts: readNumber(record, "reconnectAttempts") }
-      : {}),
-    ...(readNullableNumber(record, "lastConnectedAt") !== undefined
-      ? { lastConnectedAt: readNullableNumber(record, "lastConnectedAt") }
-      : {}),
-    ...(readNumber(record, "lastInboundAt") !== undefined
-      ? { lastInboundAt: readNumber(record, "lastInboundAt") }
-      : {}),
-    ...(readNullableNumber(record, "lastOutboundAt") !== undefined
-      ? { lastOutboundAt: readNullableNumber(record, "lastOutboundAt") }
-      : {}),
-    ...(readNullableNumber(record, "lastMessageAt") !== undefined
-      ? { lastMessageAt: readNullableNumber(record, "lastMessageAt") }
-      : {}),
-    ...(readNullableNumber(record, "lastEventAt") !== undefined
-      ? { lastEventAt: readNullableNumber(record, "lastEventAt") }
-      : {}),
-    ...(readNumber(record, "lastTransportActivityAt") !== undefined
-      ? { lastTransportActivityAt: readNumber(record, "lastTransportActivityAt") }
-      : {}),
-    ...(statusState ? { statusState } : {}),
-    ...(healthState ? { healthState } : {}),
-    ...(readBoolean(record, "terminalDisconnect") !== undefined
-      ? { terminalDisconnect: readBoolean(record, "terminalDisconnect") }
-      : {}),
-    ...(readBoolean(record, "busy") !== undefined ? { busy: readBoolean(record, "busy") } : {}),
-    ...(readNumber(record, "activeRuns") !== undefined
-      ? { activeRuns: readNumber(record, "activeRuns") }
-      : {}),
-    ...(readNullableNumber(record, "lastRunActivityAt") !== undefined
-      ? { lastRunActivityAt: readNullableNumber(record, "lastRunActivityAt") }
-      : {}),
-    ...(mode ? { mode } : {}),
-    ...(dmPolicy ? { dmPolicy } : {}),
-    ...(readStringArray(record, "allowFrom")
-      ? { allowFrom: readStringArray(record, "allowFrom") }
-      : {}),
-    ...projectCredentialSnapshotFields(account),
-    // Base URLs are useful diagnostics, but embedded userinfo would expose credentials.
-    ...(baseUrl ? { baseUrl: stripUrlUserInfo(baseUrl) } : {}),
-    ...(readBoolean(record, "allowUnmentionedGroups") !== undefined
-      ? { allowUnmentionedGroups: readBoolean(record, "allowUnmentionedGroups") }
-      : {}),
-    ...(cliPath ? { cliPath } : {}),
-    ...(dbPath ? { dbPath } : {}),
-    ...(readNumber(record, "port") !== undefined ? { port: readNumber(record, "port") } : {}),
-  };
+  // Base URLs are useful diagnostics, but embedded userinfo would expose credentials.
+  setSnapshotField(snapshot, "baseUrl", baseUrl ? stripUrlUserInfo(baseUrl) : undefined);
+  setSnapshotField(
+    snapshot,
+    "allowUnmentionedGroups",
+    readBoolean(record, "allowUnmentionedGroups"),
+  );
+  setSnapshotField(snapshot, "cliPath", normalizeOptionalString(record.cliPath));
+  setSnapshotField(snapshot, "dbPath", normalizeOptionalString(record.dbPath));
+  setSnapshotField(snapshot, "port", readNullableNumber(record, "port"));
+  setSnapshotField(snapshot, "application", record.application);
+  setSnapshotField(snapshot, "bot", record.bot);
+  setSnapshotField(
+    snapshot,
+    "publicKey",
+    record.publicKey === null ? null : normalizeOptionalString(record.publicKey),
+  );
+  setSnapshotField(snapshot, "profile", record.profile);
+  return snapshot;
 }

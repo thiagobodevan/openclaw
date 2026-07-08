@@ -3,7 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelId } from "../channels/plugins/types.js";
-import type { ChannelAccountSnapshot } from "../channels/plugins/types.js";
+import type { ChannelAccountSnapshotInput } from "../channels/plugins/types.js";
 import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
 import type { ChannelManager, ChannelRuntimeSnapshot } from "./server-channels.js";
@@ -25,12 +25,12 @@ function createMockChannelManager(overrides?: Partial<ChannelManager>): ChannelM
 }
 
 function snapshotWith(
-  accounts: Record<string, Record<string, Partial<ChannelAccountSnapshot>>>,
+  accounts: Record<string, Record<string, Partial<ChannelAccountSnapshotInput>>>,
 ): ChannelRuntimeSnapshot {
   const channels: ChannelRuntimeSnapshot["channels"] = {};
   const channelAccounts: ChannelRuntimeSnapshot["channelAccounts"] = {};
   for (const [channelId, accts] of Object.entries(accounts)) {
-    const resolved: Record<string, ChannelAccountSnapshot> = {};
+    const resolved: Record<string, ChannelAccountSnapshotInput> = {};
     for (const [accountId, partial] of Object.entries(accts)) {
       resolved[accountId] = { accountId, ...partial };
     }
@@ -46,7 +46,7 @@ function snapshotWith(
 const DEFAULT_CHECK_INTERVAL_MS = 5_000;
 
 function createSnapshotManager(
-  accounts: Record<string, Record<string, Partial<ChannelAccountSnapshot>>>,
+  accounts: Record<string, Record<string, Partial<ChannelAccountSnapshotInput>>>,
   overrides?: Partial<ChannelManager>,
 ): ChannelManager {
   return createMockChannelManager({
@@ -78,7 +78,7 @@ async function startAndRunCheck(
   return monitor;
 }
 
-function managedStoppedAccount(lastError: string): Partial<ChannelAccountSnapshot> {
+function managedStoppedAccount(lastError: string): Partial<ChannelAccountSnapshotInput> {
   return {
     running: false,
     enabled: true,
@@ -88,8 +88,8 @@ function managedStoppedAccount(lastError: string): Partial<ChannelAccountSnapsho
 }
 
 function runningConnectedSlackAccount(
-  overrides: Partial<ChannelAccountSnapshot>,
-): Partial<ChannelAccountSnapshot> {
+  overrides: Partial<ChannelAccountSnapshotInput>,
+): Partial<ChannelAccountSnapshotInput> {
   return {
     running: true,
     connected: true,
@@ -101,8 +101,8 @@ function runningConnectedSlackAccount(
 
 function disconnectedAccount(
   lastStartAt: number,
-  overrides: Partial<ChannelAccountSnapshot> = {},
-): Partial<ChannelAccountSnapshot> {
+  overrides: Partial<ChannelAccountSnapshotInput> = {},
+): Partial<ChannelAccountSnapshotInput> {
   return {
     running: true,
     connected: false,
@@ -114,7 +114,7 @@ function disconnectedAccount(
 }
 
 function createSlackSnapshotManager(
-  account: Partial<ChannelAccountSnapshot>,
+  account: Partial<ChannelAccountSnapshotInput>,
   overrides?: Partial<ChannelManager>,
 ): ChannelManager {
   return createSnapshotManager(
@@ -521,7 +521,7 @@ describe("channel-health-monitor", () => {
   });
 
   it("continues pending recovery on the next check without waiting for cooldown", async () => {
-    const account: Partial<ChannelAccountSnapshot> = disconnectedAccount(Date.now() - 300_000);
+    const account: Partial<ChannelAccountSnapshotInput> = disconnectedAccount(Date.now() - 300_000);
     const manager = createSnapshotManager(
       {
         discord: {

@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { ChannelAccountSnapshot } from "openclaw/plugin-sdk/channel-contract";
+import type { ChannelAccountSnapshotInput } from "openclaw/plugin-sdk/channel-contract";
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -345,7 +345,7 @@ function createPollingSession(params: {
   createTelegramTransport?: () => ReturnType<typeof makeTelegramTransport>;
   getLastUpdateId?: () => number | null;
   stallThresholdMs?: number;
-  setStatus?: (patch: Omit<ChannelAccountSnapshot, "accountId">) => void;
+  setStatus?: (patch: Omit<ChannelAccountSnapshotInput, "accountId">) => void;
   isolatedIngress?: ConstructorParameters<typeof TelegramPollingSession>[0]["isolatedIngress"];
 }) {
   return new TelegramPollingSession({

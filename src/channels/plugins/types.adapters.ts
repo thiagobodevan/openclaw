@@ -32,7 +32,8 @@ export type {
   ChannelDeliveryCapabilities,
 } from "./outbound.types.js";
 import type {
-  ChannelAccountSnapshot,
+  ChannelAccountStatus,
+  ChannelAccountSnapshotInput,
   ChannelAccountState,
   ChannelDirectoryEntry,
   ChannelGroupContext,
@@ -140,7 +141,7 @@ export type ChannelConfigAdapter<ResolvedAccount> = {
     (account: ResolvedAccount, cfg: OpenClawConfig) => string
   >;
   describeAccount?: ChannelAdapterCallback<
-    (account: ResolvedAccount, cfg: OpenClawConfig) => ChannelAccountSnapshot
+    (account: ResolvedAccount, cfg: OpenClawConfig) => ChannelAccountStatus
   >;
   resolveAllowFrom?: (params: {
     cfg: OpenClawConfig;
@@ -180,13 +181,13 @@ export type ChannelGroupAdapter = {
 };
 
 export type ChannelStatusAdapter<ResolvedAccount, Probe = unknown, Audit = unknown> = {
-  defaultRuntime?: ChannelAccountSnapshot;
+  defaultRuntime?: ChannelAccountSnapshotInput;
   buildChannelSummary?: ChannelAdapterCallback<
     (params: {
       account: ResolvedAccount;
       cfg: OpenClawConfig;
       defaultAccountId: string;
-      snapshot: ChannelAccountSnapshot;
+      snapshot: ChannelAccountStatus;
     }) => Record<string, unknown> | Promise<Record<string, unknown>>
   >;
   probeAccount?: ChannelAdapterCallback<
@@ -217,10 +218,10 @@ export type ChannelStatusAdapter<ResolvedAccount, Probe = unknown, Audit = unkno
     (params: {
       account: ResolvedAccount;
       cfg: OpenClawConfig;
-      runtime?: ChannelAccountSnapshot;
+      runtime?: ChannelAccountSnapshotInput;
       probe?: Probe;
       audit?: Audit;
-    }) => ChannelAccountSnapshot | Promise<ChannelAccountSnapshot>
+    }) => ChannelAccountSnapshotInput | Promise<ChannelAccountSnapshotInput>
   >;
   logSelfId?: ChannelAdapterCallback<
     (params: {
@@ -238,7 +239,7 @@ export type ChannelStatusAdapter<ResolvedAccount, Probe = unknown, Audit = unkno
       enabled: boolean;
     }) => ChannelAccountState
   >;
-  collectStatusIssues?: (accounts: ChannelAccountSnapshot[]) => ChannelStatusIssue[];
+  collectStatusIssues?: (accounts: ChannelAccountStatus[]) => ChannelStatusIssue[];
 };
 
 export type ChannelGatewayContext<ResolvedAccount = unknown> = {
@@ -248,8 +249,8 @@ export type ChannelGatewayContext<ResolvedAccount = unknown> = {
   runtime: RuntimeEnv;
   abortSignal: AbortSignal;
   log?: ChannelLogSink;
-  getStatus: () => ChannelAccountSnapshot;
-  setStatus: (next: ChannelAccountSnapshot) => void;
+  getStatus: () => ChannelAccountSnapshotInput;
+  setStatus: (next: ChannelAccountSnapshotInput) => void;
   /**
    * Optional channel runtime helpers for external channel plugins.
    *

@@ -3,7 +3,9 @@
 // dedicated subpaths or, for legacy consumers, the compat surface.
 
 export type {
+  ChannelAccountStatus,
   ChannelAccountSnapshot,
+  ChannelAccountSnapshotInput,
   ChannelAgentTool,
   ChannelAgentToolFactory,
   ChannelCapabilities,

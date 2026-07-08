@@ -195,6 +195,8 @@ export type TtsSpeakResult = SchemaType<"TtsSpeakResult">;
 /** Channel control and web-login payloads. */
 export type ChannelsStatusParams = SchemaType<"ChannelsStatusParams">;
 export type ChannelsStatusResult = SchemaType<"ChannelsStatusResult">;
+export type ChannelAccountSnapshot = ChannelsStatusResult["channelAccounts"][string][number];
+export type ChannelUiMeta = NonNullable<ChannelsStatusResult["channelMeta"]>[number];
 export type ChannelsStartParams = SchemaType<"ChannelsStartParams">;
 export type ChannelsStopParams = SchemaType<"ChannelsStopParams">;
 export type ChannelsLogoutParams = SchemaType<"ChannelsLogoutParams">;

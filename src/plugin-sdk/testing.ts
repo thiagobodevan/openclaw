@@ -30,7 +30,11 @@ export {
 } from "../cli/test-runtime-capture.js";
 export type { CliMockOutputRuntime, CliRuntimeCapture } from "../cli/test-runtime-capture.js";
 export { setDefaultChannelPluginRegistryForTests } from "../commands/channel-test-registry.js";
-export type { ChannelAccountSnapshot } from "../channels/plugins/types.public.js";
+export type {
+  ChannelAccountStatus,
+  ChannelAccountSnapshot,
+  ChannelAccountSnapshotInput,
+} from "../channels/plugins/types.public.js";
 export type { ChannelGatewayContext } from "../channels/plugins/types.adapters.js";
 export type { OpenClawConfig } from "../config/config.js";
 export { isAtLeast, parseSemver } from "../infra/runtime-guard.js";

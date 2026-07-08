@@ -66,7 +66,9 @@ type MonitorMatrixOpts = {
   initialSyncLimit?: number;
   replyToMode?: ReplyToMode;
   accountId?: string | null;
-  setStatus?: (next: import("openclaw/plugin-sdk/channel-contract").ChannelAccountSnapshot) => void;
+  setStatus?: (
+    next: import("openclaw/plugin-sdk/channel-contract").ChannelAccountSnapshotInput,
+  ) => void;
 };
 
 function isMatrixStreamingConfig(

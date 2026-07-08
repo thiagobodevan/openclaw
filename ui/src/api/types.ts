@@ -1,6 +1,11 @@
 // Control UI type declarations define types contracts.
 export type UpdateAvailable = import("../../../src/infra/update-startup.js").UpdateAvailable;
 import type { FastMode } from "@openclaw/normalization-core/string-coerce";
+import type {
+  ChannelAccountSnapshot as ProtocolChannelAccountSnapshot,
+  ChannelsStatusResult,
+  ChannelUiMeta,
+} from "../../../packages/gateway-protocol/src/index.js";
 import type { SessionGoal } from "../../../src/config/sessions/types.js";
 import type { CronJobBase } from "../../../src/cron/types-shared.js";
 import type { ConfigUiHints } from "../../../src/shared/config-ui-hints-types.js";
@@ -15,63 +20,9 @@ export type { ConfigUiHint, ConfigUiHints } from "../../../src/shared/config-ui-
 export type { SessionGoal } from "../../../src/config/sessions/types.js";
 export type { FastMode } from "@openclaw/normalization-core/string-coerce";
 
-export type ChannelsStatusSnapshot = {
-  ts: number;
-  channelOrder: string[];
-  channelLabels: Record<string, string>;
-  channelDetailLabels?: Record<string, string>;
-  channelSystemImages?: Record<string, string>;
-  channelMeta?: ChannelUiMetaEntry[];
-  channels: Record<string, unknown>;
-  channelAccounts: Record<string, ChannelAccountSnapshot[]>;
-  channelDefaultAccountId: Record<string, string>;
-  partial?: boolean;
-  warnings?: string[];
-};
-
-export type ChannelUiMetaEntry = {
-  id: string;
-  label: string;
-  detailLabel: string;
-  systemImage?: string;
-};
-
-export type ChannelAccountSnapshot = {
-  accountId: string;
-  name?: string | null;
-  enabled?: boolean | null;
-  configured?: boolean | null;
-  linked?: boolean | null;
-  running?: boolean | null;
-  connected?: boolean | null;
-  reconnectAttempts?: number | null;
-  lastConnectedAt?: number | null;
-  lastError?: string | null;
-  lastStartAt?: number | null;
-  lastStopAt?: number | null;
-  lastInboundAt?: number | null;
-  lastOutboundAt?: number | null;
-  lastProbeAt?: number | null;
-  mode?: string | null;
-  dmPolicy?: string | null;
-  allowFrom?: string[] | null;
-  tokenSource?: string | null;
-  botTokenSource?: string | null;
-  appTokenSource?: string | null;
-  credentialSource?: string | null;
-  audienceType?: string | null;
-  audience?: string | null;
-  webhookPath?: string | null;
-  webhookUrl?: string | null;
-  baseUrl?: string | null;
-  allowUnmentionedGroups?: boolean | null;
-  cliPath?: string | null;
-  dbPath?: string | null;
-  port?: number | null;
-  probe?: unknown;
-  audit?: unknown;
-  application?: unknown;
-};
+export type ChannelsStatusSnapshot = ChannelsStatusResult;
+export type ChannelUiMetaEntry = ChannelUiMeta;
+export type ChannelAccountSnapshot = ProtocolChannelAccountSnapshot;
 
 type WhatsAppSelf = {
   e164?: string | null;

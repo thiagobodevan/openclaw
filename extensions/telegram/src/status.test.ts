@@ -1,5 +1,5 @@
 // Telegram tests cover status plugin behavior.
-import type { ChannelAccountSnapshot } from "openclaw/plugin-sdk/channel-contract";
+import type { ChannelAccountStatus } from "openclaw/plugin-sdk/channel-contract";
 import { DEFAULT_EMOJIS } from "openclaw/plugin-sdk/channel-feedback";
 import { describe, expect, it } from "vitest";
 import type { TelegramChatDetails, TelegramGetChat } from "./bot/types.js";
@@ -50,7 +50,7 @@ describe("collectTelegramStatusIssues", () => {
           hasWildcardUnmentionedGroups: true,
           unresolvedGroups: 2,
         },
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expectIssueListContainsFields(issues, {
@@ -81,7 +81,7 @@ describe("collectTelegramStatusIssues", () => {
             },
           ],
         },
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toHaveLength(1);
@@ -106,7 +106,7 @@ describe("collectTelegramStatusIssues", () => {
         connected: false,
         lastStartAt: Date.now() - 121_000,
         lastError: "network timeout",
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toHaveLength(1);
@@ -132,7 +132,7 @@ describe("collectTelegramStatusIssues", () => {
         lastStartAt: Date.now() - 121_000,
         lastError:
           "Telegram isolated polling spool backlog stalled behind update 42 on lane telegram:123 for 1500100ms; marking polling unhealthy until the backlog drains.",
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toHaveLength(1);
@@ -157,7 +157,7 @@ describe("collectTelegramStatusIssues", () => {
         lastStartAt: Date.now() - 121_000,
         lastError:
           "Telegram isolated polling spool handler timed out behind update 42 on lane telegram:123 after 1500100ms; marking the update failed and restarting isolated ingress so later updates can drain.",
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toHaveLength(1);
@@ -180,7 +180,7 @@ describe("collectTelegramStatusIssues", () => {
         mode: "polling",
         connected: false,
         lastStartAt: Date.now() - 60_000,
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toStrictEqual([]);
@@ -197,7 +197,7 @@ describe("collectTelegramStatusIssues", () => {
         connected: true,
         lastStartAt: Date.now() - 60 * 60_000,
         lastTransportActivityAt: Date.now() - 31 * 60_000,
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toHaveLength(1);
@@ -220,7 +220,7 @@ describe("collectTelegramStatusIssues", () => {
         connected: true,
         lastStartAt: Date.now() - 60_000,
         lastTransportActivityAt: Date.now() - 2 * 60 * 60_000,
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toStrictEqual([]);
@@ -237,7 +237,7 @@ describe("collectTelegramStatusIssues", () => {
         connected: false,
         lastStartAt: Date.now() - 10 * 60_000,
         lastError: "fetch failed",
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toHaveLength(1);
@@ -261,7 +261,7 @@ describe("collectTelegramStatusIssues", () => {
         mode: "webhook",
         connected: false,
         lastStartAt: Date.now() - 60_000,
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toStrictEqual([]);
@@ -277,7 +277,7 @@ describe("collectTelegramStatusIssues", () => {
         mode: "webhook",
         connected: true,
         lastStartAt: Date.now() - 60 * 60_000,
-      } as ChannelAccountSnapshot,
+      } as ChannelAccountStatus,
     ]);
 
     expect(issues).toStrictEqual([]);
@@ -290,7 +290,7 @@ describe("collectTelegramStatusIssues", () => {
           accountId: "main",
           enabled: false,
           configured: true,
-        } as ChannelAccountSnapshot,
+        } as ChannelAccountStatus,
       ]),
     ).toStrictEqual([]);
   });

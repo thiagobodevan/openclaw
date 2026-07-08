@@ -57,7 +57,9 @@ export type {
 } from "./types.adapters.js";
 export type { ChannelRuntimeSurface } from "./channel-runtime-surface.types.js";
 export type {
+  ChannelAccountStatus,
   ChannelAccountSnapshot,
+  ChannelAccountSnapshotInput,
   ChannelAccountState,
   ChannelAgentPromptAdapter,
   ChannelAgentTool,

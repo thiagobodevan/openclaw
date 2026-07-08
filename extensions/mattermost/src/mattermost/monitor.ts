@@ -1,4 +1,5 @@
 // Mattermost plugin module implements monitor behavior.
+import type { ChannelAccountSnapshotInput } from "openclaw/plugin-sdk/channel-contract";
 import {
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
@@ -95,13 +96,7 @@ import {
   deliverMattermostReplyPayload,
   type MattermostReplyDeliveryOutcome,
 } from "./reply-delivery.js";
-import type {
-  ChannelAccountSnapshot,
-  ChatType,
-  OpenClawConfig,
-  ReplyPayload,
-  RuntimeEnv,
-} from "./runtime-api.js";
+import type { ChatType, OpenClawConfig, ReplyPayload, RuntimeEnv } from "./runtime-api.js";
 import {
   buildAgentMediaPayload,
   buildModelsProviderData,
@@ -143,7 +138,7 @@ type MonitorMattermostOpts = {
   config?: OpenClawConfig;
   runtime?: RuntimeEnv;
   abortSignal?: AbortSignal;
-  statusSink?: (patch: Partial<ChannelAccountSnapshot>) => void;
+  statusSink?: (patch: Partial<ChannelAccountSnapshotInput>) => void;
   webSocketFactory?: MattermostWebSocketFactory;
 };
 

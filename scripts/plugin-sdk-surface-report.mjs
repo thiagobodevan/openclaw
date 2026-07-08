@@ -91,7 +91,8 @@ function readPluginSdkEntrypointBudgetEnv(name, fallback, env = process.env) {
 }
 
 const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
-  core: 2,
+  index: 1,
+  core: 3,
   health: 1,
   lmstudio: 1,
   "provider-setup": 1,
@@ -111,7 +112,9 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "inbound-reply-dispatch": 33,
   "channel-reply-pipeline": 12,
   "channel-reply-options-runtime": 2,
-  "channel-runtime": 144,
+  "channel-runtime": 146,
+  "channel-contract": 1,
+  "status-helpers": 1,
   "interactive-runtime": 13,
   "outbound-send-deps": 4,
   "outbound-runtime": 16,
