@@ -35,7 +35,7 @@ describe("Codex runtime plugin install repair", () => {
     });
   });
 
-  it("surfaces non-fatal ClawHub repair notices to warning-only callers", async () => {
+  it("does not auto-acknowledge non-ClawHub runtime plugin repairs", async () => {
     const reviewNotice = "REVIEW RECOMMENDED - ClawHub has not completed a fresh clean check";
     mocks.repairMissingPluginInstallsForIds.mockResolvedValue({
       changes: ['Repaired missing configured plugin "codex".'],
@@ -54,7 +54,7 @@ describe("Codex runtime plugin install repair", () => {
     const repairCall = readOnlyMissingPluginInstallRepairCall();
     expect(repairCall.pluginIds).toStrictEqual(["codex"]);
     expect(repairCall.env).toStrictEqual({});
-    expect(repairCall.acknowledgeNonClawHubInstall).toBe(true);
+    expect(repairCall.acknowledgeNonClawHubInstall).toBeUndefined();
     expect(result).toStrictEqual({
       required: true,
       changes: ['Repaired missing configured plugin "codex".'],
