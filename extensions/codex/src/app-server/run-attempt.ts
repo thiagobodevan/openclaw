@@ -224,6 +224,7 @@ import {
 } from "./protocol.js";
 import { resolveCodexProviderWebSearchSupport } from "./provider-capabilities.js";
 import { readCodexRateLimitsRevision, readRecentCodexRateLimits } from "./rate-limit-cache.js";
+import { resolveCodexRemoteSkillsPrompt } from "./remote-skills.js";
 import { releaseCodexSandboxExecServerEnvironment } from "./sandbox-exec-server.js";
 import {
   isCodexAppServerNativeAuthProfile,
@@ -998,9 +999,15 @@ export async function runCodexAppServerAttempt(
     params,
     workspacePromptContext: workspaceBootstrapContext.promptContext,
   });
+  const skillsPrompt = await resolveCodexRemoteSkillsPrompt({
+    attempt: params,
+    localWorkspaceRoot: resolvedWorkspace,
+    remoteWorkspaceRoot: appServer.remoteWorkspaceRoot,
+    agentId: sessionAgentId,
+  });
   const skillsCollaborationInstructions = renderCodexSkillsCollaborationInstructions({
     attempt: params,
-    skillsPrompt: params.skillsSnapshot?.prompt,
+    skillsPrompt,
   });
   let promptText = params.prompt;
   let promptContextRange: CodexProjectedContextRange | undefined;
@@ -1425,7 +1432,7 @@ export async function runCodexAppServerAttempt(
     workspaceDir: effectiveWorkspace,
     developerInstructions: buildRenderedCodexDeveloperInstructions(),
     workspaceBootstrapContext,
-    skillsPrompt: skillsCollaborationInstructions ? (params.skillsSnapshot?.prompt ?? "") : "",
+    skillsPrompt: skillsCollaborationInstructions ? (skillsPrompt ?? "") : "",
     tools: toolBridge.availableSpecs,
   });
   const trajectoryRecorder = createCodexTrajectoryRecorder({

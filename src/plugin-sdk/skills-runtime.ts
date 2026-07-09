@@ -1,6 +1,4 @@
-/**
- * Runtime SDK subpath for skill snapshot invalidation and refresh listeners.
- */
+/** Runtime SDK subpath for skill refresh and workspace materialization. */
 export {
   bumpSkillsSnapshotVersion,
   getSkillsSnapshotVersion,
@@ -8,3 +6,4 @@ export {
   shouldRefreshSnapshotForVersion,
   type SkillsChangeEvent,
 } from "../skills/runtime/refresh-state.js";
+export { syncSkillsToWorkspace } from "../skills/loading/workspace.js";
