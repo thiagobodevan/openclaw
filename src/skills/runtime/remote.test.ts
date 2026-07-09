@@ -602,6 +602,48 @@ describe("skills-remote", () => {
     }
   });
 
+  it("retries a failed probe after the node reconnects", async () => {
+    const nodeId = `node-${randomUUID()}`;
+    const bin = `bin-${randomUUID()}`;
+    const { cfg, workspaceDir } = createRemoteSkillWorkspace(bin);
+    vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false as const,
+        error: { code: "TIMEOUT", message: "node invoke timed out" },
+      })
+      .mockResolvedValueOnce({ ok: true as const, payload: { bins: [bin] } });
+    try {
+      setSkillsRemoteRegistry({
+        listConnected: () => [],
+        get: () => undefined,
+        invoke,
+      } as unknown as NodeRegistry);
+      recordRemoteMacWithSystemWhich(nodeId);
+      const refresh = () =>
+        refreshRemoteNodeBins({
+          nodeId,
+          platform: "darwin",
+          commands: ["system.run", "system.which"],
+          cfg,
+        });
+
+      await refresh();
+      await refresh();
+      expect(invoke).toHaveBeenCalledTimes(1);
+
+      removeRemoteNodeInfo(nodeId);
+      recordRemoteMacWithSystemWhich(nodeId);
+      await refresh();
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(getRemoteSkillEligibility()?.hasBin(bin)).toBe(true);
+    } finally {
+      removeRemoteNodeInfo(nodeId);
+      fs.rmSync(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses the approved live command surface after the connect readiness delay", async () => {
     vi.useFakeTimers();
     const nodeId = `node-${randomUUID()}`;

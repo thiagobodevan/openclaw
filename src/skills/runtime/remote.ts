@@ -309,6 +309,12 @@ export function recordRemoteNodeBins(nodeId: string, bins: string[]) {
 export function removeRemoteNodeInfo(nodeId: string) {
   const existing = remoteNodes.get(nodeId);
   remoteNodes.delete(nodeId);
+  const probeState = remoteNodeProbeStates.get(nodeId);
+  if (probeState && !probeState.bins) {
+    // A new connection is a new recovery opportunity. Keep successful bin
+    // snapshots across reconnects, but never carry failure backoff forward.
+    remoteNodeProbeStates.delete(nodeId);
+  }
   if (
     existing &&
     isMacPlatform(existing.platform, existing.deviceFamily) &&
