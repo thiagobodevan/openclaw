@@ -521,6 +521,7 @@ describe("skills-remote", () => {
     const firstBin = `bin-${randomUUID()}`;
     const secondBin = `bin-${randomUUID()}`;
     const { cfg, workspaceDir } = createRemoteSkillWorkspace(firstBin);
+    const changedWorkspace = createRemoteSkillWorkspace(secondBin).workspaceDir;
     vi.spyOn(Date, "now").mockReturnValue(2_000_000);
     let invokeCount = 0;
     try {
@@ -545,23 +546,16 @@ describe("skills-remote", () => {
       await refresh();
       expect(invokeCount).toBe(1);
 
-      fs.writeFileSync(
-        path.join(workspaceDir, "remote-skill", "SKILL.md"),
-        [
-          "---",
-          "name: remote-skill",
-          "description: Needs remote bins",
-          `metadata: { "openclaw": { "os": ["darwin"], "requires": { "bins": ["${firstBin}", "${secondBin}"] } } }`,
-          "---",
-          "# Remote Skill",
-          "",
-        ].join("\n"),
-      );
+      if (!cfg.agents?.defaults) {
+        throw new Error("missing test agent defaults");
+      }
+      cfg.agents.defaults.workspace = changedWorkspace;
       await refresh();
       expect(invokeCount).toBe(2);
     } finally {
       removeRemoteNodeInfo(nodeId);
       fs.rmSync(workspaceDir, { recursive: true, force: true });
+      fs.rmSync(changedWorkspace, { recursive: true, force: true });
     }
   });
 
@@ -607,20 +601,35 @@ describe("skills-remote", () => {
     const bin = `bin-${randomUUID()}`;
     const { cfg, workspaceDir } = createRemoteSkillWorkspace(bin);
     vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+    let connId = "conn-old";
+    let resolveFirstInvoke:
+      | ((value: Awaited<ReturnType<NodeRegistry["invoke"]>>) => void)
+      | undefined;
+    const firstInvoke = new Promise<Awaited<ReturnType<NodeRegistry["invoke"]>>>((resolve) => {
+      resolveFirstInvoke = resolve;
+    });
     const invoke = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false as const,
-        error: { code: "TIMEOUT", message: "node invoke timed out" },
-      })
+      .mockImplementationOnce(async () => await firstInvoke)
       .mockResolvedValueOnce({ ok: true as const, payload: { bins: [bin] } });
     try {
       setSkillsRemoteRegistry({
         listConnected: () => [],
-        get: () => undefined,
+        get: () =>
+          ({
+            nodeId,
+            connId,
+            platform: "darwin",
+            commands: ["system.run", "system.which"],
+          }) as unknown as ReturnType<NodeRegistry["get"]>,
         invoke,
       } as unknown as NodeRegistry);
-      recordRemoteMacWithSystemWhich(nodeId);
+      recordRemoteNodeInfo({
+        nodeId,
+        connId,
+        platform: "darwin",
+        commands: ["system.run", "system.which"],
+      });
       const refresh = () =>
         refreshRemoteNodeBins({
           nodeId,
@@ -629,13 +638,22 @@ describe("skills-remote", () => {
           cfg,
         });
 
-      await refresh();
-      await refresh();
-      expect(invoke).toHaveBeenCalledTimes(1);
-
+      const failedRefresh = refresh();
+      await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
       removeRemoteNodeInfo(nodeId);
-      recordRemoteMacWithSystemWhich(nodeId);
-      await refresh();
+      connId = "conn-new";
+      recordRemoteNodeInfo({
+        nodeId,
+        connId,
+        platform: "darwin",
+        commands: ["system.run", "system.which"],
+      });
+      const reconnectRefresh = refresh();
+      resolveFirstInvoke?.({
+        ok: false,
+        error: { code: "TIMEOUT", message: "node invoke timed out" },
+      });
+      await Promise.all([failedRefresh, reconnectRefresh]);
       expect(invoke).toHaveBeenCalledTimes(2);
       expect(getRemoteSkillEligibility()?.hasBin(bin)).toBe(true);
     } finally {

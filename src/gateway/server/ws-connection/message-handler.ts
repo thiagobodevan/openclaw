@@ -2117,6 +2117,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           }
           recordRemoteNodeInfo({
             nodeId: nodeSession.nodeId,
+            connId: nodeSession.connId,
             displayName: nodeSession.displayName,
             platform: nodeSession.platform,
             deviceFamily: nodeSession.deviceFamily,
