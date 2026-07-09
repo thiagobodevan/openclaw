@@ -1295,6 +1295,7 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
     providerMode,
     primaryModel,
     channelDriver: params?.channelDriver ?? params?.channelDriverSelection?.channelDriver,
+    channel: params?.channelId ?? params?.channelDriverSelection?.channel,
     claudeCliAuthMode: params?.claudeCliAuthMode,
   });
   const enabledPluginIds = [
@@ -1308,7 +1309,8 @@ export async function runQaFlowSuite(params?: QaSuiteRunParams): Promise<QaSuite
   ];
   const gatewayConfigPatch = collectQaSuiteGatewayConfigPatch(
     selectedScenarios,
-    params?.adapterOptions?.sutAccountId?.trim() || "sut",
+    params?.adapterOptions?.sutAccountId?.trim() ||
+      (params?.channelDriverSelection?.channelDriver === "crabline" ? "default" : "sut"),
   );
   const gatewayRuntimeOptions = collectQaSuiteGatewayRuntimeOptions(selectedScenarios);
   const concurrency = normalizeQaSuiteConcurrency(
