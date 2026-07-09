@@ -620,13 +620,15 @@ describe("modelsListCommand forward-compat", () => {
       });
     });
 
-    it("includes configured provider and auth-backed catalog rows in configured-mode lists", async () => {
+    function configureAuthenticatedCatalogScenario(mode: "merge" | "replace") {
       const config = {
         agents: { defaults: { model: { primary: "xiaomi/mimo-v2.5-pro" } } },
         models: {
+          mode,
           providers: {
-            xiaomi: {
-              api: "openai-completions",
+            XIAOMI: {
+              // Replace-mode configured models can rely on runtime transport inference.
+              ...(mode === "merge" ? { api: "openai-completions" as const } : {}),
               apiKey: "tp-fixture",
               baseUrl: "https://api.xiaomi.example/v1",
               models: [
@@ -637,12 +639,12 @@ describe("modelsListCommand forward-compat", () => {
           },
         },
       };
-      mocks.loadModelsConfigWithSource.mockResolvedValueOnce({
+      mocks.loadModelsConfigWithSource.mockResolvedValue({
         sourceConfig: config,
         resolvedConfig: config,
         diagnostics: [],
       });
-      mocks.ensureAuthProfileStore.mockReturnValueOnce({
+      mocks.ensureAuthProfileStore.mockReturnValue({
         version: 1,
         profiles: {
           "google:default": {
@@ -653,7 +655,7 @@ describe("modelsListCommand forward-compat", () => {
         },
         order: {},
       });
-      mocks.resolveConfiguredEntries.mockReturnValueOnce({
+      mocks.resolveConfiguredEntries.mockReturnValue({
         entries: [
           {
             key: "xiaomi/mimo-v2.5-pro",
@@ -663,7 +665,7 @@ describe("modelsListCommand forward-compat", () => {
           },
         ],
       });
-      mocks.loadModelCatalog.mockResolvedValueOnce([
+      mocks.loadModelCatalog.mockResolvedValue([
         {
           provider: "google",
           id: "gemini-3.1-flash-lite",
@@ -672,23 +674,92 @@ describe("modelsListCommand forward-compat", () => {
           contextWindow: 1_000_000,
         },
       ]);
+    }
+
+    it.each([
+      {
+        mode: "merge",
+        expectedKeys: [
+          "xiaomi/mimo-v2.5-pro",
+          "xiaomi/mimo-v2.5",
+          "google/gemini-3.1-flash-lite",
+        ],
+      },
+      {
+        mode: "replace",
+        expectedKeys: ["xiaomi/mimo-v2.5-pro", "xiaomi/mimo-v2.5"],
+      },
+    ] as const)(
+      "uses $mode catalog semantics for the default list",
+      async ({ mode, expectedKeys }) => {
+        configureAuthenticatedCatalogScenario(mode);
+        const runtime = createRuntime();
+
+        await modelsListCommand({ json: true }, runtime as never);
+
+        expect(mocks.loadModelRegistry).not.toHaveBeenCalled();
+        const rows = lastPrintedRows<{ key: string; name: string; available: boolean }>();
+        expectRowKeys(rows, [...expectedKeys]);
+        expectRowFields(rows, "xiaomi/mimo-v2.5-pro", { name: "MiMo V2.5 Pro" });
+        expectRowFields(rows, "xiaomi/mimo-v2.5", { name: "MiMo V2.5" });
+        if (mode === "merge") {
+          expectRowFields(rows, "google/gemini-3.1-flash-lite", {
+            name: "Gemini 3.1 Flash Lite",
+            available: true,
+          });
+          expect(mocks.loadModelCatalog).toHaveBeenCalledOnce();
+        } else {
+          expect(mocks.loadModelCatalog).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it("preserves explicit all and provider browsing in replace mode", async () => {
+      configureAuthenticatedCatalogScenario("replace");
+      const googleModelKey = "google/gemini-3.1-flash-lite";
+      const googleModel = {
+        provider: "google",
+        id: "gemini-3.1-flash-lite",
+        name: "Gemini 3.1 Flash Lite",
+        api: "google-generative-ai",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        input: ["text"],
+        contextWindow: 1_000_000,
+        maxTokens: 65_536,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      };
+      mocks.loadModelRegistry.mockResolvedValueOnce({
+        models: [googleModel],
+        availableKeys: new Set([googleModelKey]),
+        registry: { getAll: () => [googleModel] },
+      });
       const runtime = createRuntime();
 
-      await modelsListCommand({ json: true }, runtime as never);
+      await modelsListCommand({ all: true, json: true }, runtime as never);
 
-      expect(mocks.loadModelRegistry).not.toHaveBeenCalled();
-      const rows = lastPrintedRows<{ key: string; name: string; available: boolean }>();
-      expectRowKeys(rows, [
-        "xiaomi/mimo-v2.5-pro",
-        "xiaomi/mimo-v2.5",
-        "google/gemini-3.1-flash-lite",
+      expectRowFields(
+        lastPrintedRows<{ key: string; available: boolean }>(),
+        googleModelKey,
+        { available: true },
+      );
+      expect(mocks.loadModelRegistry).toHaveBeenCalledOnce();
+
+      mocks.loadStaticManifestCatalogRowsForList.mockReturnValueOnce([
+        {
+          ...googleModel,
+          ref: googleModelKey,
+          mergeKey: "google::gemini-3.1-flash-lite",
+          source: "manifest",
+          reasoning: false,
+          status: "available",
+        },
       ]);
-      expectRowFields(rows, "xiaomi/mimo-v2.5-pro", { name: "MiMo V2.5 Pro" });
-      expectRowFields(rows, "xiaomi/mimo-v2.5", { name: "MiMo V2.5" });
-      expectRowFields(rows, "google/gemini-3.1-flash-lite", {
-        name: "Gemini 3.1 Flash Lite",
-        available: true,
-      });
+
+      await modelsListCommand({ provider: "google", json: true }, runtime as never);
+
+      expectRowKeys(lastPrintedRows<{ key: string }>(), [googleModelKey]);
+      expect(mocks.loadModelRegistry).toHaveBeenCalledOnce();
+      expect(mocks.loadModelCatalog).not.toHaveBeenCalled();
     });
 
     it("does not mark configured codex model as missing when forward-compat can build a fallback", async () => {

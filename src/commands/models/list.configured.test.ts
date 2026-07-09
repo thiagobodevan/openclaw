@@ -120,6 +120,22 @@ describe("resolveConfiguredEntries", () => {
     expect(entries[0]?.tags).toEqual(new Set(["default", "configured"]));
   });
 
+  it("preserves manifest aliases that select a distinct transport", () => {
+    vi.stubEnv("OPENCLAW_BUNDLED_PLUGINS_DIR", path.resolve("extensions"));
+
+    const { entries } = resolveConfiguredEntries({
+      agents: {
+        defaults: {
+          model: { primary: "azure-openai-responses/gpt-5.4" },
+        },
+      },
+      models: { providers: {} },
+    });
+
+    expect(entries.map((entry) => entry.key)).toEqual(["azure-openai-responses/gpt-5.4"]);
+    expect(entries[0]?.tags).toEqual(new Set(["default"]));
+  });
+
   it("recovers bundled source aliases when stale dist metadata omits them", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-model-alias-source-"));
     try {

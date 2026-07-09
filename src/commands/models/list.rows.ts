@@ -68,15 +68,19 @@ function loadProviderCatalogModule(): Promise<ProviderCatalogModule> {
   return providerCatalogModuleLoader.load();
 }
 
+function canonicalizeListProvider(context: RowBuilderContext, provider: string): string {
+  return canonicalizeModelCatalogProviderAlias(provider, {
+    cfg: context.cfg,
+    metadataSnapshot: context.metadataSnapshot,
+  });
+}
+
 function matchesProviderFilter(context: RowBuilderContext, provider: string): boolean {
   const providerFilter = context.filter.provider;
   if (!providerFilter) {
     return true;
   }
-  const canonicalProvider = canonicalizeModelCatalogProviderAlias(provider, {
-    cfg: context.cfg,
-    metadataSnapshot: context.metadataSnapshot,
-  });
+  const canonicalProvider = canonicalizeListProvider(context, provider);
   return normalizeProviderId(canonicalProvider) === providerFilter;
 }
 
@@ -267,11 +271,13 @@ function shouldListConfiguredProviderModel(params: {
 }
 
 function findConfiguredProviderModel(params: {
-  cfg: OpenClawConfig;
+  context: RowBuilderContext;
   provider: string;
   modelId: string;
 }): ListRowModel | undefined {
-  const providerConfig = params.cfg.models?.providers?.[params.provider];
+  const providerConfig = Object.entries(params.context.cfg.models?.providers ?? {}).find(
+    ([provider]) => canonicalizeListProvider(params.context, provider) === params.provider,
+  )?.[1];
   const configuredModel = providerConfig?.models?.find((model) => model.id === params.modelId);
   if (!providerConfig || !configuredModel) {
     return undefined;
@@ -283,10 +289,13 @@ function findConfiguredProviderModel(params: {
   });
 }
 
-function toFallbackConfiguredListModel(entry: ConfiguredEntry, cfg: OpenClawConfig): ListRowModel {
+function toFallbackConfiguredListModel(
+  entry: ConfiguredEntry,
+  context: RowBuilderContext,
+): ListRowModel {
   return (
     findConfiguredProviderModel({
-      cfg,
+      context,
       provider: entry.ref.provider,
       modelId: entry.ref.model,
     }) ?? {
@@ -359,13 +368,18 @@ export async function appendConfiguredProviderRows(params: {
   for (const [provider, providerConfig] of Object.entries(
     params.context.cfg.models?.providers ?? {},
   )) {
+    const canonicalProvider = canonicalizeListProvider(params.context, provider);
     for (const configuredModel of providerConfig.models ?? []) {
-      if (!shouldListConfiguredProviderModel({ providerConfig, model: configuredModel })) {
+      // Replace-mode rows are canonical even when runtime infers their transport.
+      if (
+        params.context.cfg.models?.mode !== "replace" &&
+        !shouldListConfiguredProviderModel({ providerConfig, model: configuredModel })
+      ) {
         continue;
       }
-      const key = modelKey(provider, configuredModel.id);
+      const key = modelKey(canonicalProvider, configuredModel.id);
       const model = toConfiguredProviderListModel({
-        provider,
+        provider: canonicalProvider,
         providerConfig,
         model: configuredModel,
       });
@@ -388,6 +402,10 @@ export async function appendAuthenticatedCatalogRows(params: {
   context: RowBuilderContext;
   seenKeys: Set<string>;
 }): Promise<void> {
+  // Replace narrows default configured lists; explicit browse paths skip this helper.
+  if (params.context.cfg.models?.mode === "replace") {
+    return;
+  }
   const { loadModelCatalog } = await loadModelCatalogModule();
   const catalog = await loadModelCatalog({
     config: params.context.cfg,
@@ -563,7 +581,7 @@ export async function appendConfiguredRows(params: {
             modelRegistry: params.modelRegistry,
             cfg: params.context.cfg,
           })
-        : toFallbackConfiguredListModel(entry, params.context.cfg);
+        : toFallbackConfiguredListModel(entry, params.context);
     const model = resolvedModel
       ? normalizeListRowWithProviderPlugin({ model: resolvedModel, context: params.context })
       : resolvedModel;

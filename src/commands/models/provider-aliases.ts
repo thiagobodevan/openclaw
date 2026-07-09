@@ -82,6 +82,10 @@ function collectModelCatalogAliases(
   modelCatalog: PluginManifestModelCatalog | undefined,
 ): void {
   for (const [aliasProvider, target] of Object.entries(modelCatalog?.aliases ?? {})) {
+    // Transport-bearing aliases are concrete routes, not spelling aliases.
+    if (target.api || target.baseUrl) {
+      continue;
+    }
     const alias = normalizeProviderId(aliasProvider);
     const provider = normalizeProviderId(target.provider);
     if (alias && provider) {
