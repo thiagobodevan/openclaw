@@ -777,7 +777,7 @@ export function createFollowupRunner(params: {
         run.inputProvenance?.kind === "internal_system" &&
         run.inputProvenance.sourceTool === "restart-sentinel"
           ? queued.originatingReplyToId
-          : queued.messageId;
+          : (queued.currentMessageId ?? queued.messageId);
       const compactionNoticeReplyToId = resolveFollowupCurrentMessageId();
       const sendCompactionNoticePayload = async (
         payload: ReplyPayload,

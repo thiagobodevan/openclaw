@@ -6049,6 +6049,7 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
       originatingAccountId: "work",
       originatingThreadId: "1739142736.000100",
       messageId: "current-msg-1",
+      currentMessageId: "reply-msg-1",
       originatingReplyToId: "quoted-parent-1",
       run: {
         config: {
@@ -6075,7 +6076,7 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
     });
     expect(requireRecord(startRoute.payload, "start payload")).toMatchObject({
       text: "🧹 Compacting context...",
-      replyToId: "current-msg-1",
+      replyToId: "reply-msg-1",
       replyToCurrent: true,
       isCompactionNotice: true,
     });
@@ -6083,7 +6084,7 @@ describe("createFollowupRunner messaging delivery and dedupe", () => {
     expect(endRoute.mirror).toBe(false);
     expect(requireRecord(endRoute.payload, "end payload")).toMatchObject({
       text: "🧹 Compaction complete",
-      replyToId: "current-msg-1",
+      replyToId: "reply-msg-1",
       replyToCurrent: true,
       isCompactionNotice: true,
     });

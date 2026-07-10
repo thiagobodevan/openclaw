@@ -436,13 +436,14 @@ describe("agent-runner-utils", () => {
         OriginatingChannel: "discord",
         OriginatingTo: "channel:123456789012345678",
         MessageSid: "msg-9",
+        CurrentMessageId: "reply-msg-9",
       },
       config: {},
       hasRepliedRef: undefined,
     });
 
     expect(context.currentChannelId).toBe("channel:123456789012345678");
-    expect(context.currentMessageId).toBe("msg-9");
+    expect(context.currentMessageId).toBe("reply-msg-9");
   });
 
   it("does not expose restart-sentinel synthetic ids as message-tool reply targets", () => {

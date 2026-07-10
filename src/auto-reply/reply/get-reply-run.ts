@@ -1455,6 +1455,7 @@ export async function runPreparedReply(
     queuedLifecycle: opts?.queuedFollowupLifecycle,
     onFollowupAdmissionWaitChange: opts?.onFollowupAdmissionWaitChange,
     messageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
+    currentMessageId: sessionCtx.CurrentMessageId,
     summaryLine: baseBodyTrimmedRaw,
     enqueuedAt: Date.now(),
     images: currentTurnImages.images,

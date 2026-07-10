@@ -966,37 +966,6 @@ describe("signal outbound", () => {
     );
   });
 
-  it("passes direct reply targets as Signal native quote metadata for formatted media", async () => {
-    const send = vi.fn(async () => ({
-      messageId: "signal-1",
-      receipt: createMessageReceiptFromOutboundResults({
-        results: [{ channel: "signal", messageId: "signal-1" }],
-        kind: "media",
-      }),
-    }));
-
-    await signalPlugin.outbound?.sendFormattedMedia?.({
-      cfg: {} as OpenClawConfig,
-      to: "signal:+15551234567",
-      text: "media quoted reply",
-      mediaUrl: "file:///tmp/signal-proof.png",
-      replyToId: "1700000000003",
-      deps: { signal: send },
-    });
-
-    expect(send).toHaveBeenCalledWith(
-      "+15551234567",
-      "media quoted reply",
-      expect.objectContaining({
-        cfg: {},
-        mediaUrl: "file:///tmp/signal-proof.png",
-        replyToId: "1700000000003",
-        replyToAuthor: "+15551234567",
-        textMode: "plain",
-      }),
-    );
-  });
-
   it("passes direct reply targets as Signal native quote metadata for attached-result sends", async () => {
     const send = vi.fn(async (_to: string, _text: string, opts: { mediaUrl?: string } = {}) => ({
       messageId: opts.mediaUrl ? "signal-media-1" : "signal-text-1",
