@@ -2,7 +2,8 @@
 import type { App } from "@slack/bolt";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearSlackRuntime, setSlackRuntime } from "../runtime.js";
 import { createSlackMonitorContext } from "./context.js";
 import type { SlackEventScope } from "./event-scope.js";
 
@@ -56,6 +57,9 @@ function createTestContext(params?: {
     removeAckAfterReply: false,
   });
 }
+
+beforeEach(() => clearSlackRuntime());
+afterEach(() => clearSlackRuntime());
 
 describe("createSlackMonitorContext shouldDropMismatchedSlackEvent", () => {
   it("drops mismatched top-level app/team identifiers", () => {
@@ -199,5 +203,55 @@ describe("createSlackMonitorContext channel metadata cache", () => {
     }
 
     await expect(ctx.resolveChannelName("C0OLDEST")).resolves.toEqual({});
+  });
+});
+
+describe("createSlackMonitorContext Agent View state", () => {
+  it("records Agent View in the account context without runtime state", async () => {
+    const ctx = createTestContext();
+
+    await expect(ctx.isSlackAgentView()).resolves.toBe(false);
+    await ctx.recordSlackAgentView();
+    await expect(ctx.isSlackAgentView()).resolves.toBe(true);
+  });
+
+  it("persists and restores Agent View through plugin state", async () => {
+    let stored: { experience: "agent"; observedAt: number } | undefined;
+    const register = vi.fn(async (_key: string, value: typeof stored) => {
+      stored = value;
+    });
+    const lookup = vi.fn(async () => stored);
+    const openKeyedStore = vi.fn(() => ({ register, lookup }));
+    setSlackRuntime({
+      state: { openKeyedStore },
+      logging: { getChildLogger: () => ({ warn: vi.fn() }) },
+    } as never);
+
+    const first = createTestContext();
+    await first.recordSlackAgentView();
+    const restarted = createTestContext();
+
+    expect(register).toHaveBeenCalledWith("default:T_EXPECTED", {
+      experience: "agent",
+      observedAt: expect.any(Number),
+    });
+    await expect(restarted.isSlackAgentView()).resolves.toBe(true);
+    expect(lookup).toHaveBeenCalledWith("default:T_EXPECTED");
+  });
+
+  it("keeps event-derived Agent View when persistent state cannot open", async () => {
+    setSlackRuntime({
+      state: {
+        openKeyedStore: vi.fn(() => {
+          throw new Error("sqlite unavailable");
+        }),
+      },
+      logging: { getChildLogger: () => ({ warn: vi.fn() }) },
+    } as never);
+    const ctx = createTestContext();
+
+    await ctx.recordSlackAgentView();
+
+    await expect(ctx.isSlackAgentView()).resolves.toBe(true);
   });
 });

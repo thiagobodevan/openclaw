@@ -12,6 +12,7 @@ import type { SessionScope } from "openclaw/plugin-sdk/config-contracts";
 import type { DmPolicy, GroupPolicy } from "openclaw/plugin-sdk/config-contracts";
 import { resolveRuntimeConversationBindingRoute } from "openclaw/plugin-sdk/conversation-runtime";
 import { createDedupeCache } from "openclaw/plugin-sdk/dedupe-runtime";
+import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import type { HistoryEntry } from "openclaw/plugin-sdk/reply-history";
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/routing";
@@ -23,6 +24,7 @@ import {
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatSlackError } from "../errors.js";
+import { getOptionalSlackRuntime } from "../runtime.js";
 import type { SlackMessageEvent } from "../types.js";
 import { normalizeAllowList, normalizeAllowListLower, normalizeSlackSlug } from "./allow-list.js";
 import type { SlackChannelConfigEntries } from "./channel-config.js";
@@ -35,10 +37,16 @@ import { isSlackChannelAllowedByPolicy } from "./policy.js";
 
 export { normalizeSlackChannelType, resolveSlackChatType } from "./channel-type.js";
 
-export type SlackAssistantSuggestedPrompt = {
+export type SlackSuggestedPrompt = {
   title: string;
   message: string;
 };
+
+export const DEFAULT_SLACK_SUGGESTED_PROMPTS: SlackSuggestedPrompt[] = [
+  { title: "What can you do?", message: "What can you help me with?" },
+  { title: "Summarize this channel", message: "Summarize the recent activity in this channel." },
+  { title: "Draft a reply", message: "Help me draft a reply." },
+];
 
 export type SlackAssistantThreadContext = {
   assistantChannelId: string;
@@ -64,6 +72,13 @@ type SlackChannelCacheEntry = {
 
 const SLACK_ASSISTANT_THREAD_CONTEXT_METADATA_EVENT = "assistant_thread_context";
 const SLACK_CHANNEL_CACHE_MAX_ENTRIES = 1024;
+const SLACK_AGENT_VIEW_STATE_NAMESPACE = "agent-view-workspaces";
+const SLACK_AGENT_VIEW_STATE_MAX_ENTRIES = 1024;
+
+type StoredSlackAgentViewState = {
+  experience: "agent";
+  observedAt: number;
+};
 
 export function buildSlackAssistantThreadMetadata(
   context: Omit<SlackAssistantThreadContext, "updatedAt">,
@@ -207,12 +222,14 @@ export type SlackMonitorContext = {
     context: Omit<SlackAssistantThreadContext, "updatedAt">,
     eventScope?: SlackEventScope,
   ) => void;
-  setSlackAssistantSuggestedPrompts: (params: {
+  setSlackSuggestedPrompts: (params: {
     channelId: string;
-    threadTs: string;
+    threadTs?: string;
     title?: string;
-    prompts: SlackAssistantSuggestedPrompt[];
+    prompts: SlackSuggestedPrompt[];
   }) => Promise<boolean>;
+  recordSlackAgentView: () => Promise<void>;
+  isSlackAgentView: () => Promise<boolean>;
 };
 
 const SLACK_ASSISTANT_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -268,6 +285,84 @@ export function createSlackMonitorContext(params: {
   const seenMessages = createDedupeCache({ ttlMs: 60_000, maxSize: 500 });
   const assistantThreadContexts = new Map<string, SlackAssistantThreadContext>();
   let lastAssistantContextCleanupAt = Date.now();
+  let agentViewEnabled = false;
+  let agentViewLoaded = false;
+  let agentViewPersisted = false;
+  let agentViewStore: PluginStateKeyedStore<StoredSlackAgentViewState> | null | undefined;
+  let agentViewStateWarned = false;
+
+  const warnAgentViewState = (action: string, error: unknown) => {
+    if (agentViewStateWarned) {
+      return;
+    }
+    agentViewStateWarned = true;
+    logger.warn({ error: formatSlackError(error) }, `Slack Agent View state failed to ${action}`);
+  };
+
+  const openAgentViewStore = () => {
+    if (agentViewStore !== undefined) {
+      return agentViewStore ?? undefined;
+    }
+    const runtime = getOptionalSlackRuntime();
+    if (!runtime) {
+      return undefined;
+    }
+    try {
+      // Slack cannot switch an app back to Assistant View, so this marker has no TTL.
+      // Keeping it durable prevents post-restart follow-ups from collapsing into the base DM.
+      agentViewStore = runtime.state.openKeyedStore<StoredSlackAgentViewState>({
+        namespace: SLACK_AGENT_VIEW_STATE_NAMESPACE,
+        maxEntries: SLACK_AGENT_VIEW_STATE_MAX_ENTRIES,
+      });
+      return agentViewStore;
+    } catch (error) {
+      agentViewStore = null;
+      warnAgentViewState("open", error);
+      return undefined;
+    }
+  };
+
+  const agentViewStateKey = `${params.accountId}:${params.teamId}`;
+  const recordSlackAgentView = async () => {
+    agentViewEnabled = true;
+    agentViewLoaded = true;
+    if (agentViewPersisted) {
+      return;
+    }
+    const store = openAgentViewStore();
+    if (!store) {
+      return;
+    }
+    try {
+      await store.register(agentViewStateKey, { experience: "agent", observedAt: Date.now() });
+      agentViewPersisted = true;
+    } catch (error) {
+      warnAgentViewState("persist", error);
+    }
+  };
+
+  const isSlackAgentView = async () => {
+    if (agentViewEnabled) {
+      return true;
+    }
+    if (agentViewLoaded) {
+      return false;
+    }
+    const store = openAgentViewStore();
+    if (!store) {
+      return false;
+    }
+    try {
+      const stored = await store.lookup(agentViewStateKey);
+      agentViewLoaded = true;
+      agentViewEnabled = stored?.experience === "agent";
+      agentViewPersisted = agentViewEnabled;
+      return agentViewEnabled;
+    } catch (error) {
+      warnAgentViewState("load", error);
+      return false;
+    }
+  };
 
   const allowFrom = normalizeAllowList(params.allowFrom);
   const groupDmChannels = normalizeAllowList(params.groupDmChannels);
@@ -581,11 +676,11 @@ export function createSlackMonitorContext(params: {
     }
   };
 
-  const setSlackAssistantSuggestedPrompts = async (p: {
+  const setSlackSuggestedPrompts = async (p: {
     channelId: string;
-    threadTs: string;
+    threadTs?: string;
     title?: string;
-    prompts: SlackAssistantSuggestedPrompt[];
+    prompts: SlackSuggestedPrompt[];
   }) => {
     const prompts = p.prompts
       .map((prompt) => ({
@@ -601,7 +696,7 @@ export function createSlackMonitorContext(params: {
       await params.app.client.assistant.threads.setSuggestedPrompts({
         token: params.botToken,
         channel_id: p.channelId,
-        thread_ts: p.threadTs,
+        ...(p.threadTs ? { thread_ts: p.threadTs } : {}),
         ...(p.title?.trim() ? { title: p.title.trim() } : {}),
         prompts,
       });
@@ -772,6 +867,8 @@ export function createSlackMonitorContext(params: {
     setSlackThreadStatus,
     getSlackAssistantThreadContext,
     saveSlackAssistantThreadContext,
-    setSlackAssistantSuggestedPrompts,
+    setSlackSuggestedPrompts,
+    recordSlackAgentView,
+    isSlackAgentView,
   };
 }

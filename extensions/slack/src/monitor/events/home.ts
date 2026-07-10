@@ -3,7 +3,7 @@ import type { SlackEventMiddlewareArgs } from "@slack/bolt";
 import type { HomeView } from "@slack/types";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { danger } from "openclaw/plugin-sdk/runtime-env";
-import type { SlackMonitorContext } from "../context.js";
+import { DEFAULT_SLACK_SUGGESTED_PROMPTS, type SlackMonitorContext } from "../context.js";
 import type { SlackAppHomeOpenedEvent } from "../types.js";
 
 export function buildSlackHomeView(): HomeView {
@@ -54,7 +54,21 @@ export function registerSlackHomeEvents(params: {
         trackEvent?.();
 
         const payload = event as SlackAppHomeOpenedEvent;
-        if (!payload.user || payload.tab === "messages") {
+        if (!payload.user) {
+          return;
+        }
+        if (payload.tab === "messages") {
+          if (!payload.channel) {
+            return;
+          }
+          const promptsSet = await ctx.setSlackSuggestedPrompts({
+            channelId: payload.channel,
+            title: "Try asking",
+            prompts: DEFAULT_SLACK_SUGGESTED_PROMPTS,
+          });
+          if (promptsSet) {
+            await ctx.recordSlackAgentView();
+          }
           return;
         }
 
