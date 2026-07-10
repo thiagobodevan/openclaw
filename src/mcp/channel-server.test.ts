@@ -144,7 +144,7 @@ describe("openclaw channel mcp server", () => {
       );
       expect(codexTools.map((tool) => tool.name)).not.toContain("conversations_list");
       for (const tool of codexTools) {
-        expect(tool._meta).toMatchObject({ ui: { visibility: ["app"] } });
+        expect(tool["_meta"]).toMatchObject({ ui: { visibility: ["app"] } });
       }
       expect(codexMcp.client.getServerCapabilities()?.experimental).toBeUndefined();
     } finally {

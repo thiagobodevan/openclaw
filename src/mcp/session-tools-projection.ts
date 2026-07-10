@@ -167,7 +167,7 @@ export function visibleMessages(
     visible.push({ role, text: bounded });
     remaining -= bounded.length;
   }
-  return visible.reverse();
+  return visible.toReversed();
 }
 
 function extractUserText(message: object): string | undefined {

@@ -13,7 +13,8 @@ import {
   openClawMcpServerInfo,
   registerOpenClawMcpApp,
 } from "./session-app.js";
-import { OpenClawSessionTools, registerSessionMcpTools } from "./session-tools.js";
+import { OpenClawSessionTools } from "./session-tools.js";
+import { registerSessionMcpTools } from "./session-tools-registration.js";
 
 const tempDirs: string[] = [];
 const openServers: Array<{ client: Client; server: McpServer }> = [];
@@ -108,9 +109,9 @@ describe("OpenClaw MCP app resource", () => {
     const tools = await client.listTools();
     const listTool = tools.tools.find((tool) => tool.name === "openclaw_sessions_list");
     expect(listTool?.annotations?.readOnlyHint).toBe(true);
-    expect(listTool?._meta).toMatchObject({ ui: { visibility: ["app"] } });
+    expect(listTool?.["_meta"]).toMatchObject({ ui: { visibility: ["app"] } });
     const globalTool = tools.tools.find((tool) => tool.name === "openclaw");
-    expect(globalTool?._meta).toEqual({
+    expect(globalTool?.["_meta"]).toEqual({
       "openai/ui": { entrypoints: [{ type: "global" }] },
       ui: { resourceUri: OPENCLAW_SESSION_APP_URI, visibility: ["app"] },
     });
@@ -123,7 +124,7 @@ describe("OpenClaw MCP app resource", () => {
         mode: expect.any(Object),
       },
     });
-    expect(detailTool?._meta).toEqual({
+    expect(detailTool?.["_meta"]).toEqual({
       "openai/ui": {
         entrypoints: [
           {

@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { OpenClawSessionTools, registerSessionMcpTools } from "./session-tools.js";
+import { OpenClawSessionTools } from "./session-tools.js";
+import { registerSessionMcpTools } from "./session-tools-registration.js";
 
 const openServers: Array<{ client: Client; server: McpServer }> = [];
 

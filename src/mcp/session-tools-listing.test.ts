@@ -159,7 +159,7 @@ describe("OpenClaw session MCP tools", () => {
   test("includes active and archived sessions in the default native collection", async () => {
     const activeKey = "agent:main:dashboard:active";
     const archivedKey = "agent:main:dashboard:archived";
-    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+    const request = vi.fn(async (method: string, _params: Record<string, unknown>) => {
       if (method !== "sessions.list") {
         throw new Error(`unexpected gateway method ${method}`);
       }

@@ -81,7 +81,7 @@ vi.mock("./channel-tools.js", () => ({
   registerChannelMcpTools: vi.fn(),
 }));
 
-vi.mock("./session-tools.js", () => ({
+vi.mock("./session-tools-registration.js", () => ({
   registerSessionMcpTools: vi.fn(),
 }));
 

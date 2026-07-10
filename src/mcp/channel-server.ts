@@ -11,7 +11,7 @@ import {
   openClawMcpServerInfo,
   registerOpenClawMcpApp,
 } from "./session-app.js";
-import { registerSessionMcpTools } from "./session-tools.js";
+import { registerSessionMcpTools } from "./session-tools-registration.js";
 
 /**
  * MCP stdio server assembly for OpenClaw channel conversations.

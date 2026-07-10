@@ -46,7 +46,6 @@ import {
 } from "./session-tools-projection.js";
 
 export type { SessionCapabilities } from "./session-tools-contract.js";
-export { registerSessionMcpTools } from "./session-tools-registration.js";
 
 /** Owns opaque session ids and the narrow Gateway projection used by MCP tools. */
 export class OpenClawSessionTools {
