@@ -2000,15 +2000,15 @@ describe("openai transport stream", () => {
 
   it("does not emit thinking streams when reasoning is disabled", () => {
     const model = {
-      id: "grok-4.20-beta-latest-reasoning",
-      name: "Grok 4.20 Beta Latest (Reasoning)",
+      id: "grok-4.20-0309-reasoning",
+      name: "Grok 4.20 0309 (Reasoning)",
       api: "openai-completions",
       provider: "xai",
       baseUrl: "https://api.x.ai/v1",
       reasoning: true,
       input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 2_000_000,
+      contextWindow: 1_000_000,
       maxTokens: 30_000,
     } satisfies Model<"openai-completions">;
 
@@ -2782,6 +2782,101 @@ describe("openai transport stream", () => {
     await testing.processOpenAICompletionsStream(mockStream(), output, model, stream);
 
     expect(output.content).toStrictEqual([{ type: "text", text: "ok" }]);
+    expect(output.stopReason).toBe("stop");
+  });
+
+  it("surfaces chat-completions refusal deltas as visible assistant text", async () => {
+    const model = {
+      id: "gpt-5.5",
+      name: "GPT-5.5",
+      api: "openai-completions" as const,
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: false,
+      input: ["text"] as const,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 4096,
+    } satisfies Model<"openai-completions">;
+    const output = createAssistantOutput(model);
+    const events: CapturedStreamEvent[] = [];
+
+    await testing.processOpenAICompletionsStream(
+      streamChunks([
+        {
+          id: "chatcmpl-refusal-delta",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: model.id,
+          choices: [
+            {
+              index: 0,
+              delta: { role: "assistant", content: null, refusal: "I can't help with that." },
+              logprobs: null,
+              finish_reason: "stop",
+            },
+          ],
+        },
+      ]),
+      output,
+      model,
+      { push: (event) => events.push(event as CapturedStreamEvent) },
+    );
+
+    expect(output.content).toStrictEqual([{ type: "text", text: "I can't help with that." }]);
+    expect(output.stopReason).toBe("stop");
+    expect(
+      events.some(
+        (event) => event.type === "text_delta" && event.delta === "I can't help with that.",
+      ),
+    ).toBe(true);
+  });
+
+  it("surfaces aggregated chat-completions message.refusal as visible assistant text", async () => {
+    const model = {
+      id: "gpt-5.5",
+      name: "GPT-5.5",
+      api: "openai-completions" as const,
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: false,
+      input: ["text"] as const,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 4096,
+    } satisfies Model<"openai-completions">;
+    const output = createAssistantOutput(model);
+
+    await testing.processOpenAICompletionsStream(
+      streamChunks([
+        {
+          id: "chatcmpl-refusal-message",
+          object: "chat.completion.chunk",
+          created: 1,
+          model: model.id,
+          choices: [
+            {
+              index: 0,
+              // Some OpenAI-compatible endpoints deliver a full message instead of delta.
+              message: {
+                role: "assistant",
+                content: null,
+                refusal: "Requests like this are not allowed.",
+              },
+              logprobs: null,
+              finish_reason: "stop",
+            } as unknown as ChatCompletionChunk["choices"][number],
+          ],
+        },
+      ]),
+      output,
+      model,
+      { push() {} },
+    );
+
+    expect(output.content).toStrictEqual([
+      { type: "text", text: "Requests like this are not allowed." },
+    ]);
     expect(output.stopReason).toBe("stop");
   });
 
@@ -3655,15 +3750,15 @@ describe("openai transport stream", () => {
   it("omits Responses reasoning params when model compat disables reasoning effort", () => {
     const params = buildOpenAIResponsesParams(
       {
-        id: "grok-4.20-beta-latest-reasoning",
-        name: "Grok 4.20 Beta Latest (Reasoning)",
+        id: "grok-4.20-0309-reasoning",
+        name: "Grok 4.20 0309 (Reasoning)",
         api: "openai-responses",
         provider: "xai",
         baseUrl: "https://api.x.ai/v1",
         reasoning: true,
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 2_000_000,
+        contextWindow: 1_000_000,
         maxTokens: 30_000,
         compat: { supportsReasoningEffort: false },
       } as unknown as Model<"openai-responses">,
@@ -3696,7 +3791,7 @@ describe("openai transport stream", () => {
         maxTokens: 128_000,
         compat: {
           supportsReasoningEffort: true,
-          supportedReasoningEfforts: ["low", "medium", "high"],
+          supportedReasoningEfforts: ["none", "low", "medium", "high"],
         },
       } as unknown as Model<"openai-responses">,
       {
@@ -3726,7 +3821,7 @@ describe("openai transport stream", () => {
         maxTokens: 128_000,
         compat: {
           supportsReasoningEffort: true,
-          supportedReasoningEfforts: ["low", "medium", "high"],
+          supportedReasoningEfforts: ["none", "low", "medium", "high"],
         },
       } as unknown as Model<"openai-responses">,
       {
@@ -5694,6 +5789,39 @@ describe("openai transport stream", () => {
     ) as { reasoning?: unknown };
 
     expect(params.reasoning).toEqual({ effort: "high", summary: "auto" });
+  });
+
+  it("normalizes canonical reasoning casing in Responses and Chat Completions payloads", () => {
+    const context = {
+      systemPrompt: "system",
+      messages: [],
+      tools: [],
+    } as never;
+    const baseModel = {
+      id: "gpt-5.5",
+      name: "GPT-5.5",
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: true,
+      input: ["text"] as Model["input"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    };
+
+    const responses = buildOpenAIResponsesParams(
+      { ...baseModel, api: "openai-responses" } satisfies Model<"openai-responses">,
+      context,
+      { reasoningEffort: " XHIGH " } as never,
+    ) as { reasoning?: unknown };
+    const completions = buildOpenAICompletionsParams(
+      { ...baseModel, api: "openai-completions" } satisfies Model<"openai-completions">,
+      context,
+      { reasoningEffort: " XHIGH " } as never,
+    ) as { reasoning_effort?: unknown };
+
+    expect(responses.reasoning).toEqual({ effort: "xhigh", summary: "auto" });
+    expect(completions.reasoning_effort).toBe("xhigh");
   });
 
   it("uses disabled OpenAI Responses reasoning when the model supports none", () => {
