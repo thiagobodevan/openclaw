@@ -2451,6 +2451,7 @@ describe("package artifact reuse", () => {
     const validateStep = workflowStep(job, "Validate inputs and secrets");
     const identityStep = workflowStep(job, "Validate package artifact identity");
     const runStep = workflowStep(job, "Run package Telegram E2E");
+    const consumptionUpload = workflowStep(job, "Upload npm Telegram package consumption");
 
     expect(currentRunDownload).toEqual({
       if: "inputs.package_artifact_name != '' && inputs.package_artifact_run_id == github.run_id",
@@ -2495,10 +2496,16 @@ describe("package artifact reuse", () => {
       "Package Telegram artifact producer run attempt does not match the requested tuple.",
     ]);
     expect(runStep.env).toMatchObject({
+      PACKAGE_ARTIFACT_DIGEST: "${{ inputs.package_artifact_digest || '' }}",
+      PACKAGE_ARTIFACT_ID: "${{ inputs.package_artifact_id || '' }}",
+      PACKAGE_ARTIFACT_NAME: "${{ inputs.package_artifact_name || '' }}",
+      PACKAGE_ARTIFACT_RUN_ATTEMPT: "${{ inputs.package_artifact_run_attempt || '' }}",
+      PACKAGE_ARTIFACT_RUN_ID: "${{ inputs.package_artifact_run_id || '' }}",
       PACKAGE_FILE_NAME: "${{ inputs.package_file_name || '' }}",
       PACKAGE_SHA256: "${{ inputs.package_sha256 || '' }}",
       PACKAGE_SOURCE_SHA: "${{ inputs.package_source_sha || '' }}",
       PACKAGE_VERSION: "${{ inputs.package_version || '' }}",
+      TRUSTED_WORKFLOW_SHA: "${{ fromJSON(toJSON(job)).workflow_sha }}",
     });
     expectTextToIncludeAll(runStep.run, [
       'declared_package_tgz="${package_dir}/${PACKAGE_FILE_NAME}"',
@@ -2514,7 +2521,27 @@ describe("package artifact reuse", () => {
       "Package Telegram artifact source SHA/version differs from the declared identity.",
       'export OPENCLAW_NPM_TELEGRAM_PACKAGE_DIR="${package_dir}"',
       'export OPENCLAW_NPM_TELEGRAM_PACKAGE_TGZ="${package_tgz}"',
+      'expected_publish_byte_name="openclaw-npm-publish-byte-${PACKAGE_ARTIFACT_RUN_ID}-${PACKAGE_ARTIFACT_RUN_ATTEMPT}"',
+      'if [[ "$PACKAGE_ARTIFACT_NAME" == "$expected_publish_byte_name" ]]; then',
+      'actual_harness_sha="$(git rev-parse HEAD)"',
+      'if [[ "$actual_harness_sha" != "$TRUSTED_WORKFLOW_SHA" ]]; then',
+      "NPM Telegram publish-byte proof requires the exact trusted workflow checkout.",
+      'receipt_path="${receipt_dir}/package-consumption.json"',
+      'ACTUAL_HARNESS_SHA="${actual_harness_sha}"',
+      "node scripts/npm-telegram-package-consumption.mjs",
+      'echo "package_consumption_receipt=1" >> "$GITHUB_OUTPUT"',
     ]);
+    expect(consumptionUpload).toEqual({
+      if: "inputs.package_artifact_name != '' && steps.run_lane.outputs.package_consumption_receipt == '1'",
+      name: "Upload npm Telegram package consumption",
+      uses: UPLOAD_ARTIFACT_V7,
+      with: {
+        name: "npm-telegram-package-consumption-${{ github.run_id }}-${{ github.run_attempt }}",
+        path: ".artifacts/npm-telegram-package-consumption/package-consumption.json",
+        "retention-days": 30,
+        "if-no-files-found": "error",
+      },
+    });
   });
 
   it("rejects partial npm Telegram artifact identity instead of falling back to npm", () => {

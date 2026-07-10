@@ -63,69 +63,8 @@ if [[ -n "${publish_target}" ]]; then
       exit 2
       ;;
   esac
-  if ! tarball_package_json="$(tar -xOf "${publish_target}" package/package.json)"; then
-    echo "error: npm publish tarball is missing a readable package/package.json: ${publish_target}" >&2
-    exit 2
-  fi
-  if ! printf '%s' "${tarball_package_json}" | \
-    EXPECTED_PACKAGE_NAME="${expected_package_name}" EXPECTED_PACKAGE_VERSION="${package_version}" \
-      PUBLISH_TARGET="${publish_target}" node -e '
-    let input = "";
-    process.stdin.on("data", (chunk) => { input += chunk; });
-    process.stdin.on("end", () => {
-      const target = process.env.PUBLISH_TARGET;
-      let pkg;
-      try {
-        pkg = JSON.parse(input);
-      } catch {
-        console.error(`error: npm publish tarball package/package.json is malformed: ${target}`);
-        process.exit(2);
-      }
-      if (!pkg || typeof pkg !== "object" || Array.isArray(pkg) || typeof pkg.name !== "string" || pkg.name.trim() === "") {
-        console.error(`error: npm publish tarball package/package.json has no valid name: ${target}`);
-        process.exit(2);
-      }
-      if (pkg.name.trim() !== process.env.EXPECTED_PACKAGE_NAME) {
-        console.error(
-          `error: npm publish tarball package name mismatch: expected ${process.env.EXPECTED_PACKAGE_NAME}, got ${pkg.name.trim()}`,
-        );
-        process.exit(2);
-      }
-      // npm treats publishConfig as arbitrary config before its OIDC exchange.
-      // Only the scoped AI package ships the exact public-access declaration.
-      if (process.env.EXPECTED_PACKAGE_NAME === "openclaw" && pkg.publishConfig !== undefined) {
-        console.error(`error: npm publish tarball publishConfig is not allowed: ${target}`);
-        process.exit(2);
-      }
-      if (process.env.EXPECTED_PACKAGE_NAME === "@openclaw/ai") {
-        const publishConfig = pkg.publishConfig;
-        const keys =
-          publishConfig && typeof publishConfig === "object" && !Array.isArray(publishConfig)
-            ? Object.keys(publishConfig)
-            : [];
-        if (
-          keys.length !== 1 ||
-          keys[0] !== "access" ||
-          publishConfig.access !== "public"
-        ) {
-          console.error(
-            `error: npm publish tarball publishConfig may only contain access=public: ${target}`,
-          );
-          process.exit(2);
-        }
-      }
-      if (typeof pkg.version !== "string" || pkg.version.trim() === "") {
-        console.error(`error: npm publish tarball package/package.json has no valid version: ${target}`);
-        process.exit(2);
-      }
-      if (pkg.version.trim() !== process.env.EXPECTED_PACKAGE_VERSION) {
-        console.error(
-          `error: npm publish tarball version mismatch: expected ${process.env.EXPECTED_PACKAGE_VERSION}, got ${pkg.version.trim()}`,
-        );
-        process.exit(2);
-      }
-    });
-  '; then
+  if ! node "${script_dir}/openclaw-npm-publish-tarball.mjs" \
+    "${publish_target}" "${expected_package_name}" "${package_version}"; then
     exit 2
   fi
 fi

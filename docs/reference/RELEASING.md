@@ -450,6 +450,19 @@ Common package profiles:
 
 For package-candidate Telegram proof, enable `telegram_mode=mock-openai` or `telegram_mode=live-frontier` on Package Acceptance. The workflow passes the resolved `package-under-test` tarball into the Telegram lane; the standalone Telegram workflow still accepts a published npm spec for post-publish checks.
 
+Core npm preflight also uploads the same prepared package bytes under the
+attempt-qualified artifact name
+`openclaw-npm-publish-byte-<run-id>-<run-attempt>`. Standalone NPM Telegram
+prepublish proof must consume that artifact by its exact id, name, digest,
+producer run id and attempt, root tarball name and SHA-256, source SHA, and
+package version. Its `harness_ref` must be the exact trusted workflow SHA, not
+the release target SHA or a moving branch. A successful run uploads
+`npm-telegram-package-consumption-<run-id>-<run-attempt>` containing
+`package-consumption.json`; this receipt binds the consumed root and
+`@openclaw/ai` tarballs to the trusted workflow SHA and QA result. This lane is
+validation only. `OpenClaw Release Publish` is not a dry-run path and must not
+be invoked to obtain this proof.
+
 ## Regular release publish automation
 
 For beta, `latest`, plugin, GitHub Release, and platform publication,

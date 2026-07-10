@@ -370,10 +370,9 @@ export async function validateNpmPublicationReadiness({
   ) {
     throw new Error("npm publication readiness requires an exact package identity.");
   }
-  let states = [];
   let pending = [];
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    states = [];
+    const states = [];
     pending = [];
     for (const pkg of packages) {
       const packument = await query(pkg.name);

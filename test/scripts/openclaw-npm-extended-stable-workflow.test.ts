@@ -76,6 +76,21 @@ describe("minimal npm extended-stable workflow", () => {
     const raw = readFileSync(workflowPath, "utf8");
     expect(raw).toContain("version: 1");
     expect(raw).toContain("openclaw-npm-preflight-${{ inputs.tag }}");
+    const publishByte = step(
+      parsed.jobs?.preflight_openclaw_npm,
+      "Upload prepared npm publish byte artifact",
+    );
+    expect(publishByte).toMatchObject({
+      id: "upload_publish_byte",
+      with: {
+        name: "openclaw-npm-publish-byte-${{ github.run_id }}-${{ github.run_attempt }}",
+        path: "${{ steps.packed_tarball.outputs.dir }}",
+        "if-no-files-found": "error",
+      },
+    });
+    expect(raw).not.toContain(
+      "openclaw-npm-preflight-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
     const preflight = parsed.jobs?.preflight_openclaw_npm;
     const validate = parsed.jobs?.validate_publish_request;
     const publish = parsed.jobs?.publish_openclaw_npm;
@@ -239,6 +254,8 @@ describe("minimal npm extended-stable workflow", () => {
     expect(mutation.run).toContain("recheck_publish_inputs");
     expect(mutation.run).toContain("Trusted npm tooling or inert release target changed");
     expect(mutation.run).toContain("Prepared npm package bytes changed before npm mutation.");
+    expect(mutation.run).toContain("scripts/openclaw-npm-publish-tarball.mjs");
+    expect(mutation.run).toContain("git diff --quiet HEAD --");
     expect(mutation.run).toContain("resolveNpmPublicationReadinessFromRegistry");
     expect(mutation.run).toContain('OPENCLAW_NPM_EXPECTED_PACKAGE_NAME="$package_name"');
     expect(mutation.run).toContain('bash "$TRUSTED_PUBLISH_SCRIPT" --validate "$tarball_path"');

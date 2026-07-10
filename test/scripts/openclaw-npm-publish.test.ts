@@ -7,13 +7,16 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { c as createTar } from "tar";
 import { afterEach, describe, expect, it } from "vitest";
 
 const scriptPath = "scripts/openclaw-npm-publish.sh";
+const tarballValidatorPath = "scripts/openclaw-npm-publish-tarball.mjs";
 const tempDirs: string[] = [];
 
 function makeTempDir(prefix: string): string {
@@ -43,7 +46,9 @@ function makeReleaseCheckout(root: string, version: string): string {
   const scriptsDir = path.join(checkout, "scripts");
   mkdirSync(scriptsDir, { recursive: true });
   writeFileSync(path.join(checkout, "package.json"), JSON.stringify({ version }), "utf8");
+  symlinkSync(path.resolve("node_modules"), path.join(checkout, "node_modules"), "dir");
   copyFileSync(scriptPath, path.join(checkout, scriptPath));
+  copyFileSync(tarballValidatorPath, path.join(checkout, tarballValidatorPath));
   copyFileSync(
     "scripts/openclaw-npm-extended-stable-release.mjs",
     path.join(checkout, "scripts/openclaw-npm-extended-stable-release.mjs"),
@@ -66,6 +71,44 @@ function makePackageTarball(root: string, packageJson?: string): string {
     writeFileSync(path.join(packageDir, "package.json"), packageJson, "utf8");
   }
   execFileSync("tar", ["-czf", tarball, "-C", root, "package"]);
+  return tarball;
+}
+
+function makeConflictingPackageTarball(root: string, packageVersion: string): string {
+  const packageDir = path.join(root, "package");
+  const shadowDir = path.join(root, "shadow");
+  const tarball = path.join(root, "openclaw-conflicting.tgz");
+  mkdirSync(packageDir);
+  mkdirSync(shadowDir);
+  writeFileSync(
+    path.join(packageDir, "package.json"),
+    JSON.stringify({ name: "openclaw", version: packageVersion }),
+    "utf8",
+  );
+  writeFileSync(
+    path.join(shadowDir, "package.json"),
+    JSON.stringify({
+      name: "shadow-package",
+      version: packageVersion,
+      publishConfig: { registry: "https://attacker.example/" },
+    }),
+    "utf8",
+  );
+  execFileSync("tar", ["-czf", tarball, "-C", root, "package/package.json", "shadow/package.json"]);
+  return tarball;
+}
+
+function makePaxMetadataTarball(root: string, packageVersion: string): string {
+  const packageDir = path.join(root, "package");
+  const tarball = path.join(root, "openclaw-pax.tgz");
+  mkdirSync(packageDir);
+  writeFileSync(
+    path.join(packageDir, "package.json"),
+    JSON.stringify({ name: "openclaw", version: packageVersion }),
+    "utf8",
+  );
+  writeFileSync(path.join(packageDir, `${"long-name-".repeat(12)}.txt`), "metadata", "utf8");
+  createTar({ cwd: root, file: tarball, gzip: true, sync: true }, ["package"]);
   return tarball;
 }
 
@@ -282,6 +325,45 @@ describe("openclaw npm publish wrapper", () => {
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("npm publish tarball publishConfig is not allowed");
+  });
+
+  it("rejects a top-level tag that would override the requested dist-tag", () => {
+    const tempRoot = makeTempDir("openclaw-npm-publish-");
+    const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version as string;
+    const tarball = makePackageTarball(
+      tempRoot,
+      JSON.stringify({ name: "openclaw", version: packageVersion, tag: "latest" }),
+    );
+    const result = runPublishWrapper(["--validate", tarball], {
+      OPENCLAW_NPM_PUBLISH_TAG: "beta",
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("npm publish tarball top-level tag is not allowed");
+  });
+
+  it("rejects alternate top-level manifests that npm strip semantics could select", () => {
+    const tempRoot = makeTempDir("openclaw-npm-publish-");
+    const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version as string;
+    const tarball = makeConflictingPackageTarball(tempRoot, packageVersion);
+    const result = runPublishWrapper(["--validate", tarball], {
+      OPENCLAW_NPM_PUBLISH_TAG: "beta",
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("entries must stay under one canonical package/ tree");
+  });
+
+  it("rejects PAX metadata before npm can interpret it with a different tar engine", () => {
+    const tempRoot = makeTempDir("openclaw-npm-publish-");
+    const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version as string;
+    const tarball = makePaxMetadataTarball(tempRoot, packageVersion);
+    const result = runPublishWrapper(["--validate", tarball], {
+      OPENCLAW_NPM_PUBLISH_TAG: "beta",
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("must not contain PAX or GNU metadata entries");
   });
 
   it("allows the AI package's exact public-access publish configuration", () => {

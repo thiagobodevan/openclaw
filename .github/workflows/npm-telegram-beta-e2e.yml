@@ -388,17 +388,24 @@ jobs:
           OPENCLAW_QA_CREDENTIAL_ACQUIRE_TIMEOUT_MS: "1800000"
           OPENCLAW_QA_REDACT_PUBLIC_METADATA: "1"
           INPUT_SCENARIO: ${{ inputs.scenario }}
+          PACKAGE_ARTIFACT_DIGEST: ${{ inputs.package_artifact_digest || '' }}
+          PACKAGE_ARTIFACT_ID: ${{ inputs.package_artifact_id || '' }}
           PACKAGE_ARTIFACT_NAME: ${{ inputs.package_artifact_name || '' }}
+          PACKAGE_ARTIFACT_RUN_ATTEMPT: ${{ inputs.package_artifact_run_attempt || '' }}
+          PACKAGE_ARTIFACT_RUN_ID: ${{ inputs.package_artifact_run_id || '' }}
           PACKAGE_FILE_NAME: ${{ inputs.package_file_name || '' }}
           PACKAGE_SHA256: ${{ inputs.package_sha256 || '' }}
           PACKAGE_SOURCE_SHA: ${{ inputs.package_source_sha || '' }}
           PACKAGE_VERSION: ${{ inputs.package_version || '' }}
+          TRUSTED_WORKFLOW_SHA: ${{ fromJSON(toJSON(job)).workflow_sha }}
         run: |
           set -euo pipefail
 
           output_dir=".artifacts/qa-e2e/npm-telegram-beta-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "output_dir=${output_dir}" >> "$GITHUB_OUTPUT"
+          echo "package_consumption_receipt=" >> "$GITHUB_OUTPUT"
           export OPENCLAW_NPM_TELEGRAM_OUTPUT_DIR="${output_dir}"
+          package_consumption_manifest=""
 
           append_telegram_summary() {
             local status=$?
@@ -491,6 +498,15 @@ jobs:
           NODE
               )"
               export OPENCLAW_NPM_TELEGRAM_PACKAGE_DIR="${package_dir}"
+              expected_publish_byte_name="openclaw-npm-publish-byte-${PACKAGE_ARTIFACT_RUN_ID}-${PACKAGE_ARTIFACT_RUN_ATTEMPT}"
+              if [[ "$PACKAGE_ARTIFACT_NAME" == "$expected_publish_byte_name" ]]; then
+                actual_harness_sha="$(git rev-parse HEAD)"
+                if [[ "$actual_harness_sha" != "$TRUSTED_WORKFLOW_SHA" ]]; then
+                  echo "NPM Telegram publish-byte proof requires the exact trusted workflow checkout." >&2
+                  exit 1
+                fi
+                package_consumption_manifest="${manifest}"
+              fi
             else
               mapfile -t package_tgzs < <(find "${package_dir}" -type f -name "*.tgz" | sort)
               if [[ "${#package_tgzs[@]}" -ne 1 ]]; then
@@ -566,6 +582,25 @@ jobs:
           fi
 
           pnpm test:docker:npm-telegram-live
+
+          if [[ -n "${package_consumption_manifest}" ]]; then
+            receipt_dir=".artifacts/npm-telegram-package-consumption"
+            receipt_path="${receipt_dir}/package-consumption.json"
+            mkdir -p "${receipt_dir}"
+            ACTUAL_HARNESS_SHA="${actual_harness_sha}" \
+              node scripts/npm-telegram-package-consumption.mjs \
+                "${package_consumption_manifest}" "${receipt_path}"
+            echo "package_consumption_receipt=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload npm Telegram package consumption
+        if: inputs.package_artifact_name != '' && steps.run_lane.outputs.package_consumption_receipt == '1'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-telegram-package-consumption-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/npm-telegram-package-consumption/package-consumption.json
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Upload npm Telegram E2E artifacts
         if: always()

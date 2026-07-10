@@ -537,6 +537,16 @@ jobs:
           path: ${{ steps.packed_tarball.outputs.dir }}
           if-no-files-found: error
 
+      # Keep this outside the preflight prefix: publish promotion expects exactly
+      # one fallback artifact there, while QA needs an attempt-qualified identity.
+      - name: Upload prepared npm publish byte artifact
+        id: upload_publish_byte
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: openclaw-npm-publish-byte-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.packed_tarball.outputs.dir }}
+          if-no-files-found: error
+
   validate_publish_request:
     if: ${{ !inputs.preflight_only }}
     runs-on: ubuntu-latest
@@ -1076,12 +1086,14 @@ jobs:
             if [[ "$(git -C "$TARGET_ROOT" rev-parse HEAD)" != "$EXPECTED_TARGET_SHA" ||
               -n "$(git -C "$TARGET_ROOT" status --porcelain --untracked-files=no)" ||
               "$(git rev-parse HEAD)" != "$TRUSTED_WORKFLOW_SHA" ||
+              -n "$(git status --porcelain --untracked-files=no)" ||
               ! -f "$TRUSTED_PUBLISH_SCRIPT" ]]; then
               echo "Trusted npm tooling or inert release target changed before npm mutation." >&2
               exit 1
             fi
-            if ! git diff --quiet -- \
+            if ! git diff --quiet HEAD -- \
               scripts/openclaw-npm-publish.sh \
+              scripts/openclaw-npm-publish-tarball.mjs \
               scripts/openclaw-npm-extended-stable-release.mjs; then
               echo "Trusted npm tooling or inert release target changed before npm mutation." >&2
               exit 1
