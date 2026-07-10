@@ -776,6 +776,14 @@ jobs:
             echo "Full release validation must run rerun_group=all before npm publish; got $RERUN_GROUP" >&2
             exit 1
           fi
+          if [[ "$PERFORMANCE_BLOCKING" != "true" ]]; then
+            echo "Full release validation manifest does not record blocking product performance evidence." >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_TAG" != *"-alpha."* && "$RELEASE_TAG" != *"-beta."* && "$RUN_RELEASE_SOAK" != "true" ]]; then
+            echo "Stable releases require Full Release Validation with runReleaseSoak=true." >&2
+            exit 1
+          fi
 
       - name: Recheck npm release request
         env:
