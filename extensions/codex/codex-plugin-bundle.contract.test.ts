@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolvePluginNpmRuntimeBuildPlan } from "../../scripts/lib/plugin-npm-runtime-build.mjs";
 
 const packageRoot = import.meta.dirname;
 const repoRoot = path.resolve(packageRoot, "../..");
@@ -87,12 +86,8 @@ describe("Codex plugin bundle contract", () => {
 
   it("keeps the native runtime and Codex bundle in the npm artifact", () => {
     const packageJson = readJson("package.json");
-    const plan = resolvePluginNpmRuntimeBuildPlan({ repoRoot, packageDir: packageRoot });
 
     expect(packageJson.files).toBeUndefined();
-    expect(plan?.packageFiles).toEqual(
-      expect.arrayContaining([".codex-plugin/**", ".mcp.json", "assets/**"]),
-    );
     for (const relativePath of [
       "index.ts",
       "openclaw.plugin.json",

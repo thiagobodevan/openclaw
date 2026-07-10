@@ -38,13 +38,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
+function sleep(durationMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMs);
+  });
+}
+
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) {
       throw new Error("Timed out waiting for the MCP Apps message exchange");
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await sleep(10);
   }
 }
 
@@ -52,8 +58,6 @@ describe("OpenClaw Codex session app runtime", () => {
   it("loads the mixed session collection once and renders configured agents", async () => {
     const host = new JSDOM("", { url: "https://codex.test/" });
     const outbound: Array<RpcMessage> = [];
-    let app: JsdomInstance | undefined;
-
     const postToApp = (message: RpcMessage) => {
       if (!app) {
         throw new Error("Session app is not ready");
@@ -89,7 +93,7 @@ describe("OpenClaw Codex session app runtime", () => {
       }
     });
 
-    app = new JSDOM(appHtml, {
+    const app = new JSDOM(appHtml, {
       url: "https://openclaw.test/",
       runScripts: "dangerously",
       beforeParse(window) {
@@ -125,8 +129,6 @@ describe("OpenClaw Codex session app runtime", () => {
     const host = new JSDOM("", { url: "https://codex.test/" });
     const outbound: Array<RpcMessage> = [];
     const teardownId = "teardown-1";
-    let app: JsdomInstance | undefined;
-
     const postToApp = (message: RpcMessage) => {
       if (!app) {
         throw new Error("Session app is not ready");
@@ -165,7 +167,7 @@ describe("OpenClaw Codex session app runtime", () => {
       }
     });
 
-    app = new JSDOM(appHtml, {
+    const app = new JSDOM(appHtml, {
       url: "https://openclaw.test/",
       runScripts: "dangerously",
       beforeParse(window) {
@@ -175,7 +177,7 @@ describe("OpenClaw Codex session app runtime", () => {
 
     try {
       await waitFor(() => outbound.some((message) => message.id === teardownId));
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await sleep(400);
 
       expect(outbound).toContainEqual({ jsonrpc: "2.0", id: teardownId, result: {} });
       expect(outbound.some((message) => message.method === "tools/call")).toBe(false);
@@ -188,8 +190,6 @@ describe("OpenClaw Codex session app runtime", () => {
   it("ignores stale detail responses and preserves unchanged transcript nodes", async () => {
     const host = new JSDOM("", { url: "https://codex.test/" });
     const outbound: Array<RpcMessage> = [];
-    let app: JsdomInstance | undefined;
-
     const postToApp = (message: RpcMessage) => {
       if (!app) {
         throw new Error("Session app is not ready");
@@ -246,7 +246,7 @@ describe("OpenClaw Codex session app runtime", () => {
       }
     });
 
-    app = new JSDOM(appHtml, {
+    const app = new JSDOM(appHtml, {
       url: "https://openclaw.test/",
       runScripts: "dangerously",
       beforeParse(window) {
@@ -339,7 +339,7 @@ describe("OpenClaw Codex session app runtime", () => {
           },
         },
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await sleep(20);
 
       expect(app.window.document.querySelector("#conversation-title")?.textContent).toBe("Beta");
       expect(app.window.document.querySelector(".message")).toBe(originalMessage);
@@ -517,7 +517,7 @@ describe("OpenClaw Codex session app runtime", () => {
         throw new Error("Session detail loader did not initialize");
       }
       void app.window.loadDetail("session-b", { background: true });
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await sleep(10);
 
       expect(callsFor("openclaw_session_detail")).toHaveLength(4);
       postToApp({
@@ -583,8 +583,6 @@ describe("OpenClaw Codex session app runtime", () => {
     let includePartialSession = false;
     let includeLostSession = false;
     let lostCreateAttempts = 0;
-    let app: JsdomInstance | undefined;
-
     const postToApp = (message: RpcMessage) => {
       if (!app) {
         throw new Error("Session app is not ready");
@@ -701,7 +699,7 @@ describe("OpenClaw Codex session app runtime", () => {
       }
     });
 
-    app = new JSDOM(appHtml, {
+    const app = new JSDOM(appHtml, {
       url: "https://openclaw.test/",
       runScripts: "dangerously",
       beforeParse(window) {
@@ -783,7 +781,7 @@ describe("OpenClaw Codex session app runtime", () => {
       message.value = "Delayed create";
       composer.dispatchEvent(new app.window.Event("submit", { bubbles: true, cancelable: true }));
       await waitFor(() => toolCalls("openclaw_session_create").length === 2);
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      await sleep(40);
 
       expect(message.value).toBe("");
       expect(app.window.document.querySelector<HTMLButtonElement>("#send")?.disabled).toBe(true);
