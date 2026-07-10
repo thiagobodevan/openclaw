@@ -474,10 +474,20 @@ start_real_gateway() {
     --params '{"slug":"proof-clean-skill"}' \
     --timeout 20000 \
     --json > proof-output/gateway-skills-detail.json 2> proof-output/gateway-skills-detail.err
-  run_openclaw_gateway_call skills.securityReview \
-    --params '{"slug":"proof-clean-skill","version":"1.2.3","ownerHandle":"openclaw"}' \
-    --timeout 20000 \
-    --json > proof-output/gateway-skills-verdict.json 2> proof-output/gateway-skills-verdict.err
+  if ! run_openclaw_gateway_call skills.securityReview \
+      --params '{"slug":"proof-clean-skill","version":"1.2.3","ownerHandle":"openclaw"}' \
+      --timeout 20000 \
+      --json > proof-output/gateway-skills-verdict.json 2> proof-output/gateway-skills-verdict-initial.err; then
+    if ! grep -q "scope upgrade pending approval" proof-output/gateway-skills-verdict-initial.err; then
+      cat proof-output/gateway-skills-verdict-initial.err >&2
+      return 1
+    fi
+    approve_pending_device_pairings 30 true
+    run_openclaw_gateway_call skills.securityReview \
+      --params '{"slug":"proof-clean-skill","version":"1.2.3","ownerHandle":"openclaw"}' \
+      --timeout 20000 \
+      --json > proof-output/gateway-skills-verdict.json 2> proof-output/gateway-skills-verdict.err
+  fi
 
   python3 - <<'PY'
 from pathlib import Path
