@@ -746,6 +746,7 @@ describe("resolveApiKeyForProfile openai refresh fallback", () => {
       provider: "openai",
       profileId,
     });
+    expect(refreshProviderOAuthCredentialWithPluginMock).toHaveBeenCalledOnce();
   });
 
   it("does not refresh managed OAuth for direct OpenAI API-key models", async () => {
@@ -1082,6 +1083,8 @@ describe("resolveApiKeyForProfile openai refresh fallback", () => {
       source: `profile:${healthyProfileId}`,
       mode: "oauth",
     });
+    expect(getOAuthApiKeyMock).not.toHaveBeenCalled();
+    expect(refreshProviderOAuthCredentialWithPluginMock).not.toHaveBeenCalled();
 
     await markAuthProfileSuccess({
       store: ensureAuthProfileStore(agentDir),

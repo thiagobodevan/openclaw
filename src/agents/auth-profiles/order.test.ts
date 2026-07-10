@@ -349,6 +349,100 @@ describe("resolveAuthProfileOrder", () => {
     expect(order).toEqual(["openai:personal", "openai:oauth", "openai:backup"]);
   });
 
+  it("demotes expired OAuth profiles behind a healthy sibling", () => {
+    const now = Date.now();
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "openai:expired": {
+          type: "oauth",
+          provider: "openai",
+          access: "expired-access",
+          refresh: "expired-refresh",
+          expires: now - 60_000,
+        },
+        "openai:healthy": {
+          type: "oauth",
+          provider: "openai",
+          access: "healthy-access",
+          refresh: "healthy-refresh",
+          expires: now + 60_000,
+        },
+      },
+      order: {
+        openai: ["openai:expired", "openai:healthy"],
+      },
+    };
+
+    expect(resolveAuthProfileOrder({ store, provider: "openai" })).toEqual([
+      "openai:healthy",
+      "openai:expired",
+    ]);
+  });
+
+  it("keeps an explicitly preferred profile first even when its OAuth token is expired", () => {
+    // preferredProfile targets a specific account; refresh runs at use, so
+    // expiry must not silently swap the credential identity.
+    const now = Date.now();
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "openai:expired": {
+          type: "oauth",
+          provider: "openai",
+          access: "expired-access",
+          refresh: "expired-refresh",
+          expires: now - 60_000,
+        },
+        "openai:healthy": {
+          type: "oauth",
+          provider: "openai",
+          access: "healthy-access",
+          refresh: "healthy-refresh",
+          expires: now + 60_000,
+        },
+      },
+      order: {
+        openai: ["openai:expired", "openai:healthy"],
+      },
+    };
+
+    expect(
+      resolveAuthProfileOrder({ store, provider: "openai", preferredProfile: "openai:expired" }),
+    ).toEqual(["openai:expired", "openai:healthy"]);
+  });
+
+  it("attempts normal auth resolution when every OAuth profile is expired", () => {
+    const now = Date.now();
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "openai:first": {
+          type: "oauth",
+          provider: "openai",
+          access: "first-access",
+          refresh: "first-refresh",
+          expires: now - 60_000,
+        },
+        "openai:second": {
+          type: "oauth",
+          provider: "openai",
+          access: "second-access",
+          refresh: "second-refresh",
+          expires: now - 30_000,
+        },
+      },
+      order: {
+        openai: ["openai:first", "openai:second"],
+      },
+    };
+
+    expect(resolveAuthProfileOrder({ store, provider: "openai" })).toEqual([
+      "openai:first",
+      "openai:second",
+    ]);
+  });
+
   it("does not discover OAuth profiles without inline credential material", async () => {
     const store: AuthProfileStore = {
       version: 1,

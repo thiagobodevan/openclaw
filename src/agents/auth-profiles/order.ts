@@ -7,6 +7,7 @@ import {
   findNormalizedProviderValue,
   normalizeProviderId,
 } from "@openclaw/model-catalog-core/provider-id";
+import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   type ProviderAuthAliasLookupParams,
@@ -346,6 +347,20 @@ export function resolveAuthProfileOrder(params: {
   }
 
   const deduped = dedupeProfileIds(filtered);
+  // Demote OAuth profiles whose access token is locally expired behind healthy
+  // siblings: one stale credential must not lead availability probes/rotation.
+  // Expired profiles stay selectable (refresh still runs at use), and explicit
+  // preferredProfile promotion below wins over expiry.
+  const isLocallyExpiredOAuthProfile = (profileId: string): boolean => {
+    const credential = store.profiles[profileId];
+    return (
+      credential?.type === "oauth" && !isFutureDateTimestampMs(credential.expires, { nowMs: now })
+    );
+  };
+  const demoteExpiredOAuth = (profileIds: string[]): string[] => [
+    ...profileIds.filter((profileId) => !isLocallyExpiredOAuthProfile(profileId)),
+    ...profileIds.filter(isLocallyExpiredOAuthProfile),
+  ];
 
   // Explicit order remains a hard user/config preference, but cooldown tracking
   // moves temporarily bad profiles behind available ones.
@@ -367,7 +382,7 @@ export function resolveAuthProfileOrder(params: {
       .toSorted((a, b) => a.cooldownUntil - b.cooldownUntil)
       .map((entry) => entry.profileId);
 
-    const ordered = [...available, ...cooldownSorted];
+    const ordered = [...demoteExpiredOAuth(available), ...cooldownSorted];
 
     // Explicit user choice still wins when it is part of the filtered order.
     if (preferredProfile && ordered.includes(preferredProfile)) {
@@ -378,7 +393,7 @@ export function resolveAuthProfileOrder(params: {
 
   // Otherwise, use round-robin by lastUsed. lastGood is intentionally ignored
   // because prioritizing it would starve other healthy profiles.
-  const sorted = orderProfilesByMode(deduped, store);
+  const sorted = demoteExpiredOAuth(orderProfilesByMode(deduped, store));
 
   if (preferredProfile && sorted.includes(preferredProfile)) {
     return [preferredProfile, ...sorted.filter((e) => e !== preferredProfile)];
