@@ -21,6 +21,7 @@ import {
   countTopLevelSectionBullets,
   githubApi,
   highlightCountError,
+  hydrateExactGitCommits,
   pullRequestMergedByTarget,
   releaseNoteReferences,
   resolvePullRequestCommitLists,
@@ -33,7 +34,7 @@ const verifier = resolve(
   ".agents/skills/openclaw-changelog-update/scripts/verify-release-notes.mjs",
 );
 
-function git(cwd: string, args: string[]): string {
+function git(cwd: string, args: string[], { input }: { input?: Buffer | string } = {}): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
@@ -44,7 +45,84 @@ function git(cwd: string, args: string[]): string {
       GIT_COMMITTER_NAME: "OpenClaw Test",
       GIT_COMMITTER_EMAIL: "test@openclaw.invalid",
     },
+    input,
   }).trim();
+}
+
+function exactGithubGitFixture() {
+  const root = mkdtempSync(join(tmpdir(), "openclaw-github-git-objects-"));
+  const target = join(root, "target");
+  const source = join(root, "source");
+  mkdirSync(target);
+  git(target, ["init", "-q"]);
+  git(target, ["config", "commit.gpgsign", "false"]);
+  writeFileSync(join(target, "base.txt"), "base\n");
+  git(target, ["add", "base.txt"]);
+  git(target, ["commit", "-qm", "base"]);
+  const parent = git(target, ["rev-parse", "HEAD"]);
+  const baseBlob = git(target, ["rev-parse", `${parent}:base.txt`]);
+
+  git(root, ["clone", "-q", target, source]);
+  const addedContent = "added\n";
+  writeFileSync(join(source, "added.txt"), addedContent);
+  git(source, ["add", "added.txt"]);
+  const tree = git(source, ["write-tree"]);
+  const addedBlob = git(source, ["hash-object", "added.txt"]);
+  const payload = [
+    `tree ${tree}`,
+    `parent ${parent}`,
+    "author OpenClaw Test <test@openclaw.invalid> 1700000000 +0000",
+    "committer OpenClaw Test <test@openclaw.invalid> 1700000000 +0000",
+    "",
+    "orphan provenance",
+    "",
+  ].join("\n");
+  const signature = [
+    "-----BEGIN SSH SIGNATURE-----",
+    "U1NIU0lHAAAAAQAAABRvcGVuY2xhdy10ZXN0LWtleQ==",
+    "-----END SSH SIGNATURE-----",
+    "",
+  ].join("\n");
+  const headerBoundary = payload.indexOf("\n\n");
+  const rawCommit = `${payload.slice(0, headerBoundary)}\ngpgsig ${signature.slice(0, -1).replaceAll("\n", "\n ")}\n\n${payload.slice(headerBoundary + 2)}`;
+  const commit = git(source, ["hash-object", "-w", "-t", "commit", "--stdin"], {
+    input: rawCommit,
+  });
+  const commitPath = `repos/openclaw/openclaw/git/commits/${commit}`;
+  const treePath = `repos/openclaw/openclaw/git/trees/${tree}`;
+  const blobPath = `repos/openclaw/openclaw/git/blobs/${addedBlob}`;
+  const responses = new Map<string, unknown>([
+    [
+      commitPath,
+      {
+        parents: [{ sha: parent }],
+        sha: commit,
+        tree: { sha: tree },
+        verification: { payload, reason: "unknown_key", signature, verified: false },
+      },
+    ],
+    [
+      treePath,
+      {
+        sha: tree,
+        tree: [
+          { mode: "100644", path: "base.txt", sha: baseBlob, type: "blob" },
+          { mode: "100644", path: "added.txt", sha: addedBlob, type: "blob" },
+        ],
+        truncated: false,
+      },
+    ],
+    [
+      blobPath,
+      {
+        content: Buffer.from(addedContent).toString("base64"),
+        encoding: "base64",
+        sha: addedBlob,
+        size: Buffer.byteLength(addedContent),
+      },
+    ],
+  ]);
+  return { addedBlob, blobPath, commit, commitPath, responses, root, target, tree, treePath };
 }
 
 describe("release-note verification", () => {
@@ -215,6 +293,83 @@ describe("release-note verification", () => {
       }),
     ).toThrow(/failed after 1\/3 attempts: error response prefix=/);
     expect(permanentCalls).toBe(1);
+  });
+
+  it("hydrates an exact signed commit retained only by the GitHub Git database API", () => {
+    const fixture = exactGithubGitFixture();
+    try {
+      const fetched: string[] = [];
+      hydrateExactGitCommits([fixture.commit], {
+        cwd: fixture.target,
+        fetchJson: (path: string) => {
+          fetched.push(path);
+          const response = fixture.responses.get(path);
+          if (!response) {
+            throw new Error(`unexpected GitHub Git object request: ${path}`);
+          }
+          return structuredClone(response);
+        },
+      });
+
+      expect(git(fixture.target, ["cat-file", "-t", fixture.commit])).toBe("commit");
+      expect(git(fixture.target, ["cat-file", "-t", fixture.tree])).toBe("tree");
+      expect(git(fixture.target, ["cat-file", "-t", fixture.addedBlob])).toBe("blob");
+      expect(
+        git(fixture.target, ["diff-tree", "--no-commit-id", "--name-only", "-r", fixture.commit]),
+      ).toBe("added.txt");
+      expect(fetched).toEqual([fixture.commitPath, fixture.treePath, fixture.blobPath]);
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
+  });
+
+  it("fails closed before writing an unverifiable, mismatched, or over-bound commit", () => {
+    const fixture = exactGithubGitFixture();
+    try {
+      const fetchJson = (path: string) => {
+        const response = fixture.responses.get(path);
+        if (!response) {
+          throw new Error(`unexpected GitHub Git object request: ${path}`);
+        }
+        return structuredClone(response);
+      };
+      const commit = fixture.responses.get(fixture.commitPath) as Record<string, unknown>;
+      const verification = commit.verification as Record<string, unknown>;
+      fixture.responses.set(fixture.commitPath, {
+        ...commit,
+        verification: { ...verification, payload: null },
+      });
+      expect(() =>
+        hydrateExactGitCommits([fixture.commit], { cwd: fixture.target, fetchJson }),
+      ).toThrow(`GitHub cannot reconstruct signed commit ${fixture.commit}`);
+      fixture.responses.set(fixture.commitPath, commit);
+
+      const blob = fixture.responses.get(fixture.blobPath) as Record<string, unknown>;
+      const tampered = Buffer.from("tampered\n");
+      fixture.responses.set(fixture.blobPath, {
+        ...blob,
+        content: tampered.toString("base64"),
+        size: tampered.length,
+      });
+      expect(() =>
+        hydrateExactGitCommits([fixture.commit], {
+          cwd: fixture.target,
+          fetchJson,
+        }),
+      ).toThrow(`Git blob ${fixture.addedBlob} hash mismatch`);
+      expect(() =>
+        hydrateExactGitCommits([fixture.commit], {
+          cwd: fixture.target,
+          fetchJson,
+          maxObjects: 1,
+        }),
+      ).toThrow("GitHub Git object hydration exceeded 1 objects");
+      expect(
+        spawnSync("git", ["cat-file", "-e", fixture.commit], { cwd: fixture.target }).status,
+      ).not.toBe(0);
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
   });
 
   it("parses and documents trusted adapted backport provenance", () => {

@@ -33,6 +33,17 @@ import {
 const repo = "openclaw/openclaw";
 const commitAssociationQueryBatchSize = 20;
 const githubApiRetryDelaysMs = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+const githubGitObjectLimit = 2_048;
+const githubGitBlobByteLimit = 8 * 1024 * 1024;
+const githubGitTreeEntryLimit = 50_000;
+const exactGitObjectPattern = /^[0-9a-f]{40}$/;
+const gitTreeEntryTypes = new Map([
+  ["040000", "tree"],
+  ["100644", "blob"],
+  ["100755", "blob"],
+  ["120000", "blob"],
+  ["160000", "commit"],
+]);
 const excludedHandles = new Set(["openclaw", "clawsweeper", "claude", "codex", "steipete"]);
 const nonEditorialTypes = new Set([
   "build",
@@ -1889,34 +1900,362 @@ export function resolvePullRequestMetadata(numbers, { fetchPage = graphql } = {}
   return result;
 }
 
-function gitCommitAvailable(commit) {
-  const result = spawnSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
-    encoding: "utf8",
-    env: canonicalGitEnvironment(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  if (result.status === 0) {
-    return true;
+function exactGitObjectId(value, label) {
+  if (typeof value !== "string" || !exactGitObjectPattern.test(value)) {
+    fail(`${label} must be an exact lowercase 40-character Git object ID`);
   }
-  if (result.status === 1 || result.status === 128) {
-    return false;
-  }
-  fail(`could not inspect Git commit ${commit}: ${result.stderr?.trim() || result.status}`);
+  return value;
 }
 
-function hydrateExactGitCommits(commits) {
-  const missing = [...new Set(commits)].filter((commit) => !gitCommitAvailable(commit)).toSorted();
+function gitObjectType(objectId, cwd) {
+  const result = spawnSync("git", ["cat-file", "--batch-check=%(objectname) %(objecttype)"], {
+    cwd,
+    encoding: "utf8",
+    env: canonicalGitEnvironment(),
+    input: `${objectId}\n`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  if (result.status !== 0) {
+    fail(
+      `could not inspect Git object ${objectId}: ${
+        result.stderr?.trim() || result.error?.message || result.signal || result.status
+      }`,
+    );
+  }
+  const output = result.stdout.trim();
+  if (output === `${objectId} missing`) {
+    return null;
+  }
+  const [resolvedObjectId, type, ...extra] = output.split(" ");
+  if (
+    resolvedObjectId !== objectId ||
+    extra.length > 0 ||
+    !["blob", "commit", "tag", "tree"].includes(type)
+  ) {
+    fail(`Git returned malformed object metadata for ${objectId}: ${output || "empty"}`);
+  }
+  return type;
+}
+
+function gitObjectAvailable(objectId, expectedType, cwd) {
+  const actualType = gitObjectType(objectId, cwd);
+  if (actualType && actualType !== expectedType) {
+    fail(`Git object ${objectId} is ${actualType}, expected ${expectedType}`);
+  }
+  return actualType !== null;
+}
+
+function gitObjectId(type, content) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  return createHash("sha1")
+    .update(Buffer.from(`${type} ${bytes.length}\0`))
+    .update(bytes)
+    .digest("hex");
+}
+
+function assertGitObjectBytes(type, content, expectedObjectId) {
+  const actualObjectId = gitObjectId(type, content);
+  if (actualObjectId !== expectedObjectId) {
+    fail(`Git ${type} ${expectedObjectId} hash mismatch: reconstructed ${actualObjectId}`);
+  }
+}
+
+function writeExactGitObject(type, content, expectedObjectId, cwd) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
+  assertGitObjectBytes(type, bytes, expectedObjectId);
+  const result = spawnSync("git", ["hash-object", "-w", "-t", type, "--stdin"], {
+    cwd,
+    encoding: "utf8",
+    env: canonicalGitEnvironment(),
+    input: bytes,
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  if (result.status !== 0) {
+    fail(
+      `could not write exact Git ${type} ${expectedObjectId}: ${
+        result.stderr?.trim() || result.signal || result.status
+      }`,
+    );
+  }
+  const writtenObjectId = result.stdout.trim();
+  if (writtenObjectId !== expectedObjectId) {
+    fail(
+      `Git wrote unexpected ${type} object ${writtenObjectId || "empty"}; expected ${expectedObjectId}`,
+    );
+  }
+}
+
+function exactGithubGitResponse(response, expectedObjectId, type) {
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    fail(`GitHub did not return a ${type} object for ${expectedObjectId}`);
+  }
+  if (response.sha !== expectedObjectId) {
+    fail(
+      `GitHub returned the wrong ${type} object for ${expectedObjectId}: ${response.sha ?? "missing"}`,
+    );
+  }
+  return response;
+}
+
+function decodeGithubBlob(response, objectId, context) {
+  if (
+    response.encoding !== "base64" ||
+    typeof response.content !== "string" ||
+    !Number.isSafeInteger(response.size) ||
+    response.size < 0
+  ) {
+    fail(`GitHub returned malformed blob metadata for ${objectId}`);
+  }
+  const encoded = response.content.replace(/\s/g, "");
+  if (
+    encoded.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)
+  ) {
+    fail(`GitHub returned malformed base64 for blob ${objectId}`);
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.toString("base64") !== encoded || bytes.length !== response.size) {
+    fail(`GitHub returned inconsistent blob bytes for ${objectId}`);
+  }
+  context.blobBytes += bytes.length;
+  if (context.blobBytes > githubGitBlobByteLimit) {
+    fail(`GitHub Git object hydration exceeded ${githubGitBlobByteLimit} blob bytes`);
+  }
+  return bytes;
+}
+
+function githubTreeEntry(entry, treeObjectId) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    fail(`GitHub returned a malformed entry for tree ${treeObjectId}`);
+  }
+  const expectedType = gitTreeEntryTypes.get(entry.mode);
+  if (!expectedType || entry.type !== expectedType) {
+    fail(
+      `GitHub returned an invalid mode/type pair in tree ${treeObjectId}: ${entry.mode ?? "missing"}/${entry.type ?? "missing"}`,
+    );
+  }
+  const objectId = exactGitObjectId(entry.sha, `tree ${treeObjectId} entry SHA`);
+  if (
+    typeof entry.path !== "string" ||
+    entry.path.length === 0 ||
+    entry.path === "." ||
+    entry.path === ".." ||
+    entry.path.includes("/") ||
+    entry.path.includes("\0")
+  ) {
+    fail(`GitHub returned an invalid direct entry path in tree ${treeObjectId}`);
+  }
+  const pathBytes = Buffer.from(entry.path, "utf8");
+  if (pathBytes.toString("utf8") !== entry.path) {
+    fail(`GitHub returned a non-round-trippable path in tree ${treeObjectId}`);
+  }
+  return {
+    mode: entry.mode,
+    objectId,
+    path: entry.path,
+    pathBytes,
+    sortKey: Buffer.concat([pathBytes, Buffer.from([entry.type === "tree" ? 47 : 0])]),
+    type: entry.type,
+  };
+}
+
+function githubTreeBytes(response, objectId, context) {
+  if (response.truncated !== false || !Array.isArray(response.tree)) {
+    fail(`GitHub returned an incomplete tree for ${objectId}`);
+  }
+  context.treeEntries += response.tree.length;
+  if (context.treeEntries > githubGitTreeEntryLimit) {
+    fail(`GitHub Git object hydration exceeded ${githubGitTreeEntryLimit} tree entries`);
+  }
+  const entries = response.tree.map((entry) => githubTreeEntry(entry, objectId));
+  if (new Set(entries.map((entry) => entry.path)).size !== entries.length) {
+    fail(`GitHub returned duplicate paths in tree ${objectId}`);
+  }
+  entries.sort((left, right) => Buffer.compare(left.sortKey, right.sortKey));
+  const bytes = Buffer.concat(
+    entries.flatMap((entry) => [
+      Buffer.from(`${entry.mode === "040000" ? "40000" : entry.mode} `),
+      entry.pathBytes,
+      Buffer.from([0]),
+      Buffer.from(entry.objectId, "hex"),
+    ]),
+  );
+  assertGitObjectBytes("tree", bytes, objectId);
+  return { bytes, entries };
+}
+
+function githubSignedCommitBytes(response, objectId) {
+  const treeObjectId = exactGitObjectId(response.tree?.sha, `commit ${objectId} tree SHA`);
+  if (!Array.isArray(response.parents)) {
+    fail(`GitHub returned malformed parents for commit ${objectId}`);
+  }
+  const parentObjectIds = response.parents.map((parent) =>
+    exactGitObjectId(parent?.sha, `commit ${objectId} parent SHA`),
+  );
+  const verification = response.verification;
+  if (
+    !verification ||
+    typeof verification.payload !== "string" ||
+    typeof verification.signature !== "string" ||
+    verification.payload.includes("\0") ||
+    verification.signature.length === 0 ||
+    verification.signature.includes("\0") ||
+    verification.signature.startsWith("\n")
+  ) {
+    fail(`GitHub cannot reconstruct signed commit ${objectId}`);
+  }
+  const signature = verification.signature.endsWith("\r\n")
+    ? verification.signature.slice(0, -2)
+    : verification.signature.endsWith("\n")
+      ? verification.signature.slice(0, -1)
+      : verification.signature;
+  if (signature.length === 0 || signature.endsWith("\n")) {
+    fail(`GitHub cannot reconstruct signed commit ${objectId}`);
+  }
+  const headerBoundary = verification.payload.indexOf("\n\n");
+  if (headerBoundary <= 0) {
+    fail(`GitHub returned malformed signed payload for commit ${objectId}`);
+  }
+  const headers = verification.payload.slice(0, headerBoundary);
+  const message = verification.payload.slice(headerBoundary + 2);
+  const headerLines = headers.split("\n");
+  const treeHeaders = headerLines.filter((line) => line.startsWith("tree "));
+  const parentHeaders = headerLines.filter((line) => line.startsWith("parent "));
+  if (
+    headerLines.some((line) => line === "gpgsig" || line.startsWith("gpgsig ")) ||
+    treeHeaders.length !== 1 ||
+    treeHeaders[0] !== `tree ${treeObjectId}` ||
+    parentHeaders.length !== parentObjectIds.length ||
+    parentHeaders.some((line, index) => line !== `parent ${parentObjectIds[index]}`)
+  ) {
+    fail(`GitHub returned inconsistent signed payload headers for commit ${objectId}`);
+  }
+  const signedHeaders = `${headers}\ngpgsig ${signature.replaceAll("\n", "\n ")}`;
+  const bytes = Buffer.from(`${signedHeaders}\n\n${message}`);
+  assertGitObjectBytes("commit", bytes, objectId);
+  return { bytes, parentObjectIds, treeObjectId };
+}
+
+function hydrateExactGithubGitObject(objectId, expectedType, context) {
+  exactGitObjectId(objectId, `${expectedType} object ID`);
+  const previousType = context.expectedTypes.get(objectId);
+  if (previousType && previousType !== expectedType) {
+    fail(`Git object ${objectId} was requested as both ${previousType} and ${expectedType}`);
+  }
+  context.expectedTypes.set(objectId, expectedType);
+  if (gitObjectAvailable(objectId, expectedType, context.cwd)) {
+    return;
+  }
+  if (context.visiting.has(objectId)) {
+    fail(`GitHub Git object graph contains a cycle at ${objectId}`);
+  }
+  context.objectCount += 1;
+  if (context.objectCount > context.maxObjects) {
+    fail(`GitHub Git object hydration exceeded ${context.maxObjects} objects`);
+  }
+  context.visiting.add(objectId);
+  try {
+    if (expectedType === "blob") {
+      const response = exactGithubGitResponse(
+        context.fetchJson(`repos/${repo}/git/blobs/${objectId}`),
+        objectId,
+        "blob",
+      );
+      const bytes = decodeGithubBlob(response, objectId, context);
+      writeExactGitObject("blob", bytes, objectId, context.cwd);
+    } else if (expectedType === "tree") {
+      const response = exactGithubGitResponse(
+        context.fetchJson(`repos/${repo}/git/trees/${objectId}`),
+        objectId,
+        "tree",
+      );
+      const { bytes, entries } = githubTreeBytes(response, objectId, context);
+      for (const entry of entries) {
+        if (entry.type === "commit") {
+          gitObjectAvailable(entry.objectId, "commit", context.cwd);
+        } else {
+          hydrateExactGithubGitObject(entry.objectId, entry.type, context);
+        }
+      }
+      writeExactGitObject("tree", bytes, objectId, context.cwd);
+    } else if (expectedType === "commit") {
+      const response = exactGithubGitResponse(
+        context.fetchJson(`repos/${repo}/git/commits/${objectId}`),
+        objectId,
+        "commit",
+      );
+      const { bytes, parentObjectIds, treeObjectId } = githubSignedCommitBytes(response, objectId);
+      for (const parentObjectId of parentObjectIds) {
+        hydrateExactGithubGitObject(parentObjectId, "commit", context);
+      }
+      hydrateExactGithubGitObject(treeObjectId, "tree", context);
+      writeExactGitObject("commit", bytes, objectId, context.cwd);
+    } else {
+      fail(`unsupported GitHub Git object type: ${expectedType}`);
+    }
+  } finally {
+    context.visiting.delete(objectId);
+  }
+  if (!gitObjectAvailable(objectId, expectedType, context.cwd)) {
+    fail(`could not hydrate exact Git ${expectedType} ${objectId}`);
+  }
+}
+
+function gitCommitAvailable(commit, cwd) {
+  return gitObjectAvailable(exactGitObjectId(commit, "commit"), "commit", cwd);
+}
+
+export function hydrateExactGitCommits(
+  commits,
+  {
+    cwd = process.cwd(),
+    fetchJson = (path) => githubApi([path]),
+    maxObjects = githubGitObjectLimit,
+  } = {},
+) {
+  if (
+    !Array.isArray(commits) ||
+    !Number.isSafeInteger(maxObjects) ||
+    maxObjects <= 0 ||
+    maxObjects > githubGitObjectLimit
+  ) {
+    fail(
+      `Git commit hydration requires a commit list and an object limit of 1-${githubGitObjectLimit}`,
+    );
+  }
+  const missing = [...new Set(commits)]
+    .map((commit) => exactGitObjectId(commit, "commit"))
+    .filter((commit) => !gitCommitAvailable(commit, cwd))
+    .toSorted();
+  const context = {
+    blobBytes: 0,
+    cwd,
+    expectedTypes: new Map(),
+    fetchJson,
+    maxObjects,
+    objectCount: 0,
+    treeEntries: 0,
+    visiting: new Set(),
+  };
   for (let index = 0; index < missing.length; index += 50) {
     const chunk = missing.slice(index, index + 50);
     const result = spawnSync("git", ["fetch", "--quiet", "--no-tags", "origin", ...chunk], {
+      cwd,
       encoding: "utf8",
       env: canonicalGitEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const unavailable = chunk.filter((commit) => !gitCommitAvailable(commit));
-    if (result.status !== 0 || unavailable.length > 0) {
+    const unavailable = chunk.filter((commit) => !gitCommitAvailable(commit, cwd));
+    // GitHub retains authenticated Git database objects after refs stop advertising them.
+    // Rebuild only exact hash-verified objects so historical signed provenance remains replayable.
+    for (const commit of unavailable) {
+      hydrateExactGithubGitObject(commit, "commit", context);
+    }
+    const stillUnavailable = chunk.filter((commit) => !gitCommitAvailable(commit, cwd));
+    if (stillUnavailable.length > 0) {
       fail(
-        `could not hydrate immutable Git commits ${unavailable.join(", ") || chunk.join(", ")}: ${
+        `could not hydrate immutable Git commits ${stillUnavailable.join(", ")}: ${
           result.stderr?.trim() || result.signal || result.status
         }`,
       );
