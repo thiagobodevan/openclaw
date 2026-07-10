@@ -192,9 +192,14 @@ export async function registerSignalReplyContext(params: {
     }
     pruneMemoryReplyContexts(registeredAt);
   } catch (error) {
-    const next = updateEvaluated
-      ? nextRecord
-      : mergeReplyContext(memoryReplyContexts.get(key), record);
+    if (!updateEvaluated) {
+      try {
+        nextRecord = mergeReplyContext(await store.lookup(key), record);
+      } catch {
+        nextRecord = undefined;
+      }
+    }
+    const next = nextRecord;
     if (next) {
       memoryReplyContexts.set(key, { ...next, expiresAt });
     } else if (updateEvaluated) {

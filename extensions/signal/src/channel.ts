@@ -125,17 +125,6 @@ async function sendSignalOutbound(params: {
   });
 }
 
-function resolveDirectSignalReplyAuthor(to: string): string | undefined {
-  const normalized = normalizeSignalMessagingTarget(to);
-  if (!normalized || inferSignalTargetChatType(normalized) !== "direct") {
-    return undefined;
-  }
-  if (normalized.startsWith("username:")) {
-    return `u:${normalized.slice("username:".length)}`;
-  }
-  return normalized;
-}
-
 function resolveSignalReplyOptions(params: {
   cfg: Parameters<typeof resolveSignalAccount>[0]["cfg"];
   to: string;
@@ -158,9 +147,7 @@ function resolveSignalReplyOptions(params: {
     replyToId,
   }).then((persistedContext) => {
     const replyToAuthor =
-      persistedContext?.ambiguous === true
-        ? undefined
-        : (persistedContext?.author ?? resolveDirectSignalReplyAuthor(params.to));
+      persistedContext?.ambiguous === true ? undefined : persistedContext?.author;
     return {
       replyToId,
       ...(replyToAuthor ? { replyToAuthor } : {}),

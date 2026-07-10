@@ -396,7 +396,6 @@ describe("signal outbound", () => {
       expect.any(String),
       expect.objectContaining({
         replyToId: "1700000000004",
-        replyToAuthor: "+15551234567",
       }),
     );
     expect(send).toHaveBeenNthCalledWith(
@@ -898,7 +897,7 @@ describe("signal outbound", () => {
     clearSignalApprovalReactionTargetsForTest();
   });
 
-  it("message adapter sends direct reply targets as Signal native quote metadata", async () => {
+  it("uses only proven direct reply authors for Signal native quote metadata", async () => {
     const send = vi.fn(async (..._args: unknown[]) => ({
       messageId: "signal-1",
       receipt: createMessageReceiptFromOutboundResults({
@@ -920,16 +919,13 @@ describe("signal outbound", () => {
 
     await sendReply();
 
-    expect(send).toHaveBeenCalledWith(
-      "+15551234567",
-      "quoted reply",
-      expect.objectContaining({
-        replyToId: "1700000000001",
-        replyToAuthor: "+15551234567",
-      }),
-    );
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ replyToId: "1700000000001" });
+    expect(send.mock.calls[0]?.[2]).not.toHaveProperty("replyToAuthor");
     const replyContext = { to: "signal:+15551234567", replyToId: "1700000000001" };
     await registerSignalReplyContext({ ...replyContext, author: "+15551234567" });
+    send.mockClear();
+    await sendReply();
+    expect(send.mock.calls[0]?.[2]).toMatchObject({ replyToAuthor: "+15551234567" });
     await registerSignalReplyContext({ ...replyContext, author: "+15550001111" });
     send.mockClear();
     await sendReply();
@@ -937,8 +933,8 @@ describe("signal outbound", () => {
     await clearSignalReplyAuthorsForTest();
   });
 
-  it("passes direct reply targets as Signal native quote metadata for formatted text", async () => {
-    const send = vi.fn(async () => ({
+  it("omits unproven direct quote authors for formatted text", async () => {
+    const send = vi.fn(async (..._args: unknown[]) => ({
       messageId: "signal-1",
       receipt: createMessageReceiptFromOutboundResults({
         results: [{ channel: "signal", messageId: "signal-1" }],
@@ -960,13 +956,13 @@ describe("signal outbound", () => {
       expect.objectContaining({
         cfg: {},
         replyToId: "1700000000002",
-        replyToAuthor: "+15551234567",
         textMode: "plain",
       }),
     );
+    expect(send.mock.calls[0]?.[2]).not.toHaveProperty("replyToAuthor");
   });
 
-  it("passes direct reply targets as Signal native quote metadata for attached-result sends", async () => {
+  it("omits unproven direct quote authors for attached-result sends", async () => {
     const send = vi.fn(async (_to: string, _text: string, opts: { mediaUrl?: string } = {}) => ({
       messageId: opts.mediaUrl ? "signal-media-1" : "signal-text-1",
       receipt: createMessageReceiptFromOutboundResults({
@@ -1003,7 +999,6 @@ describe("signal outbound", () => {
       expect.objectContaining({
         cfg: {},
         replyToId: "1700000000004",
-        replyToAuthor: "+15551234567",
       }),
     );
     expect(send).toHaveBeenNthCalledWith(
@@ -1014,9 +1009,11 @@ describe("signal outbound", () => {
         cfg: {},
         mediaUrl: "file:///tmp/signal-proof.png",
         replyToId: "1700000000005",
-        replyToAuthor: "+15551234567",
       }),
     );
+    for (const call of send.mock.calls) {
+      expect(call[2]).not.toHaveProperty("replyToAuthor");
+    }
   });
 
   it("declares message adapter durable text, media, and replyTo with receipt proofs", async () => {
@@ -1205,6 +1202,7 @@ describe("signal outbound", () => {
 
   it("keeps persisted edited reply context when an older replay arrives after restart", async () => {
     const persistedRecords = new Map<string, unknown>();
+    let failNextUpdate = true;
     const openKeyedStore = <T>(): PluginStateKeyedStore<T> => {
       const records = persistedRecords as Map<string, T>;
       return {
@@ -1219,6 +1217,10 @@ describe("signal outbound", () => {
           return true;
         },
         update: async (key, updateValue) => {
+          if (failNextUpdate) {
+            failNextUpdate = false;
+            throw new Error("write unavailable");
+          }
           const next = updateValue(records.get(key));
           if (next === undefined) {
             return false;
