@@ -1495,6 +1495,10 @@ describe("scripts/test-projects changed-target routing", () => {
 
   it("keeps package, release, and install tooling edits on owner tests", () => {
     const expectedTargets = new Map([
+      [
+        ".agents/skills/openclaw-changelog-update/scripts/lib/github-team-inventory.mjs",
+        ["test/scripts/release-notes-github-team-inventory.test.ts"],
+      ],
       ["scripts/generate-npm-shrinkwrap.mjs", ["test/scripts/generate-npm-shrinkwrap.test.ts"]],
       ["scripts/npm-runner.d.mts", ["test/scripts/npm-runner.test.ts"]],
       ["scripts/pnpm-runner.d.mts", ["test/scripts/pnpm-runner.test.ts"]],

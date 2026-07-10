@@ -20,12 +20,14 @@ every human `Thanks @...` attribution.
 ## Inputs
 
 - Target base version: `YYYY.M.PATCH`, without beta suffix.
-- Base tag: last reachable shipped release tag, usually the previous stable or
-  the previous beta train requested by the operator. It must be an ancestor of
-  the target; a newer but divergent tag is not a valid history boundary. Use
-  an explicit shipped/main-closeout SHA only when it is also reachable from the
-  target.
+- Base tag: the previous shipped release used to locate the unique raw-object
+  merge base. It may be on a divergent release line. Repeat it as
+  `--shipped-ref` when it is also publication evidence.
 - Target ref: exact branch/SHA being released.
+- Source target: optional immutable contribution cutoff. When `--target` is a
+  later final candidate, every commit after `--source-target` must form a
+  linear, association-free, reference-free `CHANGELOG.md`-only tail bounded by
+  `--max-changelog-tail`.
 
 ## Workflow
 
@@ -33,7 +35,8 @@ every human `Thanks @...` attribution.
    - `git fetch --tags origin`
    - `git pull --ff-only`
    - confirm clean `git status -sb`
-2. Audit history, including direct commits:
+2. Audit integration order, then let the verifier enumerate the complete raw
+   commit DAG including direct and off-first-parent commits:
    - `git log --first-parent --date=iso-strict --pretty=format:'%h%x09%ad%x09%s' <base-tag>..<target-ref>`
    - `git log --first-parent --grep='(#' --date=short --pretty=format:'%h%x09%ad%x09%s' <base-tag>..<target-ref>`
    - also inspect `--since='24 hours ago'` when main moved during the release.
@@ -44,6 +47,11 @@ every human `Thanks @...` attribution.
    node .agents/skills/openclaw-changelog-update/scripts/verify-release-notes.mjs \
      --base <base-tag> \
      --target <target-ref> \
+     --source-target <product-cutoff-sha> \
+     --max-changelog-tail <count> \
+     --comparison-base main \
+     --tooling-commit <trusted-main-sha> \
+     --tooling-tree <trusted-main-tree> \
      --version <YYYY.M.PATCH> \
      --manifest /tmp/openclaw-release-<YYYY.M.PATCH>.json \
      --write-ledger
@@ -53,6 +61,13 @@ every human `Thanks @...` attribution.
      audit; it contains every referenced PR, eligible contributor credit,
      inline issue context, every direct commit, and an editorial-eligibility
      classification for PRs and direct commits
+   - release acceptance uses manifest schema v6. Supply `--tooling-commit` and
+     `--tooling-tree` together from trusted `main`; the verifier hashes every
+     executed local module, verifies all four bytes against that commit, and
+     records per-file plus aggregate SHA-256 evidence. When the verifier is
+     copied into a release worktree, copy its two inventory modules and
+     `scripts/render-github-release-notes.mjs` from the same trusted commit too;
+     a mixed trusted/target module set fails closed
    - for a historical backfill, add `--seed-ref <pre-backfill-ref>` once so
      contribution records from the prior changelog are retained even when an
      older merged commit omitted its PR number; the verifier excludes records
@@ -61,16 +76,145 @@ every human `Thanks @...` attribution.
    - add repeatable `--shipped-ref <prior-shipped-tag>` when the reachable main
      closeout differs from the shipped tag or later forward-port commits
      re-associate PRs that were already released. Each tag is a cumulative
-     shipped boundary: the verifier unions explicit PR rows from complete
-     contribution records in numbered release sections, excludes only overlapping PRs,
-     and ignores `Unreleased`. Never infer this boundary from the base SHA,
-     target prose, or target record. The manifest and generated provenance retain
-     each tag plus the exact excluded PR inventory and count for deterministic
-     candidate validation
-   - source PR discovery combines merged GitHub commit associations with merged
-     PR references explicitly present in active commit subjects/bodies so
-     cherry-picks and squash commits remain accounted for. Resolve every
-     association page and exclude PRs merged after the target release commit
+     shipped boundary: exact tag content and patch equivalence decide whether
+     work shipped, while complete numbered contribution records provide
+     auditable attribution metadata and `Unreleased` is ignored. An incomplete
+     historical credit row cannot veto exact content proof. Never infer this
+     boundary from the base SHA, target prose, or target record. The manifest
+     and generated provenance retain each tag plus the exact excluded PR
+     inventory and count for deterministic candidate validation
+   - source PR ownership comes from complete GitHub commit associations, a
+     strict terminal/directive PR reference, or exact cherry-pick/patch
+     provenance under a repeatable trusted `--provenance-ref`
+   - when a PR branch was rebased before merge and GitHub no longer associates
+     its original commit, add `--provenance-pr <PR>:<full-SHA>` only with
+     operator-supplied provenance. The verifier requires a PR merged by the
+     source cutoff, one unique exact PR-member patch, and one unique
+     trailer-linked target patch. It records the PR member, trailer origin,
+     target commit, patch IDs, paths, and diff hashes separately
+   - for a deliberately partial backport, use
+     `--provenance-pr-partial <PR>:<source-SHA>:<target-SHA>`. The source SHA
+     must be an actual associated PR member, the target must carry the exact
+     `Partial backport of <source-SHA>` trailer plus PR reference, and the
+     target paths must be a strict non-empty subset whose per-path stable patch
+     IDs all match and whose patches reproduce the exact opposite path state
+     when applied bidirectionally. Partial evidence never weakens exact
+     provenance
+   - for a conflict-resolved backport that intentionally changes the same file
+     set, use `--provenance-pr-adapted <PR>:<origin-SHA>:<target-SHA>`. The
+     origin normally matches exactly one actual PR member. A GitHub squash
+     origin is accepted only when it is the immutable associated merge commit,
+     its one-parent patch exactly equals the complete PR-member aggregate from
+     the unique base/head merge base, and every aggregate path has recorded
+     squash/target hashes. The active target must carry the exact cherry-pick
+     trailer, change the same non-empty path set, preserve at least one path
+     bidirectionally, and adapt at least one path. This is operator-reviewed
+     provenance, not a generic non-equivalent cherry-pick fallback
+   - for an adapted PR-head backport that also integrates selected exact path
+     patches from earlier commits in the same PR, repeat
+     `--provenance-pr-integrated <PR>:<source-SHA>:<target-SHA>` once for every
+     reviewed source commit. The target's sole cherry-pick trailer identifies
+     the primary source, which must be the immutable PR head; every other
+     supplied source must be an earlier exact PR member. The primary path set
+     must be a strict subset of the target path set, preserve at least one exact
+     path, and adapt at least one path. The target parent must be the exact
+     trailer-linked backport of the PR head's parent. Every added target path
+     must match exactly one explicit earlier member by stable per-path patch ID
+     and bidirectional path-state application, and that member's resulting path
+     state must survive unchanged into the PR head's parent. The manifest
+     records exact, adapted, integrated, and omitted source paths with their
+     hashes. This mode never infers an integration source from patch similarity
+     alone
+   - `--comparison-base main` runs the canonical merged-main search over the
+     exact raw merge-base timestamp through the final target timestamp. GitHub
+     Search windows are split and paginated with exact record/member hashes;
+     each record binds the immutable base, head, and merge commit.
+     The team universe must reconcile disjointly as canonical source PRs,
+     post-fork/unbackported PRs, shipped-or-boundary PRs, or net-reverted PRs;
+     `unclassified` must be empty
+   - every post-fork classification proves the PR head, member commits, and
+     merge commit are outside target ancestry and have no target association,
+     ownership/strict explicit reference, cherry/adaptation origin, or exact
+     patch equivalent. Exact patch proof covers the merge first-parent patch,
+     the aggregate patch from the unique base/head merge base through the
+     immutable PR head, and every member patch unless its exact zero-context
+     post-state is already present at both that immutable base and head. Only
+     post/post state whose reverse reconstructs the same zero-context patch at
+     both snapshots is branch-local cleanup. Ambiguous, dependent, relocated,
+     and rename states stay fail-closed unless every candidate path belongs to
+     the PR aggregate, the target exactly matches the immutable aggregate base
+     state on every aggregate-changed path, and no source-only commit outside
+     aggregate-base ancestry touches any aggregate-changed path. This lets a
+     shifted duplicate hunk be classified absent while keeping reverted
+     backports fail-closed.
+     Final-tree aggregate proof must reverse and reapply to the exact target
+     tree and records the patch id, diff hash, changed paths, target tree, proof
+     strength, and proof method.
+     A zero-context round-trip may conservatively block a post-fork absence
+     classification when three-way application conflicts, but it never proves
+     shipped exclusion. Generic contextual mentions are recorded but are not
+     backport evidence. Any ownership evidence fails closed as missing
+     canonical work. Because GitHub's merge window is inclusive to the second,
+     a lower-bound PR is a boundary item only when its immutable merge commit
+     is already ancestral to the raw merge base
+   - every strict ownership reference must resolve to a pull request merged by
+     the source-target cutoff; trailing issue references remain metadata, while
+     issue-valued directives, open PRs, and later merges fail closed instead of
+     becoming contribution rows
+   - generic `#NNN`, `Fixes #NNN`, title, note, and legacy references are
+     metadata only; they never create PR ownership
+   - resolve every association page and fail closed on GraphQL errors, missing
+     aliases/connections, count drift, duplicate members, or repeated cursors.
+     API transport, rate-limit, 5xx, and upstream HTML failures use one bounded
+     retry budget; auth, validation, and other permanent failures stop
+     immediately, and nonzero API commands never count as JSON success
+   - when a post-fork PR member shares a stable patch with an independently
+     authored main commit and a release direct commit, use
+     `--comparison-pr-member-overlap <PR>:<member-SHA>:<target-SHA>:<main-witness-SHA>`
+     only to acknowledge the two expected comparison scanner records. This is
+     explicit non-ownership evidence: the target stays direct, the PR stays
+     post-fork, and no contribution row is added. The verifier requires the
+     member to survive the immutable PR head, actual merge parent, and merge
+     result by exact-path zero-context round-trip while its changed lines are
+     absent from the merge first-parent diff. Each member hunk must have one
+     contextual occurrence in the aggregate base, member parent/result, and
+     target parent/result; the target parent must match the aggregate-base path
+     state, and pre-member setup changes must occur after the member hunk. The
+     target and main witness must have identical raw diffs, paths, author
+     identity/time, and message; that witness must be the only independent exact
+     path match across the merge parent's full ancestry, must lie on the merge
+     parent's first-parent path, and its target path state must survive every
+     later first-parent path-touching commit through the actual merge parent.
+     The PR member has the sole stated PR association, while the target and
+     witness are association/reference/trailer-free. The member predates the
+     target, the witness predates the target, and all three commits are
+     ancestry-separated and disjoint from every ownership provenance mode. Any
+     extra member, scanner match, aggregate presence, shifted hunk, missing
+     witness, or unused directive fails closed.
+   - resolve commit-author pages completely so verified non-noreply co-authors
+     retain contributor credit
+   - the manifest records canonical/current/generated/missing/stale PR members
+     and sorted-newline hashes, per-row missing/stale reason evidence, both the
+     manifest-direct and exclusive-direct commit sets plus overlap equation,
+     every commit disposition, ownership evidence, and the raw merge base.
+     Schema v6 preserves both pre-write and post-write reconciliations, the
+     normalized semantically material invocation, resolved seed authorization
+     (or `null`), executed tooling identity, and the exact candidate changelog
+     and release section SHA-256. Its inventory v4 also binds the exact queried
+     commit-association partition, every explicit issue/PR reference, immutable
+     trusted-provenance PR metadata and members, complete comparison records,
+     and each shipped baseline's history, verified revert edges, and recursively
+     active commits. The top-level reference-entry digest independently binds
+     every issue/PR node used to generate the contribution ledger.
+     Ledger writes require generated rows to match canonical ownership except
+     for an explicit `--seed-ref` historical backfill. `--manifest` must never
+     alias `CHANGELOG.md`, including case-folded and symlink aliases. A ledger
+     write commits a pending manifest first, the changelog second, and a pass
+     manifest last with sibling temp-file renames; detected concurrent mutation
+     aborts without overwriting the other writer's bytes. Accept a pass only
+     when the current invocation exits zero, its normalized invocation matches,
+     and recomputed `CHANGELOG.md` and release-section SHA-256 values match the
+     manifest artifacts; `status: "pass"` alone is never sufficient
    - read the manifest before editing `### Highlights`, `### Changes`, or
      `### Fixes`; do not carry old grouped prose forward without re-auditing it
    - inspect linked PRs/issues or diffs for ambiguous commits. Direct commits
@@ -168,6 +312,8 @@ every human `Thanks @...` attribution.
   node .agents/skills/openclaw-changelog-update/scripts/verify-release-notes.mjs \
     --base <base-tag> \
     --target <target-ref> \
+    --tooling-commit <trusted-main-sha> \
+    --tooling-tree <trusted-main-tree> \
     --version <YYYY.M.PATCH> \
     --manifest /tmp/openclaw-release-<YYYY.M.PATCH>.json \
     --write-ledger
@@ -175,15 +321,40 @@ every human `Thanks @...` attribution.
 - the command fails when any `#NNN` reference in release history or the
   rendered release section cannot resolve, when reverted work is presented
   as shipped, when a source PR is absent from the contribution record, when
-  direct commits are rendered as a public record dump, when non-editorial
-  PRs appear in grouped prose, or when an eligible PR author or known
-  co-author is missing from that PR's `Thanks @...` credit. It also fails
-  before history collection when `--base` is not an ancestor of `--target`,
-  when `### Highlights` has fewer than five or more than eight top-level
+  contribution rows are duplicated or disagree with their declared exact
+  count, when direct commits are rendered as a public record dump, when
+  non-editorial PRs appear in grouped prose, or when an eligible PR author or
+  known co-author is missing from that PR's exact `Thanks @...` credit. It also fails
+  before history collection when the raw object graph is shallow, grafted,
+  replaced, missing, or has an ambiguous merge base, when `### Highlights` has
+  fewer than five or more than eight top-level
   bullets, or when the existing prose/record names a PR outside the source
   range. Only an explicit `--seed-ref` may add historical PR inventory; an
   explicit repeatable `--shipped-ref` may subtract PRs proven present in a
   prior shipped tag
+- for the audited beta3 historical fixture, the canonical invocation is:
+  ```bash
+  node .agents/skills/openclaw-changelog-update/scripts/verify-release-notes.mjs \
+    --base v2026.6.11 \
+    --target 811ddd96180583bae00001f71971419182ae0520 \
+    --source-target 306b800ace5398dcfc5eae6e15dcae533db42c95 \
+    --max-changelog-tail 2 \
+    --comparison-base main \
+    --tooling-commit <trusted-main-sha> \
+    --tooling-tree <trusted-main-tree> \
+    --shipped-ref v2026.6.11 \
+    --provenance-pr 103073:417b9163cacd48aeec5a1ab2d2554cdbc14f9796 \
+    --comparison-pr-member-overlap 99242:67f76f2c14bfe010bb244a808e6137c4c44b02b2:00259d07efe08a218e6d561153e730fe2c746e1c:d3ff48c51f4ff4cf3594c04e127c8e3ae83ba021 \
+    --version 2026.7.1 \
+    --manifest /tmp/openclaw-release-2026.7.1.json \
+    --write-ledger
+  ```
+  Expected arithmetic is `2389 - 421 - 6 - 2 = 1960`, with zero
+  unclassified PRs. This fixture proves the algorithm; final release use must
+  substitute the exact frozen product cutoff and its sole bounded
+  `CHANGELOG.md`-only child/tail. Add trusted provenance refs and partial
+  or adapted backports only when their exact commits exist in that candidate's
+  source range; never copy later provenance into a historical fixture
 - when grouped prose names a PR, that same bullet must retain every
   contributor and linked-reporter credit from its generated PR record
 - unqualified `#NNN` references resolve against `openclaw/openclaw`;
