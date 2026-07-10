@@ -30,6 +30,7 @@ type Workflow = {
         bypass_extended_stable_guard?: { default?: boolean; type?: string };
         npm_dist_tag?: { options?: string[] };
         plugin_npm_run_id?: { required?: boolean; type?: string };
+        preflight_run_attempt?: { required?: boolean; type?: string };
       };
     };
   };
@@ -195,7 +196,20 @@ describe("minimal npm extended-stable workflow", () => {
   it("authenticates exact extended-stable run and Full Validation identities", () => {
     const parsed = workflow();
     const raw = readFileSync(workflowPath, "utf8");
-    expect(raw).toContain("--json workflowName,headBranch,headSha,event,conclusion,url");
+    expect(parsed.on?.workflow_dispatch?.inputs?.preflight_run_attempt).toMatchObject({
+      required: false,
+      type: "string",
+    });
+    const preflightRun = step(
+      parsed.jobs?.publish_openclaw_npm,
+      "Resolve exact preflight artifact",
+    );
+    expect(preflightRun.env?.PREFLIGHT_RUN_ATTEMPT).toBe("${{ inputs.preflight_run_attempt }}");
+    expect(preflightRun.run).toContain(
+      "actions/runs/${PREFLIGHT_RUN_ID}/attempts/${PREFLIGHT_RUN_ATTEMPT}",
+    );
+    expect(preflightRun.run).toContain("actions/runs/${PREFLIGHT_RUN_ID}/artifacts?per_page=100");
+    expect(preflightRun.run).toContain("openclaw-npm-preflight-artifact.mjs resolve");
     const fullValidationRun = step(
       parsed.jobs?.publish_openclaw_npm,
       "Verify full release validation run metadata",
@@ -233,6 +247,14 @@ describe("minimal npm extended-stable workflow", () => {
     const publish = parsed.jobs?.publish_openclaw_npm;
     const download = step(publish, "Download prepared npm tarball");
     expect(download.if).toBeUndefined();
+    expect(download.env).toMatchObject({
+      PREFLIGHT_ARTIFACT_ID: "${{ steps.preflight_artifact.outputs.artifact_id }}",
+      PREFLIGHT_ARTIFACT_NAME: "${{ steps.preflight_artifact.outputs.artifact_name }}",
+      PREFLIGHT_ARTIFACT_DIGEST: "${{ steps.preflight_artifact.outputs.artifact_digest }}",
+      PREFLIGHT_RUN_ATTEMPT: "${{ inputs.preflight_run_attempt }}",
+    });
+    expect(download.run).toContain("openclaw-npm-preflight-artifact.mjs download");
+    expect(download.run).not.toContain("gh run download");
 
     const provenance = step(publish, "Verify prepared tarball provenance");
     expect(provenance.run).toContain(".dependencyTarballs[0].tarballName");

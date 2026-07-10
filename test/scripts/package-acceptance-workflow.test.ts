@@ -2876,10 +2876,22 @@ describe("package artifact reuse", () => {
     const resolveJob = workflowJob(RELEASE_PUBLISH_WORKFLOW, "resolve_release_target");
     const publishJob = workflowJob(RELEASE_PUBLISH_WORKFLOW, "publish");
     const resolveFullRun = workflowStep(resolveJob, "Resolve full release validation run");
+    const resolvePreflight = workflowStep(
+      resolveJob,
+      "Resolve exact OpenClaw npm preflight artifact",
+    );
+    const resolvePreflightDownload = workflowStep(
+      resolveJob,
+      "Download exact OpenClaw npm preflight artifact",
+    );
     const resolveDownload = workflowStep(resolveJob, "Download full release validation manifest");
     const trustedTooling = workflowStep(resolveJob, "Download trusted release validation tooling");
     const validateManifest = workflowStep(resolveJob, "Validate full release validation manifest");
     const publishDownload = workflowStep(publishJob, "Download full release validation manifest");
+    const publishPreflightDownload = workflowStep(
+      publishJob,
+      "Download exact OpenClaw npm preflight artifact",
+    );
     const publishOrchestration = workflowStep(publishJob, "Dispatch publish workflows");
     const npmPublishJob = workflowJob(
       ".github/workflows/openclaw-npm-release.yml",
@@ -2891,7 +2903,7 @@ describe("package artifact reuse", () => {
 
     expect(workflow).toContain("timeout-minutes: 120");
     expect(workflow).toContain("environment: npm-release");
-    expect(workflow).toContain("Download OpenClaw npm preflight manifest");
+    expect(workflow).toContain("Download exact OpenClaw npm preflight artifact");
     expect(workflow).toContain("Validate OpenClaw npm preflight manifest");
     expect(workflow).toContain("Download full release validation manifest");
     expect(workflow).toContain("Validate full release validation manifest");
@@ -2899,6 +2911,24 @@ describe("package artifact reuse", () => {
     expect(workflow).toContain("+refs/heads/main:refs/remotes/origin/main");
     expect(workflow).toContain("full_release_validation_run_attempt");
     expect(workflow).toContain("full_release_validation_run_id");
+    expect(resolvePreflight.env?.PREFLIGHT_RUN_ATTEMPT).toBe("${{ inputs.preflight_run_attempt }}");
+    expect(resolvePreflight.run).toContain(
+      "actions/runs/${PREFLIGHT_RUN_ID}/attempts/${PREFLIGHT_RUN_ATTEMPT}",
+    );
+    expect(resolvePreflight.run).toContain("openclaw-npm-preflight-artifact.mjs resolve");
+    expect(resolvePreflightDownload.env).toMatchObject({
+      PREFLIGHT_ARTIFACT_ID: "${{ steps.preflight_artifact.outputs.artifact_id }}",
+      PREFLIGHT_ARTIFACT_DIGEST: "${{ steps.preflight_artifact.outputs.artifact_digest }}",
+    });
+    expect(resolvePreflightDownload.run).toContain("openclaw-npm-preflight-artifact.mjs download");
+    expect(publishPreflightDownload.env).toMatchObject({
+      PREFLIGHT_ARTIFACT_ID: "${{ needs.resolve_release_target.outputs.preflight_artifact_id }}",
+      PREFLIGHT_ARTIFACT_DIGEST:
+        "${{ needs.resolve_release_target.outputs.preflight_artifact_digest }}",
+    });
+    expect(publishPreflightDownload.run).toContain(
+      ".release-harness/scripts/openclaw-npm-preflight-artifact.mjs download",
+    );
     expect(resolveFullRun.id).toBe("full_run");
     expect(resolveFullRun.env?.FULL_RELEASE_VALIDATION_RUN_ATTEMPT).toBe(
       "${{ inputs.full_release_validation_run_attempt }}",
@@ -2941,6 +2971,10 @@ describe("package artifact reuse", () => {
     expect(publishOrchestration.run).toContain(
       '-f full_release_validation_run_attempt="${FULL_RELEASE_VALIDATION_RUN_ATTEMPT}"',
     );
+    expect(publishOrchestration.run).toContain(
+      '-f preflight_run_attempt="${PREFLIGHT_RUN_ATTEMPT}"',
+    );
+    expect(publishOrchestration.run).not.toContain('gh run download "${PREFLIGHT_RUN_ID}"');
     expect(npmFullRun.id).toBe("full_run");
     expect(npmFullRun.env?.FULL_RELEASE_VALIDATION_RUN_ATTEMPT).toBe(
       "${{ inputs.full_release_validation_run_attempt }}",

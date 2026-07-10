@@ -10,7 +10,6 @@ import {
   githubApi,
   parseArgs,
   parseRunIdFromDispatchOutput,
-  resolveArtifactName,
   requireRunIdFromDispatchOutput,
   run,
   validateCandidateChangelogProvenance,
@@ -648,12 +647,14 @@ describe("release candidate checklist", () => {
       ]),
       workflowRef: "main",
       fullReleaseRunAttempt: 2,
+      npmPreflightRunAttempt: 4,
     };
 
     const command = buildPublishCommand(options);
     expect(command).toContain("'full_release_validation_run_id=111'");
     expect(command).toContain("'full_release_validation_run_attempt=2'");
     expect(command).toContain("'preflight_run_id=222'");
+    expect(command).toContain("'preflight_run_attempt=4'");
     expect(command).toContain("'tag=v2026.5.14-beta.3'");
     expect(command).toContain("'plugin_publish_scope=all-publishable'");
     expect(command).toContain("'--ref' 'main'");
@@ -854,16 +855,6 @@ describe("release candidate checklist", () => {
         "full-release-validation.yml",
       ),
     ).toThrow("refusing to guess from recent workflow_dispatch runs");
-  });
-
-  it("falls back to a single compatible artifact from the same run", () => {
-    expect(
-      resolveArtifactName(
-        [{ name: "openclaw-npm-preflight-dba00", expired: false }],
-        "openclaw-npm-preflight-v2026.5.16-beta.2",
-        "openclaw-npm-preflight-",
-      ),
-    ).toBe("openclaw-npm-preflight-dba00");
   });
 
   it("bounds GitHub API requests with a timeout signal", async () => {

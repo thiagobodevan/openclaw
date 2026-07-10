@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url";
 import { stripLeadingPackageManagerSeparator } from "./lib/arg-utils.mjs";
 import { readBoundedResponseText } from "./lib/bounded-response.mjs";
 import {
+  downloadNpmPreflightArtifact,
+  resolveNpmPreflightArtifactTuple,
+} from "./openclaw-npm-preflight-artifact.mjs";
+import {
   dedicatedSectionVersionForTag,
   extractChangelogReleaseSections,
   extractChangelogSection,
@@ -696,40 +700,6 @@ export function validateCandidateChangelogProvenance({
   return { status: "passed", base, target: recordedTarget, shippedBaselines };
 }
 
-async function runArtifacts(repo, runId) {
-  const data = await githubApi(`repos/${repo}/actions/runs/${runId}/artifacts?per_page=100`);
-  return (data.artifacts ?? []).map((artifact) => ({
-    name: artifact.name,
-    expired: artifact.expired,
-  }));
-}
-
-/**
- * Chooses the expected artifact name, allowing one same-prefix fallback per run.
- */
-export function resolveArtifactName(artifacts, preferredName, prefix) {
-  const available = artifacts
-    .filter((artifact) => artifact.expired !== true)
-    .map((artifact) => artifact.name);
-  if (available.includes(preferredName)) {
-    return preferredName;
-  }
-  const candidates = available.filter((name) => name.startsWith(prefix));
-  if (candidates.length === 1) {
-    console.warn(`artifact ${preferredName} not found; using ${candidates[0]} from the same run`);
-    return candidates[0];
-  }
-  const candidateList =
-    available.length > 0 ? available.map((name) => `- ${name}`).join("\n") : "- <none>";
-  throw new Error(
-    `artifact ${preferredName} not found in run. Expected ${preferredName} or exactly one ${prefix}* fallback.\nAvailable artifacts:\n${candidateList}`,
-  );
-}
-
-async function resolveRunArtifactName(repo, runId, preferredName, prefix) {
-  return resolveArtifactName(await runArtifacts(repo, runId), preferredName, prefix);
-}
-
 function runAndEcho(command, args) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
@@ -896,12 +866,6 @@ function downloadArtifact(repo, runId, name, dir) {
   run("gh", ["run", "download", runId, "--repo", repo, "--name", name, "--dir", dir]);
 }
 
-async function downloadResolvedArtifact(repo, runId, preferredName, prefix, dir) {
-  const name = await resolveRunArtifactName(repo, runId, preferredName, prefix);
-  downloadArtifact(repo, runId, name, dir);
-  return name;
-}
-
 function sha256(path) {
   return run("shasum", ["-a", "256", path], { capture: true }).trim().split(/\s+/u)[0] ?? "";
 }
@@ -958,6 +922,7 @@ export function buildPublishCommand(options) {
   const fields = [
     ["tag", options.tag],
     ["preflight_run_id", options.npmPreflightRunId],
+    ["preflight_run_attempt", options.npmPreflightRunAttempt],
     ["full_release_validation_run_id", options.fullReleaseRunId],
     ["full_release_validation_run_attempt", options.fullReleaseRunAttempt],
     ["npm_dist_tag", options.npmDistTag],
@@ -1100,7 +1065,7 @@ async function runParallelsIfNeeded(options, tarballPath, dependencyTarballPaths
   };
 }
 
-async function runTelegramIfNeeded(options, artifactName) {
+async function runTelegramIfNeeded(options, artifact, manifest, targetSha, trustedWorkflowSha) {
   if (options.skipTelegram) {
     return { status: "skipped" };
   }
@@ -1108,9 +1073,16 @@ async function runTelegramIfNeeded(options, artifactName) {
   const runId = dispatchWorkflow(options.repo, workflowFile, options.workflowRef, {
     package_spec: `openclaw@${options.tag.replace(/^v/u, "")}`,
     package_label: options.tag,
-    package_artifact_name: artifactName,
-    package_artifact_run_id: options.npmPreflightRunId,
-    harness_ref: options.workflowRef,
+    package_artifact_name: artifact.artifactName,
+    package_artifact_id: artifact.artifactId,
+    package_artifact_digest: artifact.artifactDigest.slice("sha256:".length),
+    package_artifact_run_id: artifact.runId,
+    package_artifact_run_attempt: artifact.runAttempt,
+    package_file_name: manifest.tarballName,
+    package_sha256: manifest.tarballSha256,
+    package_source_sha: targetSha,
+    package_version: manifest.packageVersion,
+    harness_ref: trustedWorkflowSha,
     provider_mode: options.telegramProviderMode,
   });
   const runLocal = await waitForSuccessfulRun(options.repo, runId, {
@@ -1121,7 +1093,10 @@ async function runTelegramIfNeeded(options, artifactName) {
     status: "passed",
     runId,
     url: runLocal.url,
-    artifactName,
+    artifactName: artifact.artifactName,
+    artifactId: artifact.artifactId,
+    artifactDigest: artifact.artifactDigest,
+    artifactRunAttempt: artifact.runAttempt,
     providerMode: options.telegramProviderMode,
   };
 }
@@ -1206,19 +1181,33 @@ async function main() {
     workflowName: "OpenClaw NPM Release",
     workflowRef: options.workflowRef,
   });
-  if (npmRun.headSha !== targetSha) {
-    throw new Error(`run SHA mismatch: tag=${targetSha} npm=${npmRun.headSha}`);
+  if (!Number.isInteger(npmRun.runAttempt) || npmRun.runAttempt < 1) {
+    throw new Error(`OpenClaw NPM Release run ${options.npmPreflightRunId} has invalid attempt.`);
   }
+  options.npmPreflightRunAttempt = npmRun.runAttempt;
 
   const npmDir = join(options.outputDir, "npm-preflight");
   const fullDir = join(options.outputDir, "full-release-validation");
-  const npmArtifactName = await downloadResolvedArtifact(
-    options.repo,
-    options.npmPreflightRunId,
-    `openclaw-npm-preflight-${options.tag}`,
-    "openclaw-npm-preflight-",
-    npmDir,
-  );
+  const [npmAttemptRun, npmArtifactInventory] = await Promise.all([
+    githubApi(
+      `repos/${options.repo}/actions/runs/${options.npmPreflightRunId}/attempts/${npmRun.runAttempt}`,
+    ),
+    githubApi(
+      `repos/${options.repo}/actions/runs/${options.npmPreflightRunId}/artifacts?per_page=100`,
+    ),
+  ]);
+  const npmArtifact = resolveNpmPreflightArtifactTuple({
+    workflowRun: npmAttemptRun,
+    artifactInventory: npmArtifactInventory,
+    expectedRepository: options.repo,
+    expectedRunId: options.npmPreflightRunId,
+    expectedRunAttempt: npmRun.runAttempt,
+  });
+  await downloadNpmPreflightArtifact({
+    token: run("gh", ["auth", "token"], { capture: true }).trim(),
+    tuple: npmArtifact,
+    outputDir: npmDir,
+  });
   if (!Number.isInteger(fullRun.runAttempt) || fullRun.runAttempt < 1) {
     throw new Error(`Full Release Validation run ${options.fullReleaseRunId} has invalid attempt.`);
   }
@@ -1279,7 +1268,13 @@ async function main() {
   });
 
   const parallels = await runParallelsIfNeeded(options, tarballPath, dependencyTarballPaths);
-  const npmTelegram = await runTelegramIfNeeded(options, npmArtifactName);
+  const npmTelegram = await runTelegramIfNeeded(
+    options,
+    npmArtifact,
+    npmManifest,
+    targetSha,
+    toolingSha,
+  );
   options.npmTelegramRunId = npmTelegram.runId ?? "";
   const pluginNpmPlan = await collectPluginPlanWithRetry(
     "scripts/plugin-npm-release-plan.ts",
@@ -1302,13 +1297,14 @@ async function main() {
     fullReleaseValidationRunId: options.fullReleaseRunId,
     fullReleaseValidationRunAttempt: fullRun.runAttempt,
     npmPreflightRunId: options.npmPreflightRunId,
+    npmPreflightRunAttempt: npmRun.runAttempt,
     windowsNodeTag: options.windowsNodeTag || undefined,
     windowsNodeSourceRelease,
     fullReleaseValidationUrl: fullRun.url,
     fullReleaseValidationControls: fullManifest.controls,
     npmPreflightUrl: npmRun.url,
     artifacts: {
-      npmPreflight: npmArtifactName,
+      npmPreflight: npmArtifact,
       fullReleaseValidation: fullArtifactName,
     },
     releaseNotesCheck,
@@ -1345,7 +1341,7 @@ async function main() {
             ),
           ]
         : []),
-      `- npm preflight artifact: ${npmArtifactName}`,
+      `- npm preflight artifact: ${npmArtifact.artifactName} (id ${npmArtifact.artifactId}, ${npmArtifact.artifactDigest})`,
       `- full release artifact: ${fullArtifactName}`,
       `- GitHub release notes: ${releaseNotesCheck.status} (${releaseNotesCheck.mode}, ${releaseNotesCheck.characters} characters, ${releaseNotesCheck.bytes} bytes)`,
       releaseNotesProvenance.status === "passed"

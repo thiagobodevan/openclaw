@@ -249,7 +249,7 @@ exists and after the OpenClaw npm preflight has succeeded (the preflight runs
 `pnpm plugins:sync:check` among its checks). The tag still selects the exact
 release commit, including a commit on `release/YYYY.M.PATCH`; Tideclaw alpha
 publishes keep using their matching alpha branch. It requires the saved
-`preflight_run_id` and a successful
+`preflight_run_id`, exact `preflight_run_attempt`, and a successful
 `full_release_validation_run_id` and its exact
 `full_release_validation_run_attempt`, dispatches `Plugin NPM Release` for all
 publishable plugin packages, dispatches `Plugin ClawHub Release` for the same
@@ -268,6 +268,7 @@ gh workflow run openclaw-release-publish.yml \
   --ref main \
   -f tag=vYYYY.M.PATCH-beta.N \
   -f preflight_run_id=<successful-openclaw-npm-preflight-run-id> \
+  -f preflight_run_attempt=<successful-openclaw-npm-preflight-run-attempt> \
   -f full_release_validation_run_id=<successful-full-release-validation-run-id> \
   -f full_release_validation_run_attempt=<successful-full-release-validation-run-attempt> \
   -f npm_dist_tag=beta

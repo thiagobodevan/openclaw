@@ -8,7 +8,11 @@ on:
         required: true
         type: string
       preflight_run_id:
-        description: Successful OpenClaw NPM Release preflight run id, required for OpenClaw npm or all-publishable plugin publication
+        description: Successful OpenClaw NPM Release preflight run id, paired with its exact attempt for OpenClaw npm or all-publishable plugin publication
+        required: false
+        type: string
+      preflight_run_attempt:
+        description: Exact successful OpenClaw NPM Release preflight run attempt, required with release evidence
         required: false
         type: string
       full_release_validation_run_id:
@@ -93,7 +97,12 @@ jobs:
     timeout-minutes: 20
     outputs:
       sha: ${{ steps.manifest.outputs.sha || steps.ref.outputs.sha }}
-      preflight_artifact_name: ${{ steps.preflight_artifact.outputs.name }}
+      preflight_artifact_digest: ${{ steps.preflight_artifact.outputs.artifact_digest }}
+      preflight_artifact_id: ${{ steps.preflight_artifact.outputs.artifact_id }}
+      preflight_artifact_name: ${{ steps.preflight_artifact.outputs.artifact_name }}
+      preflight_artifact_size_bytes: ${{ steps.preflight_artifact.outputs.artifact_size_bytes }}
+      preflight_workflow_head_branch: ${{ steps.preflight_artifact.outputs.workflow_head_branch }}
+      preflight_workflow_sha: ${{ steps.preflight_artifact.outputs.workflow_sha }}
       full_release_validation_run_attempt: ${{ steps.full_run.outputs.attempt }}
       windows_node_installer_digests: ${{ steps.windows_source.outputs.installer_digests }}
     steps:
@@ -101,6 +110,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
           FULL_RELEASE_VALIDATION_RUN_ID: ${{ inputs.full_release_validation_run_id }}
           FULL_RELEASE_VALIDATION_RUN_ATTEMPT: ${{ inputs.full_release_validation_run_attempt }}
           WINDOWS_NODE_TAG: ${{ inputs.windows_node_tag }}
@@ -130,12 +140,16 @@ jobs:
             release_evidence_required=true
           fi
           release_evidence_supplied=false
-          if [[ -n "${PREFLIGHT_RUN_ID//[[:space:]]/}" || -n "${FULL_RELEASE_VALIDATION_RUN_ID//[[:space:]]/}" || -n "${FULL_RELEASE_VALIDATION_RUN_ATTEMPT//[[:space:]]/}" ]]; then
+          if [[ -n "${PREFLIGHT_RUN_ID//[[:space:]]/}" || -n "${PREFLIGHT_RUN_ATTEMPT//[[:space:]]/}" || -n "${FULL_RELEASE_VALIDATION_RUN_ID//[[:space:]]/}" || -n "${FULL_RELEASE_VALIDATION_RUN_ATTEMPT//[[:space:]]/}" ]]; then
             release_evidence_supplied=true
           fi
           if [[ "${release_evidence_required}" == "true" || "${release_evidence_supplied}" == "true" ]]; then
             if [[ -z "${PREFLIGHT_RUN_ID//[[:space:]]/}" ]]; then
               echo "OpenClaw npm and all-publishable plugin publication require preflight_run_id; supplied release evidence must also be complete." >&2
+              exit 1
+            fi
+            if [[ ! "${PREFLIGHT_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "OpenClaw npm and all-publishable plugin publication require a positive preflight_run_attempt; supplied release evidence must also be complete." >&2
               exit 1
             fi
             if [[ -z "${FULL_RELEASE_VALIDATION_RUN_ID//[[:space:]]/}" ]]; then
@@ -262,56 +276,43 @@ jobs:
           echo "installer_digests=${approved_installer_digests}" >> "$GITHUB_OUTPUT"
           echo "- Windows Node source release: prevalidated \`${WINDOWS_NODE_TAG}\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Download OpenClaw npm preflight manifest
+      - name: Checkout trusted release tooling
+        if: ${{ inputs.publish_openclaw_npm }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve exact OpenClaw npm preflight artifact
         id: preflight_artifact
         if: ${{ inputs.publish_openclaw_npm || inputs.plugin_publish_scope == 'all-publishable' || inputs.preflight_run_id != '' || inputs.full_release_validation_run_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
         run: |
           set -euo pipefail
+          run_file="${RUNNER_TEMP}/openclaw-npm-preflight-run.json"
+          artifacts_file="${RUNNER_TEMP}/openclaw-npm-preflight-artifacts.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}/attempts/${PREFLIGHT_RUN_ATTEMPT}" > "$run_file"
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}/artifacts?per_page=100" > "$artifacts_file"
+          node scripts/openclaw-npm-preflight-artifact.mjs resolve \
+            "$run_file" "$artifacts_file" "$GITHUB_OUTPUT"
 
-          preferred_name="openclaw-npm-preflight-${RELEASE_TAG}"
-          preflight_dir="${RUNNER_TEMP}/openclaw-npm-preflight-manifest"
-          rm -rf "${preflight_dir}"
-          mkdir -p "${preflight_dir}"
-
-          download_named_artifact() {
-            local artifact_name="$1"
-            for attempt in 1 2 3; do
-              if gh run download "${PREFLIGHT_RUN_ID}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --name "${artifact_name}" \
-                --dir "${preflight_dir}"; then
-                return 0
-              fi
-              if [[ "$attempt" != "3" ]]; then
-                echo "::warning::Artifact download for ${artifact_name} failed on attempt ${attempt}; retrying."
-                sleep $((attempt * 10))
-              fi
-            done
-            return 1
-          }
-
-          if download_named_artifact "${preferred_name}"; then
-            echo "name=${preferred_name}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "::warning::${preferred_name} not found; checking run artifacts for a single compatible preflight artifact."
-          mapfile -t matches < <(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}/artifacts" \
-            --jq '.artifacts[] | select(.expired != true) | .name' |
-            grep '^openclaw-npm-preflight-' || true)
-          if [[ "${#matches[@]}" != "1" ]]; then
-            echo "Expected ${preferred_name}, or exactly one openclaw-npm-preflight-* fallback artifact in run ${PREFLIGHT_RUN_ID}." >&2
-            printf 'Available preflight candidates:\n' >&2
-            printf -- '- %s\n' "${matches[@]:-<none>}" >&2
-            exit 1
-          fi
-          fallback_name="${matches[0]}"
-          download_named_artifact "${fallback_name}"
-          echo "name=${fallback_name}" >> "$GITHUB_OUTPUT"
+      - name: Download exact OpenClaw npm preflight artifact
+        if: ${{ inputs.publish_openclaw_npm }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
+          PREFLIGHT_ARTIFACT_ID: ${{ steps.preflight_artifact.outputs.artifact_id }}
+          PREFLIGHT_ARTIFACT_NAME: ${{ steps.preflight_artifact.outputs.artifact_name }}
+          PREFLIGHT_ARTIFACT_DIGEST: ${{ steps.preflight_artifact.outputs.artifact_digest }}
+          PREFLIGHT_ARTIFACT_SIZE_BYTES: ${{ steps.preflight_artifact.outputs.artifact_size_bytes }}
+          PREFLIGHT_WORKFLOW_HEAD_BRANCH: ${{ steps.preflight_artifact.outputs.workflow_head_branch }}
+          PREFLIGHT_WORKFLOW_SHA: ${{ steps.preflight_artifact.outputs.workflow_sha }}
+        run: node scripts/openclaw-npm-preflight-artifact.mjs download "${RUNNER_TEMP}/openclaw-npm-preflight-manifest"
 
       - name: Resolve full release validation run
         id: full_run
@@ -552,6 +553,22 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Download exact OpenClaw npm preflight artifact
+        if: ${{ inputs.publish_openclaw_npm }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
+          PREFLIGHT_ARTIFACT_ID: ${{ needs.resolve_release_target.outputs.preflight_artifact_id }}
+          PREFLIGHT_ARTIFACT_NAME: ${{ needs.resolve_release_target.outputs.preflight_artifact_name }}
+          PREFLIGHT_ARTIFACT_DIGEST: ${{ needs.resolve_release_target.outputs.preflight_artifact_digest }}
+          PREFLIGHT_ARTIFACT_SIZE_BYTES: ${{ needs.resolve_release_target.outputs.preflight_artifact_size_bytes }}
+          PREFLIGHT_WORKFLOW_HEAD_BRANCH: ${{ needs.resolve_release_target.outputs.preflight_workflow_head_branch }}
+          PREFLIGHT_WORKFLOW_SHA: ${{ needs.resolve_release_target.outputs.preflight_workflow_sha }}
+        run: >-
+          node .release-harness/scripts/openclaw-npm-preflight-artifact.mjs download
+          "${RUNNER_TEMP}/openclaw-npm-preflight-artifact"
+
       - name: Download full release validation manifest
         if: ${{ inputs.publish_openclaw_npm }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -738,6 +755,7 @@ jobs:
           PARENT_WORKFLOW_SHA: ${{ github.sha }}
           RELEASE_TAG: ${{ inputs.tag }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
           FULL_RELEASE_VALIDATION_RUN_ID: ${{ inputs.full_release_validation_run_id }}
           FULL_RELEASE_VALIDATION_RUN_ATTEMPT: ${{ needs.resolve_release_target.outputs.full_release_validation_run_attempt }}
           RELEASE_NPM_DIST_TAG: ${{ inputs.npm_dist_tag }}
@@ -745,7 +763,7 @@ jobs:
           PLUGINS: ${{ inputs.plugins }}
           PUBLISH_OPENCLAW_NPM: ${{ inputs.publish_openclaw_npm && 'true' || 'false' }}
           WAIT_FOR_CLAWHUB: ${{ inputs.wait_for_clawhub && 'true' || 'false' }}
-          PREFLIGHT_ARTIFACT_NAME: ${{ needs.resolve_release_target.outputs.preflight_artifact_name }}
+          NPM_PREFLIGHT_DIR: ${{ runner.temp }}/openclaw-npm-preflight-artifact
           NPM_TELEGRAM_RUN_ID: ${{ inputs.npm_telegram_run_id }}
           WINDOWS_NODE_TAG: ${{ inputs.windows_node_tag }}
           WINDOWS_NODE_INSTALLER_DIGESTS: ${{ needs.resolve_release_target.outputs.windows_node_installer_digests }}
@@ -1222,7 +1240,7 @@ jobs:
           }
 
           resolve_openclaw_npm_publish_state() {
-            local artifact_name manifest_dir manifest_path manifest_sha manifest_tarball_sha published_sha published_tarball_path published_tarball_url release_version
+            local manifest_path manifest_sha manifest_tarball_sha published_sha published_tarball_path published_tarball_url release_version
 
             openclaw_npm_already_published="false"
             if [[ "${PUBLISH_OPENCLAW_NPM}" != "true" ]]; then
@@ -1238,15 +1256,7 @@ jobs:
             # that far. Resume is only safe when the registry serves the exact
             # tarball this tag's preflight built; the same version from any
             # other artifact is immutable on npm and needs a correction tag.
-            artifact_name="${PREFLIGHT_ARTIFACT_NAME:-openclaw-npm-preflight-${RELEASE_TAG}}"
-            manifest_dir="${RUNNER_TEMP}/openclaw-npm-resume-preflight"
-            rm -rf "${manifest_dir}"
-            mkdir -p "${manifest_dir}"
-            gh run download "${PREFLIGHT_RUN_ID}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --name "${artifact_name}" \
-              --dir "${manifest_dir}"
-            manifest_path="${manifest_dir}/preflight-manifest.json"
+            manifest_path="${NPM_PREFLIGHT_DIR}/preflight-manifest.json"
             manifest_sha="$(jq -er '.releaseSha' "${manifest_path}")"
             manifest_tarball_sha="$(jq -er '.tarballSha256' "${manifest_path}")"
             if [[ "${manifest_sha}" != "${TARGET_SHA}" ]]; then
@@ -1254,7 +1264,7 @@ jobs:
               exit 1
             fi
             published_tarball_url="$(npm view "openclaw@${release_version}" dist.tarball)"
-            published_tarball_path="${manifest_dir}/published.tgz"
+            published_tarball_path="${RUNNER_TEMP}/openclaw-npm-published.tgz"
             curl -fsSL --retry 3 -o "${published_tarball_path}" "${published_tarball_url}"
             published_sha="$(sha256sum "${published_tarball_path}" | awk '{print $1}')"
             if [[ "${published_sha}" != "${manifest_tarball_sha}" ]]; then
@@ -1643,28 +1653,21 @@ jobs:
           }
 
           upload_dependency_evidence_release_asset() {
-            local release_version download_dir asset_path asset_name artifact_name
+            local release_version asset_path asset_name
             release_version="${RELEASE_TAG#v}"
-            download_dir="${RUNNER_TEMP}/openclaw-release-dependency-evidence-asset"
             asset_name="openclaw-${release_version}-dependency-evidence.zip"
             asset_path="${RUNNER_TEMP}/${asset_name}"
-            artifact_name="${PREFLIGHT_ARTIFACT_NAME:-openclaw-npm-preflight-${RELEASE_TAG}}"
 
-            rm -rf "${download_dir}" "${asset_path}"
-            mkdir -p "${download_dir}"
-            gh run download "${PREFLIGHT_RUN_ID}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --name "${artifact_name}" \
-              --dir "${download_dir}"
+            rm -f "${asset_path}"
 
-            if [[ ! -d "${download_dir}/dependency-evidence" ]]; then
+            if [[ ! -d "${NPM_PREFLIGHT_DIR}/dependency-evidence" ]]; then
               echo "Dependency evidence is missing from OpenClaw npm preflight artifact." >&2
-              find "${download_dir}" -maxdepth 2 -type f -print >&2 || true
+              find "${NPM_PREFLIGHT_DIR}" -maxdepth 2 -type f -print >&2 || true
               exit 1
             fi
 
             (
-              cd "${download_dir}"
+              cd "${NPM_PREFLIGHT_DIR}"
               find dependency-evidence -type f -print | LC_ALL=C sort | zip -X -q "${asset_path}" -@
             )
             attach_or_verify_release_asset "${asset_path}" "${asset_name}"
@@ -2046,6 +2049,7 @@ jobs:
                 -f tag="${RELEASE_TAG}" \
                 -f preflight_only=false \
                 -f preflight_run_id="${PREFLIGHT_RUN_ID}" \
+                -f preflight_run_attempt="${PREFLIGHT_RUN_ATTEMPT}" \
                 -f full_release_validation_run_id="${FULL_RELEASE_VALIDATION_RUN_ID}" \
                 -f full_release_validation_run_attempt="${FULL_RELEASE_VALIDATION_RUN_ATTEMPT}" \
                 -f release_publish_run_id="${GITHUB_RUN_ID}" \

@@ -13,7 +13,11 @@ on:
         default: false
         type: boolean
       preflight_run_id:
-        description: Existing successful preflight workflow run id to promote without rebuilding
+        description: Existing successful preflight workflow run id to promote without rebuilding, paired with its exact attempt
+        required: false
+        type: string
+      preflight_run_attempt:
+        description: Exact successful preflight workflow run attempt to promote
         required: false
         type: string
       full_release_validation_run_id:
@@ -95,9 +99,9 @@ jobs:
           fi
 
       - name: Forbid preflight artifact promotion on validation-only runs
-        if: ${{ inputs.preflight_only && inputs.preflight_run_id != '' }}
+        if: ${{ inputs.preflight_only && (inputs.preflight_run_id != '' || inputs.preflight_run_attempt != '') }}
         run: |
-          echo "preflight_run_id is only valid for real publish runs."
+          echo "preflight_run_id and preflight_run_attempt are only valid for real publish runs."
           exit 1
 
       - name: Checkout
@@ -592,6 +596,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           RELEASE_NPM_DIST_TAG: ${{ inputs.npm_dist_tag }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
           FULL_RELEASE_VALIDATION_RUN_ID: ${{ inputs.full_release_validation_run_id }}
           FULL_RELEASE_VALIDATION_RUN_ATTEMPT: ${{ inputs.full_release_validation_run_attempt }}
           PLUGIN_NPM_RUN_ID: ${{ inputs.plugin_npm_run_id }}
@@ -600,6 +605,10 @@ jobs:
           set -euo pipefail
           if [[ -z "${PREFLIGHT_RUN_ID}" ]]; then
             echo "Real publish requires preflight_run_id from a successful npm preflight run." >&2
+            exit 1
+          fi
+          if [[ ! "${PREFLIGHT_RUN_ATTEMPT}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Real publish requires a positive preflight_run_attempt paired with preflight_run_id." >&2
             exit 1
           fi
           if [[ -z "${FULL_RELEASE_VALIDATION_RUN_ID}" ]]; then
@@ -779,18 +788,33 @@ jobs:
             echo "Publishing openclaw@${PACKAGE_VERSION}"
           fi
 
-      - name: Verify preflight run metadata
+      - name: Resolve exact preflight artifact
+        id: preflight_artifact
         env:
           GH_TOKEN: ${{ github.token }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
           RELEASE_NPM_DIST_TAG: ${{ inputs.npm_dist_tag }}
           EXPECTED_EXTENDED_STABLE_BRANCH: ${{ github.ref_name }}
           EXPECTED_RELEASE_SHA: ${{ steps.release_target.outputs.sha }}
           RUN_KIND: preflight
         run: |
           set -euo pipefail
-          RUN_JSON="$(gh run view "$PREFLIGHT_RUN_ID" --repo "$GITHUB_REPOSITORY" --json workflowName,headBranch,headSha,event,conclusion,url)"
-          printf '%s' "$RUN_JSON" | node scripts/openclaw-npm-extended-stable-release.mjs verify-run
+          run_file="${RUNNER_TEMP}/openclaw-npm-preflight-run.json"
+          artifacts_file="${RUNNER_TEMP}/openclaw-npm-preflight-artifacts.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}/attempts/${PREFLIGHT_RUN_ATTEMPT}" > "$run_file"
+          jq '{
+            workflowName: .name,
+            headBranch: .head_branch,
+            headSha: .head_sha,
+            event,
+            status,
+            conclusion,
+            url: .html_url
+          }' "$run_file" | node scripts/openclaw-npm-extended-stable-release.mjs verify-run
+          gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}/artifacts?per_page=100" > "$artifacts_file"
+          node scripts/openclaw-npm-preflight-artifact.mjs resolve \
+            "$run_file" "$artifacts_file" "$GITHUB_OUTPUT"
 
       - name: Verify full release validation run metadata
         id: full_run
@@ -841,54 +865,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
-          RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-
-          download_preflight_artifact() {
-            local preferred_name fallback_name
-            preferred_name="openclaw-npm-preflight-${RELEASE_TAG}"
-            rm -rf preflight-tarball
-            mkdir -p preflight-tarball
-
-            download_named_artifact() {
-              local artifact_name="$1"
-              for attempt in 1 2 3; do
-                if gh run download "${PREFLIGHT_RUN_ID}" \
-                  --repo "${GITHUB_REPOSITORY}" \
-                  --name "${artifact_name}" \
-                  --dir preflight-tarball; then
-                  return 0
-                fi
-                if [[ "$attempt" != "3" ]]; then
-                  echo "::warning::Artifact download for ${artifact_name} failed on attempt ${attempt}; retrying."
-                  sleep $((attempt * 10))
-                fi
-              done
-              return 1
-            }
-
-            if download_named_artifact "${preferred_name}"; then
-              echo "Downloaded ${preferred_name}."
-              return 0
-            fi
-
-            echo "::warning::${preferred_name} not found; checking run artifacts for a single compatible preflight artifact."
-            mapfile -t matches < <(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${PREFLIGHT_RUN_ID}/artifacts" \
-              --jq '.artifacts[] | select(.expired != true) | .name' |
-              grep '^openclaw-npm-preflight-' || true)
-            if [[ "${#matches[@]}" != "1" ]]; then
-              echo "Expected ${preferred_name}, or exactly one openclaw-npm-preflight-* fallback artifact in run ${PREFLIGHT_RUN_ID}." >&2
-              printf 'Available preflight candidates:\n' >&2
-              printf -- '- %s\n' "${matches[@]:-<none>}" >&2
-              exit 1
-            fi
-            fallback_name="${matches[0]}"
-            download_named_artifact "${fallback_name}"
-            echo "Downloaded fallback preflight artifact ${fallback_name}."
-          }
-
-          download_preflight_artifact
+          PREFLIGHT_RUN_ATTEMPT: ${{ inputs.preflight_run_attempt }}
+          PREFLIGHT_ARTIFACT_ID: ${{ steps.preflight_artifact.outputs.artifact_id }}
+          PREFLIGHT_ARTIFACT_NAME: ${{ steps.preflight_artifact.outputs.artifact_name }}
+          PREFLIGHT_ARTIFACT_DIGEST: ${{ steps.preflight_artifact.outputs.artifact_digest }}
+          PREFLIGHT_ARTIFACT_SIZE_BYTES: ${{ steps.preflight_artifact.outputs.artifact_size_bytes }}
+          PREFLIGHT_WORKFLOW_HEAD_BRANCH: ${{ steps.preflight_artifact.outputs.workflow_head_branch }}
+          PREFLIGHT_WORKFLOW_SHA: ${{ steps.preflight_artifact.outputs.workflow_sha }}
+        run: node scripts/openclaw-npm-preflight-artifact.mjs download preflight-tarball
 
       - name: Download full release validation manifest
         if: ${{ inputs.full_release_validation_run_id != '' }}
