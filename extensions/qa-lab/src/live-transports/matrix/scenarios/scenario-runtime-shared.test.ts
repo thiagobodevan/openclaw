@@ -1,6 +1,11 @@
 // QA Lab Matrix tests cover scenario runtime shared plugin behavior.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveMatrixQaNoReplyWindowMs } from "./scenario-runtime-shared.js";
+import {
+  buildMatrixNoticeArtifact,
+  buildMatrixReplyArtifact,
+  resolveMatrixQaNoReplyWindowMs,
+  truncateMatrixQaPreview,
+} from "./scenario-runtime-shared.js";
 
 describe("matrix scenario runtime shared", () => {
   afterEach(() => {
@@ -18,5 +23,25 @@ describe("matrix scenario runtime shared", () => {
       vi.stubEnv("OPENCLAW_QA_MATRIX_NO_REPLY_WINDOW_MS", value);
       expect(resolveMatrixQaNoReplyWindowMs(30_000)).toBe(8_000);
     }
+  });
+
+  it("keeps every shared Matrix preview UTF-16 safe", () => {
+    const prefix = "a".repeat(199);
+    const event = {
+      kind: "message" as const,
+      roomId: "!room:matrix-qa.test",
+      eventId: "$event",
+      sender: "@sut:matrix-qa.test",
+      type: "m.room.message",
+    };
+
+    expect(truncateMatrixQaPreview(`${prefix}😀tail`)).toBe(prefix);
+    expect(buildMatrixReplyArtifact({ ...event, body: `${prefix}😀tail` }).bodyPreview).toBe(
+      prefix,
+    );
+    expect(buildMatrixNoticeArtifact({ ...event, body: `${prefix}😀tail` }).bodyPreview).toBe(
+      prefix,
+    );
+    expect(buildMatrixReplyArtifact({ ...event, body: " " }).bodyPreview).toBe("");
   });
 });
