@@ -597,6 +597,7 @@ export function validateCandidateChangelogProvenance({
   targetSha,
   isAncestor = gitIsAncestor,
   loadShippedBaseline = loadCandidateShippedBaseline,
+  validatedLedgerBase,
 }) {
   // Validate the same section the renderer publishes: alpha and correction
   // tags may carry their own heading, and alpha tags may fall back to
@@ -662,7 +663,12 @@ export function validateCandidateChangelogProvenance({
       "shipped baseline exclusions must appear inside the complete contribution record",
     );
   }
-  if (!isAncestor(base, recordedTarget)) {
+  if (validatedLedgerBase !== undefined && validatedLedgerBase !== base) {
+    throw new Error(
+      `validated release ledger base ${validatedLedgerBase} does not match contribution record base ${base}`,
+    );
+  }
+  if (validatedLedgerBase === undefined && !isAncestor(base, recordedTarget)) {
     throw new Error(
       `CHANGELOG.md contribution record base ${base} is not an ancestor of recorded target ${recordedTarget}`,
     );
@@ -1171,12 +1177,6 @@ async function main() {
     repository: options.repo,
     tag: options.tag,
   });
-  const releaseNotesProvenance = validateCandidateChangelogProvenance({
-    changelog: releaseChangelog,
-    version: releaseNotesVersion,
-    tag: options.tag,
-    targetSha,
-  });
   const releaseLedger = options.releaseLedgerRunId
     ? await consumeReleaseLedgerRunEvidence({
         changelog: releaseChangelog,
@@ -1193,6 +1193,13 @@ async function main() {
       `release ledger SHA mismatch: expected candidate ${targetSha}, got ${releaseLedger.releaseSha}`,
     );
   }
+  const releaseNotesProvenance = validateCandidateChangelogProvenance({
+    changelog: releaseChangelog,
+    version: releaseNotesVersion,
+    tag: options.tag,
+    targetSha,
+    validatedLedgerBase: releaseLedger?.baseRef,
+  });
   const releaseLedgerEvidence = releaseLedger
     ? {
         artifactDigest: releaseLedger.artifactDigest,

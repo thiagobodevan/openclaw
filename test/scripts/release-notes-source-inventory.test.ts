@@ -4106,22 +4106,35 @@ describe("release source inventory", () => {
         "feature.txt": "base\n",
         "overlap.txt": oldOverlap,
         "release.txt": "base\n",
-        "version.txt": "0.142.0\n",
+        "version.txt": "release=beta.3\ncodex=0.142.0\n",
       };
       const broadFiles = {
         ...rootFiles,
         "overlap.txt": broadOverlap,
-        "version.txt": "0.143.0\n",
+        "version.txt": "release=beta.3\ncodex=0.143.0\n",
       };
       const root = createCommit(cwd, {
         files: rootFiles,
         subject: "chore: root",
         timestamp: 10,
       });
+      const witnessBase = createCommit(cwd, {
+        files: {
+          ...rootFiles,
+          "version.txt": "release=stable\ncodex=0.142.0\n",
+        },
+        parents: [root],
+        subject: "chore: stabilize main release context",
+        timestamp: 15,
+      });
+      const witnessFiles = {
+        ...broadFiles,
+        "version.txt": "release=stable\ncodex=0.143.0\n",
+      };
       const witness = createCommit(cwd, {
         authorTimestamp: 20,
-        files: broadFiles,
-        parents: [root],
+        files: witnessFiles,
+        parents: [witnessBase],
         subject: "chore: bump runtime to 0.143.0",
         timestamp: 25,
       });
@@ -4130,7 +4143,7 @@ describe("release source inventory", () => {
         files: broadFiles,
         parents: [root],
         subject: "chore: bump runtime to 0.143.0",
-        timestamp: 30,
+        timestamp: 36,
       });
       const sourceFeature = createCommit(cwd, {
         authorTimestamp: 32,
@@ -4153,7 +4166,7 @@ describe("release source inventory", () => {
       const landedFeature = createCommit(cwd, {
         authorTimestamp: 32,
         files: {
-          ...broadFiles,
+          ...witnessFiles,
           "feature.txt": "head\n",
           "overlap.txt": landedIntermediateOverlap,
         },
@@ -4163,7 +4176,7 @@ describe("release source inventory", () => {
       });
       const landedMember = createCommit(cwd, {
         authorTimestamp: 35,
-        files: { ...broadFiles, "feature.txt": "head\n" },
+        files: { ...witnessFiles, "feature.txt": "head\n" },
         parents: [landedFeature],
         subject: "test: align version fixtures",
         timestamp: 41,
@@ -4221,34 +4234,39 @@ describe("release source inventory", () => {
           },
         ],
       ]);
-      const inventory = buildReleaseSourceInventory(
-        {
-          baseRef: root,
-          comparisonBaseBranch: "main",
-          comparisonPullRequestMemberSubsetOverlaps: [
-            {
-              number: 205,
-              sourceCommitRef: sourceMember,
-              targetCommitRef: target,
-              witnessCommitRef: witness,
-            },
-          ],
-          cwd,
-          finalTargetRef: sourceTarget,
-          sourceTargetRef: sourceTarget,
-        },
-        completeEvidence(
-          new Map([
-            [sourceMember, [205]],
-            [witness, [999]],
-          ]),
-          referenceNodes,
+      const build = ({
+        targetCommit = target,
+        targetRef = sourceTarget,
+      }: { targetCommit?: string; targetRef?: string } = {}) =>
+        buildReleaseSourceInventory(
           {
-            comparison,
-            pullRequestCommits: new Map([[205, [sourceFeature, sourceMember]]]),
+            baseRef: root,
+            comparisonBaseBranch: "main",
+            comparisonPullRequestMemberSubsetOverlaps: [
+              {
+                number: 205,
+                sourceCommitRef: sourceMember,
+                targetCommitRef: targetCommit,
+                witnessCommitRef: witness,
+              },
+            ],
+            cwd,
+            finalTargetRef: targetRef,
+            sourceTargetRef: targetRef,
           },
-        ),
-      );
+          completeEvidence(
+            new Map([
+              [sourceMember, [205]],
+              [witness, [999]],
+            ]),
+            referenceNodes,
+            {
+              comparison,
+              pullRequestCommits: new Map([[205, [sourceFeature, sourceMember]]]),
+            },
+          ),
+        );
+      const inventory = build();
 
       expect(inventory.range.comparisonPullRequestMemberSubsetOverlaps).toEqual([
         expect.objectContaining({
@@ -4288,6 +4306,65 @@ describe("release source inventory", () => {
       });
       expect(sourceContributionsFromInventory(inventory).pullRequests.has(205)).toBe(false);
       expect(assertCompleteReleaseSourceInventory(inventory)).toBe(inventory);
+
+      const shiftedTargetBase = createCommit(cwd, {
+        files: {
+          ...rootFiles,
+          "overlap.txt": `shifted-context\n${oldOverlap}`,
+        },
+        parents: [root],
+        subject: "test: shift release fixture context",
+        timestamp: 16,
+      });
+      const shiftedTarget = createCommit(cwd, {
+        authorTimestamp: 20,
+        files: {
+          ...broadFiles,
+          "overlap.txt": `shifted-context\n${broadOverlap}`,
+        },
+        parents: [shiftedTargetBase],
+        subject: "chore: bump runtime to 0.143.0",
+        timestamp: 36,
+      });
+      const shiftedSourceTarget = createCommit(cwd, {
+        files: {
+          ...broadFiles,
+          "overlap.txt": `shifted-context\n${broadOverlap}`,
+          "release.txt": "released\n",
+        },
+        parents: [shiftedTarget],
+        subject: "fix: release-only work",
+        timestamp: 50,
+      });
+      expect(() => build({ targetCommit: shiftedTarget, targetRef: shiftedSourceTarget })).toThrow(
+        "lacks position-bound zero-context equivalence",
+      );
+
+      const revertedOverlap = broadOverlap
+        .replace("candidate-a=0.143.0", "candidate-a=0.142.0")
+        .replace("candidate-b=0.143.0", "candidate-b=0.142.0")
+        .replace("candidate-c=0.143.0", "candidate-c=0.142.0");
+      const targetRevert = createCommit(cwd, {
+        files: { ...broadFiles, "overlap.txt": revertedOverlap },
+        parents: [target],
+        subject: "test: temporarily restore stale fixtures",
+        timestamp: 40,
+      });
+      const targetRestore = createCommit(cwd, {
+        files: broadFiles,
+        parents: [targetRevert],
+        subject: "test: restore current fixtures",
+        timestamp: 45,
+      });
+      const reintroducedSourceTarget = createCommit(cwd, {
+        files: { ...broadFiles, "release.txt": "released\n" },
+        parents: [targetRestore],
+        subject: "fix: release-only work",
+        timestamp: 50,
+      });
+      expect(() => build({ targetRef: reintroducedSourceTarget })).toThrow(
+        "reintroduces the candidate after first-parent supersession",
+      );
     }));
 
   it("does not infer provenance from a shifted duplicate zero-context hunk", () =>

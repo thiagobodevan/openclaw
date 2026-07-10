@@ -197,6 +197,49 @@ describe("release candidate checklist", () => {
     expect(reachable).toHaveBeenCalledWith(recordedTarget, targetSha);
   });
 
+  it("allows a divergent contribution base only when exact ledger evidence is validated", () => {
+    const base = "v2026.6.11";
+    const recordedTarget = "a".repeat(40);
+    const targetSha = "b".repeat(40);
+    const changelog = [
+      "# Changelog",
+      "",
+      "## 2026.7.1",
+      "",
+      "### Complete contribution record",
+      "",
+      `This audited record covers the complete ${base}..${recordedTarget} history: 1 merged PR.`,
+      "",
+      "#### Pull requests",
+      "",
+      "- **PR #123** fix: example.",
+    ].join("\n");
+    const reachable = vi.fn(
+      (ancestor: string, target: string) => ancestor === recordedTarget && target === targetSha,
+    );
+    const validate = (validatedLedgerBase?: string) =>
+      validateCandidateChangelogProvenance({
+        changelog,
+        version: "2026.7.1",
+        tag: "v2026.7.1-beta.3",
+        targetSha,
+        isAncestor: reachable,
+        validatedLedgerBase,
+      });
+
+    expect(() => validate()).toThrow(`contribution record base ${base} is not an ancestor`);
+    expect(() => validate("v2026.6.10")).toThrow(
+      `validated release ledger base v2026.6.10 does not match contribution record base ${base}`,
+    );
+    expect(validate(base)).toEqual({
+      status: "passed",
+      base,
+      target: recordedTarget,
+      shippedBaselines: [],
+    });
+    expect(reachable).toHaveBeenCalledWith(recordedTarget, targetSha);
+  });
+
   it("rejects duplicate contribution record rows even when the declared count matches", () => {
     const targetSha = "b".repeat(40);
     const changelog = [

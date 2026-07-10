@@ -961,6 +961,18 @@ function countLineSequence(lines, sequence) {
   return count;
 }
 
+function lineSequenceStart(lines, sequence) {
+  if (sequence.length === 0 || sequence.length > lines.length) {
+    return undefined;
+  }
+  for (let index = 0; index <= lines.length - sequence.length; index += 1) {
+    if (sequence.every((line, offset) => lines[index + offset] === line)) {
+      return index + 1;
+    }
+  }
+  return undefined;
+}
+
 function candidateHunkAnchorEvidence(
   cwd,
   graph,
@@ -1127,31 +1139,48 @@ function candidateSubsetHunkEvidence(
       snapshots.sourceCommit,
       hunk.postimageLines,
     ),
+    sourceCommitPostimageStart: lineSequenceStart(snapshots.sourceCommit, hunk.postimageLines),
     sourceParentPreimageOccurrences: countLineSequence(snapshots.sourceParent, hunk.preimageLines),
+    sourceParentPreimageStart: lineSequenceStart(snapshots.sourceParent, hunk.preimageLines),
     targetCommitPostimageOccurrences: countLineSequence(
       snapshots.targetCommit,
       hunk.postimageLines,
     ),
+    targetCommitPostimageStart: lineSequenceStart(snapshots.targetCommit, hunk.postimageLines),
     targetParentPreimageOccurrences: countLineSequence(snapshots.targetParent, hunk.preimageLines),
+    targetParentPreimageStart: lineSequenceStart(snapshots.targetParent, hunk.preimageLines),
     witnessCommitPostimageOccurrences: countLineSequence(
       snapshots.witnessCommit,
       hunk.postimageLines,
     ),
+    witnessCommitPostimageStart: lineSequenceStart(snapshots.witnessCommit, hunk.postimageLines),
     witnessParentPreimageOccurrences: countLineSequence(
       snapshots.witnessParent,
       hunk.preimageLines,
     ),
+    witnessParentPreimageStart: lineSequenceStart(snapshots.witnessParent, hunk.preimageLines),
   }));
   if (
-    hunks.some((hunk) =>
-      [
-        hunk.sourceCommitPostimageOccurrences,
-        hunk.sourceParentPreimageOccurrences,
-        hunk.targetCommitPostimageOccurrences,
-        hunk.targetParentPreimageOccurrences,
-        hunk.witnessCommitPostimageOccurrences,
-        hunk.witnessParentPreimageOccurrences,
-      ].some((count) => count !== 1),
+    hunks.some(
+      (hunk) =>
+        [
+          hunk.sourceCommitPostimageOccurrences,
+          hunk.sourceParentPreimageOccurrences,
+          hunk.targetCommitPostimageOccurrences,
+          hunk.targetParentPreimageOccurrences,
+          hunk.witnessCommitPostimageOccurrences,
+          hunk.witnessParentPreimageOccurrences,
+        ].some((count) => count !== 1) ||
+        [
+          hunk.sourceCommitPostimageStart,
+          hunk.targetCommitPostimageStart,
+          hunk.witnessCommitPostimageStart,
+        ].some((start) => start !== hunk.newStart) ||
+        [
+          hunk.sourceParentPreimageStart,
+          hunk.targetParentPreimageStart,
+          hunk.witnessParentPreimageStart,
+        ].some((start) => start !== hunk.oldStart),
     )
   ) {
     return undefined;
@@ -1166,6 +1195,120 @@ function candidateSubsetHunkEvidence(
     targetParent: targetRecord.parents[0],
     witnessCommit,
     witnessParent: witnessRecord.parents[0],
+  };
+}
+
+function equivalentZeroContextPathEvidence(cwd, graph, targetCommit, witnessCommit, path) {
+  const targetRecord = graph.get(targetCommit);
+  const witnessRecord = graph.get(witnessCommit);
+  if (
+    !targetRecord ||
+    targetRecord.parents.length !== 1 ||
+    !witnessRecord ||
+    witnessRecord.parents.length !== 1
+  ) {
+    return undefined;
+  }
+  const targetPatch = zeroContextPatch(cwd, targetRecord.parents[0], targetCommit, [path]);
+  const witnessPatch = zeroContextPatch(cwd, witnessRecord.parents[0], witnessCommit, [path]);
+  const targetHunks = parseTextPatchHunks(targetPatch);
+  const witnessHunks = parseTextPatchHunks(witnessPatch);
+  if (targetPatch === "" || witnessPatch === "" || !targetHunks || !witnessHunks) {
+    return undefined;
+  }
+  const summarizeHunks = (hunks) =>
+    hunks.map((hunk) => ({
+      newCount: hunk.newCount,
+      newStart: hunk.newStart,
+      oldCount: hunk.oldCount,
+      oldStart: hunk.oldStart,
+      postimageSha256: createHash("sha256")
+        .update(hunk.postimageLines.map((line) => `${line}\n`).join(""))
+        .digest("hex"),
+      preimageSha256: createHash("sha256")
+        .update(hunk.preimageLines.map((line) => `${line}\n`).join(""))
+        .digest("hex"),
+    }));
+  const targetHunkRecords = summarizeHunks(targetHunks);
+  const witnessHunkRecords = summarizeHunks(witnessHunks);
+  if (JSON.stringify(targetHunkRecords) !== JSON.stringify(witnessHunkRecords)) {
+    return undefined;
+  }
+  const targetChangedLineHashes = changedLineHashes(targetPatch);
+  const witnessChangedLineHashes = changedLineHashes(witnessPatch);
+  if (
+    targetChangedLineHashes.length === 0 ||
+    JSON.stringify(targetChangedLineHashes) !== JSON.stringify(witnessChangedLineHashes)
+  ) {
+    return undefined;
+  }
+  return {
+    changedLineHashes: setSummary(targetChangedLineHashes),
+    hunks: recordSummary(targetHunkRecords),
+    path,
+    targetCommit,
+    targetParent: targetRecord.parents[0],
+    targetPatchSha256: createHash("sha256").update(targetPatch).digest("hex"),
+    witnessCommit,
+    witnessParent: witnessRecord.parents[0],
+    witnessPatchSha256: createHash("sha256").update(witnessPatch).digest("hex"),
+  };
+}
+
+function candidateFirstParentSurvivalEvidence(
+  cwd,
+  graph,
+  startCommit,
+  endCommit,
+  candidate,
+  label,
+) {
+  const firstParentHistory = git(cwd, ["rev-list", "--first-parent", endCommit]).trim().split("\n");
+  if (!isAncestor(cwd, startCommit, endCommit) || !firstParentHistory.includes(startCommit)) {
+    fail(`${label} does not have the required first-parent ancestry`);
+  }
+  const pathHistoryOutput = git(cwd, [
+    "rev-list",
+    "--first-parent",
+    "--reverse",
+    `${startCommit}..${endCommit}`,
+    "--",
+    ...candidate.paths,
+  ]).trim();
+  const pathHistory = [
+    startCommit,
+    ...(pathHistoryOutput === "" ? [] : pathHistoryOutput.split("\n")),
+    ...(startCommit !== endCommit && !pathHistoryOutput.split("\n").includes(endCommit)
+      ? [endCommit]
+      : []),
+  ];
+  extendGraphWithCommitsAndParents(cwd, graph, pathHistory);
+  let supersededAt = null;
+  const survival = pathHistory.map((commit, index) => {
+    const proof = candidateExactPathTreeProof(cwd, graph, commit, candidate);
+    if (index === 0 && !proof) {
+      fail(`${label} does not contain the candidate at its first-parent start`);
+    }
+    if (proof && supersededAt) {
+      fail(`${label} reintroduces the candidate after first-parent supersession`);
+    }
+    if (!proof && !supersededAt) {
+      supersededAt = commit;
+    }
+    return {
+      candidatePresent: Boolean(proof),
+      commit,
+      proofMethod: proof?.proofMethod ?? null,
+      tree: graph.get(commit).tree,
+    };
+  });
+  return {
+    endCommit,
+    paths: setSummary(candidate.paths),
+    startCommit,
+    supersededAt,
+    survival: recordSummary(survival),
+    terminalCandidatePresent: survival.at(-1).candidatePresent,
   };
 }
 
@@ -4719,6 +4862,16 @@ export function buildReleaseSourceInventory(
         witnessRecord?.parents.length === 1
           ? changedPaths(cwd, witnessRecord.parents[0], overlapEntry.witnessCommit)
           : [];
+      // Independence comes from the main witness, not the release-branch cherry clock.
+      // The witness must exist before both the PR member and its broader target copy.
+      const witnessPredatesSource =
+        witnessRecord && sourceRecord
+          ? witnessRecord.committer.timestamp < sourceRecord.committer.timestamp
+          : false;
+      const witnessPredatesTarget =
+        witnessRecord && targetRecord
+          ? witnessRecord.committer.timestamp < targetRecord.committer.timestamp
+          : false;
       if (
         !metadata ||
         !pullRequestCommits ||
@@ -4744,14 +4897,11 @@ export function buildReleaseSourceInventory(
         witnessAssociations.includes(overlapEntry.number) ||
         !targetPatch ||
         !witnessPatch ||
-        targetPatch.diffSha256 !== witnessPatch.diffSha256 ||
-        targetPatch.patch !== witnessPatch.patch ||
-        targetPatch.patchId !== witnessPatch.patchId ||
         JSON.stringify(targetPaths) !== JSON.stringify(witnessPaths) ||
         JSON.stringify(targetRecord.author) !== JSON.stringify(witnessRecord.author) ||
         targetRecord.message !== witnessRecord.message ||
-        witnessRecord.committer.timestamp >= targetRecord.committer.timestamp ||
-        targetRecord.committer.timestamp >= sourceRecord.committer.timestamp ||
+        !witnessPredatesSource ||
+        !witnessPredatesTarget ||
         targetCommit?.disposition !== "direct" ||
         targetCommit.pullRequests.length > 0 ||
         targetCommit.evidence.length > 0 ||
@@ -4768,6 +4918,19 @@ export function buildReleaseSourceInventory(
       ) {
         fail(`${label} is not an isolated direct strict-member subset overlap`);
       }
+      const broadPathEvidence = targetPaths.map((path) => {
+        const evidence = equivalentZeroContextPathEvidence(
+          cwd,
+          graph,
+          overlapEntry.targetCommit,
+          overlapEntry.witnessCommit,
+          path,
+        );
+        if (!evidence) {
+          fail(`${label} broad path ${path} lacks position-bound zero-context equivalence`);
+        }
+        return evidence;
+      });
       const sourceChangedLineHashes = changedLineHashes(
         candidateZeroContextPatch(cwd, sourceCandidate),
       );
@@ -4839,6 +5002,34 @@ export function buildReleaseSourceInventory(
         sourceTarget,
         sourceCandidate,
       );
+      const targetCandidateProof = candidateExactPathTreeProof(
+        cwd,
+        graph,
+        overlapEntry.targetCommit,
+        sourceCandidate,
+      );
+      const witnessCandidateProof = candidateExactPathTreeProof(
+        cwd,
+        graph,
+        overlapEntry.witnessCommit,
+        sourceCandidate,
+      );
+      const witnessSurvival = candidateFirstParentSurvivalEvidence(
+        cwd,
+        graph,
+        overlapEntry.witnessCommit,
+        landedStack.baseCommit,
+        sourceCandidate,
+        label,
+      );
+      const targetSurvival = candidateFirstParentSurvivalEvidence(
+        cwd,
+        graph,
+        overlapEntry.targetCommit,
+        sourceTarget,
+        sourceCandidate,
+        label,
+      );
       const stackNetPatch = zeroContextPatch(
         cwd,
         landedStack.baseCommit,
@@ -4853,6 +5044,8 @@ export function buildReleaseSourceInventory(
         !stackBaseProof ||
         !mergeCommitProof ||
         !sourceTargetProof ||
+        !targetCandidateProof ||
+        !witnessCandidateProof ||
         stackAllocatedCandidateLines.length > 0
       ) {
         fail(`${label} is allocated by the rebased pull request stack`);
@@ -4914,6 +5107,7 @@ export function buildReleaseSourceInventory(
         },
         method: "reviewed-nonownership-strict-member-subset-overlap",
         ownershipAttributed: false,
+        broadPaths: recordSummary(broadPathEvidence),
         paths: recordSummary(pathEvidence),
         pullRequest: metadata,
         pullRequestMembers: setSummary(pullRequestCommits),
@@ -4940,6 +5134,8 @@ export function buildReleaseSourceInventory(
           parent: targetRecord.parents[0],
           patchId: targetPatch.patchId,
           paths: setSummary(targetPaths),
+          candidateProof: targetCandidateProof,
+          firstParentSurvival: targetSurvival,
           tree: targetRecord.tree,
         },
         witness: {
@@ -4952,6 +5148,8 @@ export function buildReleaseSourceInventory(
           parent: witnessRecord.parents[0],
           patchId: witnessPatch.patchId,
           paths: setSummary(witnessPaths),
+          candidateProof: witnessCandidateProof,
+          firstParentSurvival: witnessSurvival,
           tree: witnessRecord.tree,
         },
       });

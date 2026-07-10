@@ -201,14 +201,19 @@ every human `Thanks @...` attribution.
      stack. Every source member must map in order to one distinct landed commit
      by exact author and message identity, the selected member must map by exact
      patch, and the witness must already be ancestral to the stack base. The
-     member's unique text hunks must be a strict subset of identical broader
-     target/witness changed-line hashes, survive at the stack base, merge
-     result, and source target, and be absent from the stack's net changed-line
-     allocation. The target remains association/reference/trailer-free direct
-     release work; the witness must have an independent PR association. Exactly
-     the source-head and landed-head final-tree scanner matches are acknowledged.
-     Any extra scanner match, ownership evidence, non-rebased mapping, shifted
-     or ambiguous hunk, or unused directive fails closed.
+     member's unique contextual text hunks must be a strict subset of broader
+     target/witness changes whose per-path zero-context hunk coordinates and
+     pre/postimage hashes match exactly. The member patch must round-trip the
+     target, witness, stack base, and merge result path trees. First-parent
+     lineage from witness to stack base and target to source target is monotonic:
+     the candidate may disappear once through later supersession, but it may
+     never reappear. The candidate must also be absent from the stack's net
+     changed-line allocation. The target remains
+     association/reference/trailer-free direct release work; the witness must
+     have an independent PR association. Exactly the source-head and landed-head
+     final-tree scanner matches are acknowledged. Any extra scanner match,
+     ownership evidence, non-rebased mapping, shifted or reverted/reintroduced
+     hunk, or unused directive fails closed.
    - resolve commit-author pages completely so verified non-noreply co-authors
      retain contributor credit
    - the manifest records canonical/current/generated/missing/stale PR members
