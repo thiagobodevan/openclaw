@@ -165,15 +165,22 @@ function completedCodexContextOverflow(
   if (promptTokens === undefined) {
     return undefined;
   }
-  if (promptTokens > budget) {
-    return true;
+  const lastAssistant = isRecord(result.lastAssistant) ? result.lastAssistant : undefined;
+  const stopReason =
+    typeof lastAssistant?.stopReason === "string" ? lastAssistant.stopReason : undefined;
+  if (stopReason === "stop") {
+    return promptTokens > budget;
+  }
+  if (stopReason !== undefined && stopReason !== "length") {
+    return false;
   }
   const output = nonNegativeFiniteNumber(usage.output);
-  if (output === undefined) {
-    return undefined;
+  if (stopReason === "length") {
+    return output === undefined ? undefined : output === 0 && promptTokens >= budget * 0.99;
   }
-  // Match the runtime's length-stop threshold for zero-output calls.
-  return output === 0 && promptTokens >= budget * 0.99;
+  // A completed Codex turn without an assistant item has no stop reason.
+  // Only usage beyond the effective budget is unambiguous in that shape.
+  return promptTokens > budget ? true : undefined;
 }
 
 /**

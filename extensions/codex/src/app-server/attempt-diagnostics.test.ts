@@ -153,7 +153,7 @@ describe("Codex app-server attempt diagnostics", () => {
     expect(JSON.stringify(completedEvent)).not.toContain("secret path");
   });
 
-  it("detects zero-output completed calls at the effective context budget", () => {
+  it("omits ambiguous zero-output completed calls at the effective context budget", () => {
     emitTrustedDiagnosticEventWithPrivateData.mockClear();
     const emitter = createCodexModelCallDiagnosticEmitter({
       baseFields: {
@@ -183,17 +183,43 @@ describe("Codex app-server attempt diagnostics", () => {
     });
 
     const completedEvent = emitTrustedDiagnosticEventWithPrivateData.mock.calls[1]?.[0];
+    expect(completedEvent).not.toHaveProperty("contextOverflowDetected");
+  });
+
+  it("detects completed calls whose prompt usage exceeds the effective budget", () => {
+    emitTrustedDiagnosticEventWithPrivateData.mockClear();
+    const emitter = createCodexModelCallDiagnosticEmitter({
+      baseFields: {
+        runId: "run-1",
+        callId: "call-1",
+        provider: "codex",
+        model: "gpt-5.4-codex",
+        contextTokenBudget: 100,
+      },
+      capture: {},
+      tools: [],
+      buildInputMessages: () => [],
+      buildSystemPrompt: () => undefined,
+      now: () => 10,
+    });
+
+    emitter.emitStarted();
+    emitter.emitCompleted({
+      attemptUsage: {
+        input: 81,
+        output: 0,
+        cacheRead: 20,
+        cacheWrite: 0,
+        total: 101,
+      },
+      toolMetas: [],
+    });
+
+    const completedEvent = emitTrustedDiagnosticEventWithPrivateData.mock.calls[1]?.[0];
     expect(completedEvent).toEqual(
       expect.objectContaining({
         type: "model.call.completed",
         contextOverflowDetected: true,
-        usage: {
-          input: 80,
-          output: 0,
-          cacheRead: 19,
-          cacheWrite: 0,
-          total: 99,
-        },
       }),
     );
   });
