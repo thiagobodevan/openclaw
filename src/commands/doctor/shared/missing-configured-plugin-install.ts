@@ -1217,7 +1217,6 @@ async function installCandidate(params: {
         failedPluginId: candidate.pluginId,
       };
     }
-    const npmInstallSpecLabel = sanitizeTerminalText(npmInstallSpec);
     changes.push(
       `ClawHub ${clawhubInstallSpecLabel} unavailable for "${candidate.pluginId}"; falling back to npm ${npmInstallSpecLabel}.`,
     );
