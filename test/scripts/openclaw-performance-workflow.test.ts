@@ -33,6 +33,14 @@ function findStep(name: string): WorkflowStep {
 }
 
 describe("OpenClaw performance workflow", () => {
+  it("pins the Kova evaluator that reads truncated agent payloads", () => {
+    const workflow = readFileSync(WORKFLOW, "utf8");
+    const kovaRef = "a2dd84e7d65507e614afaff850d3932d18c859b6";
+
+    expect(workflow).toContain(`default: ${kovaRef}`);
+    expect(workflow).toContain(`inputs.kova_ref || '${kovaRef}'`);
+  });
+
   it("uses the clawgrit reports token for every report repo push path", () => {
     const prepare = findStep("Prepare clawgrit reports checkout");
     const publish = findStep("Publish to clawgrit reports");
