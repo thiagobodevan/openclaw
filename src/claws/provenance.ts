@@ -189,6 +189,23 @@ export function readClawInstallRecord(
   return row ? rowToInstall(row) : undefined;
 }
 
+export function readClawInstallRecords(
+  options: OpenClawStateDatabaseOptions = {},
+): PersistedClawInstall[] {
+  const database = openOpenClawStateDatabase(options);
+  ensureClawInstallTable(database.db);
+  const rows = database.db
+    .prepare(
+      `SELECT schema_version, source_kind, claw_name, claw_version, package_root,
+              manifest_path, integrity, agent_id, workspace, agent_config_digest,
+              status, added_at_ms, updated_at_ms
+         FROM claw_installs
+        ORDER BY agent_id`,
+    )
+    .all() as InstallRow[];
+  return rows.map(rowToInstall);
+}
+
 function rowToPackageRef(row: PackageRefRow): PersistedClawPackageRef {
   return {
     schemaVersion: CLAW_PACKAGE_REF_SCHEMA_VERSION,
@@ -243,6 +260,7 @@ export function persistClawPackageRef(
 
 export function readClawPackageRefs(
   options: OpenClawStateDatabaseOptions & {
+    agentId?: string;
     kind?: ClawPackage["kind"];
     source?: ClawPackage["source"];
     ref?: string;
@@ -254,6 +272,7 @@ export function readClawPackageRefs(
   const conditions: string[] = [];
   const params: Record<string, string> = {};
   for (const [column, value] of [
+    ["agent_id", options.agentId],
     ["package_kind", options.kind],
     ["package_source", options.source],
     ["package_ref", options.ref],
