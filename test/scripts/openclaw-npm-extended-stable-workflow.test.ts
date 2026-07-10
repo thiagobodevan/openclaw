@@ -80,6 +80,9 @@ describe("minimal npm extended-stable workflow", () => {
     expect(refGuard.run).toContain("requires a full 40-character commit SHA");
     expect(refGuard.run).toContain("dev/throwaway-2026.0.33-v6.8");
     expect(refGuard.run).toContain("requires preflight_only=true");
+    expect(refGuard.env?.WORKFLOW_SHA).toBe("${{ github.sha }}");
+    expect(refGuard.run).toContain('"${RELEASE_REF,,}" != "${WORKFLOW_SHA,,}"');
+    expect(refGuard.run).toContain("requires tag to equal the selected branch head SHA");
     expect(parsed.jobs?.reject_non_preflight?.if).toBe("${{ !inputs.preflight_only }}");
     expect(step(parsed.jobs?.reject_non_preflight, "Reject publish-mode dispatch").run).toContain(
       "publish jobs are absent",

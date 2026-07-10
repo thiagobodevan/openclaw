@@ -63,6 +63,7 @@ jobs:
           PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
           RELEASE_NPM_DIST_TAG: ${{ inputs.npm_dist_tag }}
           WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [[ "${PREFLIGHT_ONLY}" != "true" ]]; then
@@ -83,6 +84,10 @@ jobs:
           fi
           if [[ "${WORKFLOW_REF}" != "refs/heads/dev/throwaway-2026.0.33-v6.8" ]]; then
             echo "This throwaway workflow must run from dev/throwaway-2026.0.33-v6.8."
+            exit 1
+          fi
+          if [[ "${RELEASE_REF,,}" != "${WORKFLOW_SHA,,}" ]]; then
+            echo "This throwaway workflow requires tag to equal the selected branch head SHA."
             exit 1
           fi
 
