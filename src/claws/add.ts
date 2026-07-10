@@ -5,6 +5,12 @@ import { transformConfigFileWithRetry } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import { resolveUserPath } from "../utils.js";
+import {
+  ClawCronInstallError,
+  installClawCronJobs,
+  type ClawCronGateway,
+  type PersistedClawCronRef,
+} from "./cron.js";
 import { ClawPackageInstallError, installClawPackages } from "./packages.js";
 import { persistClawInstallRecord, type PersistedClawInstall } from "./provenance.js";
 import type { PersistedClawPackageRef } from "./provenance.js";
@@ -41,6 +47,7 @@ export type ClawAddResult = {
   configCommitted: boolean;
   workspaceFiles: PersistedClawWorkspaceFile[];
   packages: PersistedClawPackageRef[];
+  cronJobs: PersistedClawCronRef[];
   installRecord?: PersistedClawInstall;
   error?: {
     code: string;
@@ -51,7 +58,8 @@ export type ClawAddResult = {
 
 function hasUnsupportedMutationActions(plan: ClawAddPlan): boolean {
   return plan.actions.some(
-    (action) => !["agent", "workspace", "workspaceFile", "package"].includes(action.kind),
+    (action) =>
+      !["agent", "workspace", "workspaceFile", "package", "cronJob"].includes(action.kind),
   );
 }
 
@@ -70,6 +78,8 @@ export async function applyClawAddPlan(
     persistRecord?: typeof persistClawInstallRecord;
     createWorkspaceFiles?: typeof createClawWorkspaceFiles;
     installPackages?: typeof installClawPackages;
+    installCronJobs?: typeof installClawCronJobs;
+    cronGateway?: Pick<ClawCronGateway, "add">;
     nowMs?: number;
   } = {},
 ): Promise<ClawAddResult> {
@@ -79,7 +89,7 @@ export async function applyClawAddPlan(
   if (hasUnsupportedMutationActions(plan)) {
     throw new ClawAddMutationError(
       "unsupported_components",
-      "This build can add agent settings, workspace files, and packages; declared MCP servers or cron jobs require later lifecycle slices.",
+      "This build can add agent settings, workspace files, packages, and cron jobs; declared MCP servers require a later lifecycle slice.",
     );
   }
 
@@ -169,6 +179,7 @@ export async function applyClawAddPlan(
       configCommitted: true,
       workspaceFiles: workspaceError.createdFiles,
       packages: [],
+      cronJobs: [],
       ...(installRecord ? { installRecord } : {}),
       error: {
         code: "workspace_files_failed",
@@ -213,12 +224,57 @@ export async function applyClawAddPlan(
       configCommitted: true,
       workspaceFiles,
       packages: packageError.installedPackages,
+      cronJobs: [],
       ...(installRecord ? { installRecord } : {}),
       error: {
         code: packageError.code,
         message: provenanceError
           ? `${packageError.message}; root provenance also failed: ${provenanceError}`
           : packageError.message,
+      },
+    };
+  }
+
+  const installCronJobs = options.installCronJobs ?? installClawCronJobs;
+  let cronJobs: PersistedClawCronRef[] = [];
+  try {
+    cronJobs = await installCronJobs(plan, { ...options, gateway: options.cronGateway });
+  } catch (error) {
+    const cronError =
+      error instanceof ClawCronInstallError
+        ? error
+        : new ClawCronInstallError(
+            "cron_install_failed",
+            error instanceof Error ? error.message : String(error),
+            cronJobs,
+          );
+    const persistRecord = options.persistRecord ?? persistClawInstallRecord;
+    let installRecord: PersistedClawInstall | undefined;
+    let provenanceError: string | undefined;
+    try {
+      installRecord = persistRecord(plan, { ...options, status: "partial" });
+    } catch (recordError) {
+      provenanceError = recordError instanceof Error ? recordError.message : String(recordError);
+    }
+    return {
+      schemaVersion: CLAW_ADD_RESULT_SCHEMA_VERSION,
+      stability: CLAW_OUTPUT_STABILITY,
+      dryRun: false,
+      mutationAllowed: true,
+      status: "partial",
+      claw: plan.claw,
+      agent: plan.agent,
+      workspaceCreated: true,
+      configCommitted: true,
+      workspaceFiles,
+      packages,
+      cronJobs: cronError.cronJobs,
+      ...(installRecord ? { installRecord } : {}),
+      error: {
+        code: cronError.code,
+        message: provenanceError
+          ? `${cronError.message}; root provenance also failed: ${provenanceError}`
+          : cronError.message,
       },
     };
   }
@@ -238,6 +294,7 @@ export async function applyClawAddPlan(
       configCommitted: true,
       workspaceFiles,
       packages,
+      cronJobs,
       installRecord,
     };
   } catch (error) {
@@ -253,6 +310,7 @@ export async function applyClawAddPlan(
       configCommitted: true,
       workspaceFiles,
       packages,
+      cronJobs,
       error: { code: "provenance_failed", message: (error as Error).message },
     };
   }

@@ -26,10 +26,6 @@ import {
 } from "../claws/types.js";
 // Runtime handlers for experimental local Claws commands.
 import { loadConfig } from "../config/config.js";
-import {
-  loadCronJobsStoreWithConfigJobsReadOnly,
-  resolveCronJobsStorePath,
-} from "../cron/store.js";
 import { defaultRuntime, writeRuntimeJson, type RuntimeEnv } from "../runtime.js";
 import type {
   ClawsAddOptions,
@@ -38,6 +34,7 @@ import type {
   ClawsRemoveOptions,
   ClawsStatusOptions,
 } from "./claws-cli.js";
+import { callGatewayFromCli } from "./gateway-rpc.js";
 
 type DiagnosticLike = { level: string; code: string; path: string; message: string };
 
@@ -170,9 +167,6 @@ export async function runClawsAddCommand(
 
   const config = loadConfig();
   const existingAgents = config.agents?.list ?? [];
-  const cronStore = await loadCronJobsStoreWithConfigJobsReadOnly(
-    resolveCronJobsStorePath(config.cron?.store),
-  );
   const plan = await buildClawAddPlan({
     manifest: result.manifest,
     source: result.source,
@@ -185,7 +179,6 @@ export async function runClawsAddCommand(
         agent.workspace ? [agent.workspace] : [],
       ),
       existingMcpServerNames: Object.keys(config.mcp?.servers ?? {}),
-      existingCronJobIds: cronStore.store.jobs.map((job) => job.id),
     },
   });
 
@@ -214,7 +207,11 @@ export async function runClawsAddCommand(
 
   let addResult;
   try {
-    addResult = await applyClawAddPlan(plan);
+    addResult = await applyClawAddPlan(plan, {
+      cronGateway: {
+        add: async (input) => await callGatewayFromCli("cron.add", {}, input),
+      },
+    });
   } catch (error) {
     const code = error instanceof ClawAddMutationError ? error.code : "add_failed";
     const message = (error as Error).message;
@@ -262,7 +259,7 @@ export async function runClawsStatusCommand(
         `${record.install.agentId}: ${record.install.claw.name}@${record.install.claw.version} (${record.install.status})`,
       );
       runtime.log(
-        `  Agent: ${record.agentState}; files: ${record.workspaceFiles.length}; packages: ${record.packages.length}`,
+        `  Agent: ${record.agentState}; files: ${record.workspaceFiles.length}; packages: ${record.packages.length}; cron: ${record.cronJobs.length}`,
       );
     }
   }
@@ -297,7 +294,11 @@ export async function runClawsRemoveCommand(
     return;
   }
   try {
-    const result = await applyClawRemovePlan(plan);
+    const result = await applyClawRemovePlan(plan, {
+      cronGateway: {
+        remove: async (id) => await callGatewayFromCli("cron.remove", {}, { id }),
+      },
+    });
     if (opts.json) {
       writeRuntimeJson(runtime, result);
     } else {
