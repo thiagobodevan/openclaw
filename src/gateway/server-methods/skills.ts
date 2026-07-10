@@ -119,12 +119,15 @@ function buildExplicitClawHubVerdictTargets(
   items: readonly ExplicitClawHubVerdictItem[],
 ): ClawHubVerdictTarget[] {
   const registry = resolveClawHubBaseUrl();
-  return items.map((item) => ({
-    registry,
-    slug: item.slug,
-    version: item.version,
-    ...(item.ownerHandle ? { ownerHandle: item.ownerHandle } : {}),
-  }));
+  return items.map((item) => {
+    const ownerHandle = item.ownerHandle?.trim();
+    return {
+      registry,
+      slug: item.slug,
+      version: item.version,
+      ...(ownerHandle ? { ownerHandle } : {}),
+    };
+  });
 }
 
 async function respondWithClawHubVerdictTargets(

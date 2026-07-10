@@ -252,6 +252,33 @@ describe("skills gateway handlers (clawhub)", () => {
     });
   });
 
+  it("normalizes explicit ClawHub verdict owner handles before requesting audits", async () => {
+    fetchClawHubSkillSecurityVerdictsMock.mockResolvedValue({
+      schema: "clawhub.skill.security-verdicts.v1",
+      items: [],
+    });
+
+    const { ok, error } = await callSkillsHandler("skills.securityVerdicts", {
+      items: [
+        { slug: "calendar", version: "2.0.0", ownerHandle: " openclaw " },
+        { slug: "terminal", version: "1.0.0", ownerHandle: "   " },
+      ],
+    });
+
+    expect(ok).toBe(true);
+    expect(error).toBeUndefined();
+    expect(resolveAgentWorkspaceDirMock).not.toHaveBeenCalled();
+    expect(buildWorkspaceSkillStatusMock).not.toHaveBeenCalled();
+    expect(fetchClawHubSkillSecurityVerdictsMock).toHaveBeenCalledWith({
+      baseUrl: "https://clawhub.ai",
+      items: [
+        { slug: "calendar", version: "2.0.0", ownerHandle: "openclaw" },
+        { slug: "terminal", version: "1.0.0" },
+      ],
+      skipAuth: true,
+    });
+  });
+
   it("treats an explicit empty ClawHub verdict batch as a no-op without scanning skills", async () => {
     const { ok, response, error } = await callSkillsHandler("skills.securityVerdicts", {
       items: [],
