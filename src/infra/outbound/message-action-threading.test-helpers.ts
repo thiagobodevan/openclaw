@@ -60,9 +60,6 @@ export function createOutboundThreadingMock() {
       const explicitReplyTo =
         typeof actionParams.replyTo === "string" ? actionParams.replyTo.trim() : "";
       if (explicitReplyTo) {
-        if (context.toolContext?.replyToMode === "first" && context.toolContext.hasRepliedRef) {
-          context.toolContext.hasRepliedRef.value = true;
-        }
         return explicitReplyTo;
       }
 
@@ -101,9 +98,6 @@ export function createOutboundThreadingMock() {
         const hasRepliedRef = context.toolContext?.hasRepliedRef;
         if (hasRepliedRef?.value) {
           return undefined;
-        }
-        if (hasRepliedRef) {
-          hasRepliedRef.value = true;
         }
       }
 

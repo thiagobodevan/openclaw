@@ -245,14 +245,6 @@ vi.mock("./current-turn-images.js", () => ({
 }));
 
 vi.mock("./agent-runner-utils.js", () => ({
-  buildThreadingToolContext: ({
-    sessionCtx,
-  }: {
-    sessionCtx: { CurrentMessageId?: string; MessageSid?: string; ReplyToMode?: string };
-  }) => ({
-    currentMessageId: sessionCtx.CurrentMessageId ?? sessionCtx.MessageSid,
-    replyToMode: sessionCtx.ReplyToMode,
-  }),
   buildEmbeddedRunExecutionParams: (params: {
     provider: string;
     model: string;
@@ -1687,11 +1679,6 @@ describe("runAgentTurnWithFallback", () => {
     const result = await runAgentTurnWithFallback(
       createMinimalRunAgentTurnParams({
         followupRun,
-        sessionCtx: {
-          Provider: "signal",
-          CurrentMessageId: "reply-message-1",
-          ReplyToMode: "first",
-        },
         typingSignals,
       }),
     );
@@ -1702,8 +1689,6 @@ describe("runAgentTurnWithFallback", () => {
       provider: "codex-cli",
       model: "gpt-5.4",
       clientCaps: ["tool-events", "inline-widgets"],
-      currentMessageId: "reply-message-1",
-      replyToMode: "first",
     });
   });
 

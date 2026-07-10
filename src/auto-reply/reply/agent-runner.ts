@@ -1388,11 +1388,22 @@ export async function runReplyAgent(params: {
     sessionCtx.ChatType,
   );
   const replyState = opts?.hasRepliedRef ?? { value: false };
-  const applyReplyToMode = createReplyToModeFilterForChannel(
-    replyToMode,
-    replyToChannel,
-    replyState,
-  );
+  const applyReplyToMode = (payload: ReplyPayload) => payload;
+  const onBlockReply = opts?.onBlockReply;
+  const deliverBlockReply: GetReplyOptions["onBlockReply"] = onBlockReply
+    ? async (payload, context) => {
+        const deliveryState = { value: replyState.value };
+        const filter = createReplyToModeFilterForChannel(
+          replyToMode,
+          replyToChannel,
+          deliveryState,
+        );
+        await onBlockReply(filter(payload), context);
+        if (!context?.abortSignal?.aborted) {
+          replyState.value = deliveryState.value;
+        }
+      }
+    : undefined;
   const cfg = followupRun.run.config;
   const replyMediaContext = createReplyMediaContext({
     cfg,
@@ -1412,23 +1423,22 @@ export async function runReplyAgent(params: {
     sessionCtx.CurrentMessageId ?? sessionCtx.MessageSidFull ?? sessionCtx.MessageSid;
   const sendDirectCompactionNotice = shouldNotifyUserAboutCompaction(cfg)
     ? async (phase: CompactionNoticePhase) => {
-        if (!opts?.onBlockReply) {
+        if (!deliverBlockReply) {
           return;
         }
         const noticePayload = createCompactionNoticePayload({
           phase,
           currentMessageId: compactionNoticeMessageId,
-          applyReplyToMode,
         });
         try {
-          await opts.onBlockReply(noticePayload);
+          await deliverBlockReply(noticePayload);
         } catch (err) {
           logVerbose(`context maintenance notice delivery failed: ${String(err)}`);
         }
       }
     : undefined;
   const blockReplyCoalescing =
-    blockStreamingEnabled && opts?.onBlockReply
+    blockStreamingEnabled && deliverBlockReply
       ? resolveEffectiveBlockStreamingConfig({
           cfg,
           provider: sessionCtx.Provider,
@@ -1437,9 +1447,9 @@ export async function runReplyAgent(params: {
         }).coalescing
       : undefined;
   const blockReplyPipeline =
-    blockStreamingEnabled && opts?.onBlockReply
+    blockStreamingEnabled && deliverBlockReply
       ? createBlockReplyPipeline({
-          onBlockReply: opts.onBlockReply,
+          onBlockReply: deliverBlockReply,
           timeoutMs: blockReplyTimeoutMs,
           coalescing: blockReplyCoalescing,
           buffer: createAudioAsVoiceBuffer({ isAudioPayload }),
@@ -1644,7 +1654,7 @@ export async function runReplyAgent(params: {
         followupRun,
         promptForEstimate: followupRun.prompt,
         sessionCtx,
-        opts: { ...opts, hasRepliedRef: replyState },
+        opts: { ...opts, onBlockReply: deliverBlockReply, hasRepliedRef: replyState },
         defaultModel,
         agentCfgContextTokens,
         resolvedVerboseLevel,
@@ -1742,7 +1752,7 @@ export async function runReplyAgent(params: {
         sessionCtx,
         replyThreading: replyThreadingOverride ?? sessionCtx.ReplyThreading,
         replyOperation,
-        opts: { ...opts, hasRepliedRef: replyState },
+        opts: { ...opts, onBlockReply: deliverBlockReply, hasRepliedRef: replyState },
         typingSignals,
         blockReplyPipeline,
         blockStreamingEnabled,

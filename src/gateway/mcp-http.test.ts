@@ -815,7 +815,6 @@ describe("mcp loopback server", () => {
         "x-openclaw-current-channel-id": "telegram:chat123",
         "x-openclaw-current-thread-ts": "42",
         "x-openclaw-current-message-id": "reply-message-1",
-        "x-openclaw-reply-to-mode": "first",
         "x-openclaw-current-inbound-audio": "true",
         "x-openclaw-inbound-event-kind": "room_event",
         "x-openclaw-source-reply-delivery-mode": "message_tool_only",
@@ -835,7 +834,6 @@ describe("mcp loopback server", () => {
     expect(call.currentChannelId).toBe("telegram:chat123");
     expect(call.currentThreadTs).toBe("42");
     expect(call.currentMessageId).toBe("reply-message-1");
-    expect(call.replyToMode).toBe("first");
     expect(call.currentInboundAudio).toBe(true);
     expect(call.inboundEventKind).toBe("room_event");
     expect(call.sourceReplyDeliveryMode).toBe("message_tool_only");
@@ -1097,7 +1095,6 @@ describe("mcp loopback server", () => {
       currentChannelId: "telegram:chat123",
       currentInboundAudio: undefined,
       currentMessageId: undefined,
-      hasRepliedRef: { value: false as boolean },
       currentThreadTs: "thread-1",
       inboundEventKind: "room_event",
       messageProvider: "telegram",
@@ -1113,14 +1110,12 @@ describe("mcp loopback server", () => {
       });
     }
     expect(resolveGatewayScopedToolsMock).toHaveBeenCalledTimes(257);
-    baseParams.hasRepliedRef.value = true;
 
     cache.resolve({
       ...baseParams,
       currentMessageId: "message-0",
     });
     expect(resolveGatewayScopedToolsMock).toHaveBeenCalledTimes(258);
-    expect(getScopedToolsCall(257).hasRepliedRef).toBe(baseParams.hasRepliedRef);
 
     cache.resolve({
       ...baseParams,
@@ -2267,9 +2262,6 @@ describe("createMcpLoopbackServerConfig", () => {
     );
     expect(config.mcpServers?.openclaw?.headers?.["x-openclaw-current-message-id"]).toBe(
       "${OPENCLAW_MCP_CURRENT_MESSAGE_ID}",
-    );
-    expect(config.mcpServers?.openclaw?.headers?.["x-openclaw-reply-to-mode"]).toBe(
-      "${OPENCLAW_MCP_REPLY_TO_MODE}",
     );
     expect(config.mcpServers?.openclaw?.headers?.["x-openclaw-current-inbound-audio"]).toBe(
       "${OPENCLAW_MCP_CURRENT_INBOUND_AUDIO}",

@@ -2028,9 +2028,10 @@ describe("runMessageAction plugin dispatch", () => {
           },
         ],
       };
-      mocks.executeSendAction.mockResolvedValueOnce({
+      mocks.executeSendAction.mockResolvedValue({
         handledBy: "core",
         payload: { ok: true },
+        sendResult: { deliveryStatus: "suppressed" },
       });
       setActivePluginRegistry(
         createTestRegistry([
@@ -2052,7 +2053,7 @@ describe("runMessageAction plugin dispatch", () => {
         ]),
       );
 
-      const result = await runMessageAction({
+      const input = {
         cfg: {
           channels: {
             cardchat: {
@@ -2079,14 +2080,20 @@ describe("runMessageAction plugin dispatch", () => {
           mode: "cli",
         },
         dryRun: false,
-      });
+      } satisfies Parameters<typeof runMessageAction>[0];
+      const [result] = await Promise.all([
+        runMessageAction(input),
+        runMessageAction({ ...input, params: { ...input.params, message: "Follow-up" } }),
+      ]);
 
       expect(result.kind).toBe("send");
       expect(result.handledBy).toBe("core");
-      expect(replyState.value).toBe(true);
+      expect(replyState.value).toBe(false);
       expect(handleAction).not.toHaveBeenCalled();
       expect(mocks.callGatewayLeastPrivilege).not.toHaveBeenCalled();
       const executeCall = readMockCallArg(mocks.executeSendAction, "execute send call");
+      const secondExecuteCall = readMockCallArg(mocks.executeSendAction, "second send call", 1);
+      expect(secondExecuteCall.replyToId).toBeUndefined();
       expectRecordFields(
         executeCall,
         {
@@ -2102,6 +2109,11 @@ describe("runMessageAction plugin dispatch", () => {
         { text: "Deployment trend", presentation },
         "execute send payload",
       );
+      mocks.executeSendAction.mockRejectedValueOnce(
+        Object.assign(new Error("partial"), { sentBeforeError: true }),
+      );
+      await expect(runMessageAction(input)).rejects.toThrow("partial");
+      expect(replyState.value).toBe(true);
     });
 
     it("keeps non-presentation sends on plugin-owned handling", async () => {

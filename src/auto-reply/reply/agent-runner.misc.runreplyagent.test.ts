@@ -1143,6 +1143,7 @@ describe("runReplyAgent block streaming", () => {
         sessionFile: "/tmp/session.jsonl",
         workspaceDir: "/tmp",
         config: {
+          channels: { discord: { replyToMode: "first" } },
           agents: {
             defaults: {
               blockStreamingCoalesce: {
@@ -1201,6 +1202,7 @@ describe("runReplyAgent block streaming", () => {
 
     expect(sawAbort).toBe(true);
     expectReplyText(result, "Final message");
+    expect(result).toMatchObject({ replyToId: "msg" });
   });
 });
 

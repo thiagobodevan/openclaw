@@ -118,6 +118,14 @@ export type MessageActionRunnerGateway = {
 const loadMessageActionGatewayRuntime = createLazyRuntimeModule(
   () => import("./message.gateway.runtime.js"),
 );
+const implicitReplyReservations = new WeakSet<{ value: boolean }>();
+
+function finishImplicitReply(ref: { value: boolean } | undefined, delivered: boolean): void {
+  if (ref) {
+    implicitReplyReservations.delete(ref);
+    ref.value = delivered;
+  }
+}
 
 export type RunMessageActionParams = {
   cfg: OpenClawConfig;
@@ -1163,20 +1171,8 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     resolveOutboundSessionRoute,
     ensureOutboundSessionEntry,
   });
-  const resolvedReplyToId = readStringParam(params, "replyTo");
-  const commitImplicitReply = () => {
-    if (
-      !dryRun &&
-      !replyToIsExplicit &&
-      resolvedReplyToId &&
-      input.toolContext?.replyToMode === "first"
-    ) {
-      const hasRepliedRef = input.toolContext.hasRepliedRef;
-      if (hasRepliedRef) {
-        hasRepliedRef.value = true;
-      }
-    }
-  };
+  let resolvedReplyToId = readStringParam(params, "replyTo");
+  const hasRepliedRef = input.toolContext?.hasRepliedRef;
   throwIfAborted(abortSignal);
 
   const ttsPayload = await maybeApplyTtsToMessageActionSendPayload({
@@ -1208,6 +1204,22 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     requesterSenderUsername: input.requesterSenderUsername,
     requesterSenderE164: input.requesterSenderE164,
   });
+  const replyReservationCandidate =
+    !dryRun && !replyToIsExplicit && resolvedReplyToId && input.toolContext?.replyToMode === "first"
+      ? hasRepliedRef
+      : undefined;
+  const replyReservation =
+    replyReservationCandidate &&
+    !replyReservationCandidate.value &&
+    !implicitReplyReservations.has(replyReservationCandidate)
+      ? replyReservationCandidate
+      : undefined;
+  if (replyReservation) {
+    implicitReplyReservations.add(replyReservation);
+  } else if (replyReservationCandidate) {
+    delete params.replyTo;
+    resolvedReplyToId = undefined;
+  }
 
   // Gateway action ownership wins even when this process has a render-capable
   // outbound adapter; credentials and account selection may exist only remotely.
@@ -1230,9 +1242,15 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
       payload,
       dryRun,
     }),
+  }).catch((error: unknown) => {
+    finishImplicitReply(
+      replyReservation,
+      (error as { sentBeforeError?: boolean }).sentBeforeError === true,
+    );
+    throw error;
   });
   if (gatewayPluginAction) {
-    commitImplicitReply();
+    finishImplicitReply(replyReservation, true);
     return gatewayPluginAction;
   }
 
@@ -1303,8 +1321,18 @@ async function handleSendAction(ctx: ResolvedActionContext): Promise<MessageActi
     replyToIdSource: resolvedReplyToId ? (replyToIsExplicit ? "explicit" : "implicit") : undefined,
     replyToMode: replyToIsExplicit ? undefined : input.toolContext?.replyToMode,
     threadId: resolvedThreadId ?? undefined,
+  }).catch((error: unknown) => {
+    finishImplicitReply(
+      replyReservation,
+      (error as { sentBeforeError?: boolean }).sentBeforeError === true,
+    );
+    throw error;
   });
-  commitImplicitReply();
+  const deliveryStatus = send.sendResult?.deliveryStatus;
+  finishImplicitReply(
+    replyReservation,
+    deliveryStatus !== "suppressed" && deliveryStatus !== "failed",
+  );
 
   return {
     kind: "send",
