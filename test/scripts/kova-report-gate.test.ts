@@ -12,7 +12,7 @@ const SCRIPT_PATH = "scripts/lib/kova-report-gate.mjs";
 function partialReport(overrides: Record<string, unknown> = {}) {
   return {
     baseline: { comparison: { regressionCount: 0 } },
-    gate: { verdict: "PARTIAL", blockingCount: 0 },
+    gate: { verdict: "PARTIAL", blockingCount: 0, baseline: { regressionCount: 0 } },
     performance: {
       groups: [
         {
@@ -85,9 +85,42 @@ describe("scripts/lib/kova-report-gate.mjs", () => {
       evaluateToleratedPartialKovaReport(
         partialReport({
           baseline: {},
+          gate: { verdict: "PARTIAL", blockingCount: 0, baseline: {} },
         }),
       ),
     ).toEqual({ ok: false, reason: "missing baseline regression count" });
+  });
+
+  it("accepts partial reports without a baseline comparison", () => {
+    expect(
+      evaluateToleratedPartialKovaReport(
+        partialReport({
+          baseline: null,
+          gate: { verdict: "PARTIAL", blockingCount: 0, baseline: null },
+        }),
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects partial reports that omit baseline metadata", () => {
+    const report = partialReport();
+    delete report.baseline;
+    delete report.gate.baseline;
+
+    expect(evaluateToleratedPartialKovaReport(report)).toEqual({
+      ok: false,
+      reason: "missing baseline metadata",
+    });
+  });
+
+  it("rejects partial reports with one-sided baseline metadata", () => {
+    expect(
+      evaluateToleratedPartialKovaReport(
+        partialReport({
+          baseline: null,
+        }),
+      ),
+    ).toEqual({ ok: false, reason: "baseline evidence was one-sided" });
   });
 
   it("rejects partial reports with malformed zero-like baseline regression counts", () => {
@@ -95,6 +128,7 @@ describe("scripts/lib/kova-report-gate.mjs", () => {
       evaluateToleratedPartialKovaReport(
         partialReport({
           baseline: { comparison: { regressionCount: null } },
+          gate: { verdict: "PARTIAL", blockingCount: 0, baseline: {} },
         }),
       ),
     ).toEqual({ ok: false, reason: "missing baseline regression count" });

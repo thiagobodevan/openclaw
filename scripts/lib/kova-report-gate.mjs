@@ -36,17 +36,30 @@ export function evaluateToleratedPartialKovaReport(report) {
     return { ok: false, reason: `blocking count was ${JSON.stringify(gate.blockingCount)}` };
   }
 
-  const baselineRegressionCount = numericCount(
-    report?.baseline?.comparison?.regressionCount ?? report?.gate?.baseline?.regressionCount,
-  );
-  if (baselineRegressionCount === undefined) {
-    return { ok: false, reason: "missing baseline regression count" };
+  const hasReportBaseline = Object.hasOwn(report, "baseline");
+  const hasGateBaseline = Object.hasOwn(gate, "baseline");
+  if (!hasReportBaseline || !hasGateBaseline) {
+    return { ok: false, reason: "missing baseline metadata" };
   }
-  if (baselineRegressionCount !== 0) {
-    return {
-      ok: false,
-      reason: `baseline regression count was ${JSON.stringify(baselineRegressionCount)}`,
-    };
+
+  const reportBaseline = report.baseline;
+  const gateBaseline = gate.baseline;
+  const hasNoBaseline = reportBaseline === null && gateBaseline === null;
+  if (!hasNoBaseline) {
+    if (reportBaseline === null || gateBaseline === null) {
+      return { ok: false, reason: "baseline evidence was one-sided" };
+    }
+    const reportBaselineRegressionCount = numericCount(reportBaseline?.comparison?.regressionCount);
+    const gateBaselineRegressionCount = numericCount(gateBaseline?.regressionCount);
+    if (reportBaselineRegressionCount === undefined || gateBaselineRegressionCount === undefined) {
+      return { ok: false, reason: "missing baseline regression count" };
+    }
+    if (reportBaselineRegressionCount !== 0 || gateBaselineRegressionCount !== 0) {
+      return {
+        ok: false,
+        reason: `baseline regression count was ${JSON.stringify({ report: reportBaselineRegressionCount, gate: gateBaselineRegressionCount })}`,
+      };
+    }
   }
 
   const statuses = report?.summary?.statuses;
