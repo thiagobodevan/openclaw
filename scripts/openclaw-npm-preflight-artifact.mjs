@@ -2,12 +2,12 @@
 
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, parse, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   DEFAULT_MAX_ACTIONS_ARTIFACT_BYTES,
   DEFAULT_MAX_ACTIONS_ARTIFACT_EXPANDED_BYTES,
   readPublicationArtifactArchive,
 } from "./lib/actions-artifact-archive.mjs";
+import { runAsScript } from "./lib/ts-guard-utils.mjs";
 
 const WORKFLOW_NAME = "OpenClaw NPM Release";
 const WORKFLOW_PATH = ".github/workflows/openclaw-npm-release.yml";
@@ -287,9 +287,4 @@ async function main(argv = process.argv.slice(2), environment = process.env) {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
-}
+runAsScript(import.meta.url, main);
