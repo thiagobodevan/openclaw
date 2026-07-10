@@ -28,6 +28,8 @@ const {
   clearSignalApprovalReactionTargetsForTest,
   resolveSignalApprovalReactionTargetWithPersistence,
 } = await import("./approval-reactions.js");
+const { clearSignalReplyAuthorsForTest, resolveSignalReplyContextWithPersistence } =
+  await import("./reply-authors.js");
 const { sendMessageSignal } = await import("./send.js");
 
 const SIGNAL_TEST_CFG = {
@@ -44,8 +46,9 @@ const SIGNAL_TEST_CFG = {
 };
 
 describe("sendMessageSignal receipts", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     clearSignalApprovalReactionTargetsForTest();
+    await clearSignalReplyAuthorsForTest();
     signalRpcRequestMock.mockReset();
     resolveOutboundAttachmentFromUrlMock.mockClear();
   });
@@ -61,6 +64,13 @@ describe("sendMessageSignal receipts", () => {
     expect(result.timestamp).toBe(1234567890);
     expect(result.receipt.primaryPlatformMessageId).toBe("1234567890");
     expect(result.receipt.platformMessageIds).toEqual(["1234567890"]);
+    await expect(
+      resolveSignalReplyContextWithPersistence({
+        accountId: "default",
+        to: "+15551234567",
+        replyToId: "1234567890",
+      }),
+    ).resolves.toEqual({ author: "+15550001111", body: "hello" });
     expect(result.receipt.raw).toEqual([
       {
         channel: "signal",

@@ -5,10 +5,10 @@ import {
   verifyChannelMessageAdapterCapabilityProofs,
 } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import {
   createPluginRuntimeMock,
   createPluginSetupWizardStatus,
-  type PluginRuntime,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { describe, expect, it, vi } from "vitest";
@@ -29,7 +29,7 @@ import {
 import { probeSignal } from "./probe.js";
 import {
   clearSignalReplyAuthorsForTest,
-  registerSignalReplyAuthorForInboundMessage,
+  registerSignalReplyContext,
   resolveSignalReplyContextWithPersistence,
 } from "./reply-authors.js";
 import { clearSignalRuntime, setSignalRuntime } from "./runtime.js";
@@ -1123,7 +1123,7 @@ describe("signal outbound", () => {
           expect(result?.receipt.platformMessageIds).toEqual(["signal-media-1"]);
         },
         replyTo: async () => {
-          await registerSignalReplyAuthorForInboundMessage({
+          await registerSignalReplyContext({
             accountId: "default",
             to: "signal:group:group-1",
             replyToId: "1700000000006",
@@ -1191,7 +1191,7 @@ describe("signal outbound", () => {
       },
     } as OpenClawConfig;
 
-    await registerSignalReplyAuthorForInboundMessage({
+    await registerSignalReplyContext({
       accountId: "work",
       to: "signal:group:group-1",
       replyToId: "1700000000007",
@@ -1236,7 +1236,7 @@ describe("signal outbound", () => {
     );
 
     try {
-      await registerSignalReplyAuthorForInboundMessage({
+      await registerSignalReplyContext({
         accountId: "default",
         to: "signal:group:group-1",
         replyToId: "1700000000007",
@@ -1258,35 +1258,38 @@ describe("signal outbound", () => {
 
   it("keeps persisted edited reply context when an older replay arrives after restart", async () => {
     const persistedRecords = new Map<string, unknown>();
-    const openKeyedStore: PluginRuntime["state"]["openKeyedStore"] = <T>() => ({
-      register: async (key, value) => {
-        persistedRecords.set(key, value);
-      },
-      registerIfAbsent: async (key, value) => {
-        if (persistedRecords.has(key)) {
-          return false;
-        }
-        persistedRecords.set(key, value);
-        return true;
-      },
-      update: async (key, updateValue) => {
-        const next = updateValue(persistedRecords.get(key) as T | undefined);
-        if (next === undefined) {
-          return false;
-        }
-        persistedRecords.set(key, next);
-        return true;
-      },
-      lookup: async (key) => persistedRecords.get(key) as T | undefined,
-      consume: async (key) => {
-        const value = persistedRecords.get(key) as T | undefined;
-        persistedRecords.delete(key);
-        return value;
-      },
-      delete: async (key) => persistedRecords.delete(key),
-      entries: async () => [],
-      clear: async () => persistedRecords.clear(),
-    });
+    const openKeyedStore = <T>(): PluginStateKeyedStore<T> => {
+      const records = persistedRecords as Map<string, T>;
+      return {
+        register: async (key, value) => {
+          records.set(key, value);
+        },
+        registerIfAbsent: async (key, value) => {
+          if (records.has(key)) {
+            return false;
+          }
+          records.set(key, value);
+          return true;
+        },
+        update: async (key, updateValue) => {
+          const next = updateValue(records.get(key));
+          if (next === undefined) {
+            return false;
+          }
+          records.set(key, next);
+          return true;
+        },
+        lookup: async (key) => records.get(key),
+        consume: async (key) => {
+          const value = records.get(key);
+          records.delete(key);
+          return value;
+        },
+        delete: async (key) => records.delete(key),
+        entries: async () => [],
+        clear: async () => records.clear(),
+      };
+    };
     setSignalRuntime(createPluginRuntimeMock({ state: { openKeyedStore } }));
 
     try {
@@ -1305,7 +1308,7 @@ describe("signal outbound", () => {
         sourceTimestamp: 1_700_000_000_999,
         registeredAt: 1_700_000_000_999,
       });
-      await registerSignalReplyAuthorForInboundMessage({
+      await registerSignalReplyContext({
         ...shared,
         body: "original body",
         sourceTimestamp: 1_700_000_000_000,

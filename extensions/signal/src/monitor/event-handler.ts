@@ -76,7 +76,7 @@ import {
 } from "../identity.js";
 import { normalizeSignalMessagingTarget } from "../normalize.js";
 import { resolveSignalReactionLevel } from "../reaction-level.js";
-import { registerSignalReplyAuthorForInboundMessage } from "../reply-authors.js";
+import { registerSignalReplyContext } from "../reply-authors.js";
 import {
   removeReactionSignal,
   sendReactionSignal,
@@ -1133,7 +1133,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
             typeof envelope.timestamp === "number" ? String(envelope.timestamp) : undefined,
         },
       });
-      await registerSignalReplyAuthorForInboundMessage({
+      await registerSignalReplyContext({
         accountId: deps.accountId,
         to: signalTo,
         replyToId: messageId,
@@ -1142,7 +1142,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         sourceTimestamp: inboundTimestamp,
       });
       if (replyToId && replyToId !== messageId) {
-        await registerSignalReplyAuthorForInboundMessage({
+        await registerSignalReplyContext({
           accountId: deps.accountId,
           to: signalTo,
           replyToId,
@@ -1280,7 +1280,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     }
 
     const senderName = envelope.sourceName ?? senderDisplay;
-    await registerSignalReplyAuthorForInboundMessage({
+    await registerSignalReplyContext({
       accountId: deps.accountId,
       to: signalTo,
       replyToId: messageId,
@@ -1289,7 +1289,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
       sourceTimestamp: inboundTimestamp,
     });
     if (replyToId && replyToId !== messageId) {
-      await registerSignalReplyAuthorForInboundMessage({
+      await registerSignalReplyContext({
         accountId: deps.accountId,
         to: signalTo,
         replyToId,

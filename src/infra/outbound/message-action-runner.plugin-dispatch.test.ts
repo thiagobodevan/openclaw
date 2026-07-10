@@ -2066,6 +2066,12 @@ describe("runMessageAction plugin dispatch", () => {
           message: "Deployment trend",
           presentation,
         },
+        toolContext: {
+          currentChannelProvider: "cardchat",
+          currentChannelId: "channel:test-card",
+          currentMessageId: "reply-1",
+          replyToMode: "first",
+        },
         gateway: {
           clientName: "cli",
           mode: "cli",
@@ -2078,7 +2084,11 @@ describe("runMessageAction plugin dispatch", () => {
       expect(handleAction).not.toHaveBeenCalled();
       expect(mocks.callGatewayLeastPrivilege).not.toHaveBeenCalled();
       const executeCall = readMockCallArg(mocks.executeSendAction, "execute send call");
-      expectRecordFields(executeCall, { message: "Deployment trend" }, "execute send call");
+      expectRecordFields(
+        executeCall,
+        { message: "Deployment trend", replyToId: "reply-1", replyToMode: "first" },
+        "execute send call",
+      );
       expectRecordFields(
         readRecordField(executeCall, "payload", "execute send payload"),
         { text: "Deployment trend", presentation },

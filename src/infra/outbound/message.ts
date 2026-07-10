@@ -7,6 +7,7 @@ import {
   serializeDurableMessagePayloadOutcomes,
   type SerializedDurableMessagePayloadOutcome,
 } from "../../channels/message/runtime.js";
+import type { ReplyToMode } from "../../config/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import type { PollInput } from "../../polls.js";
@@ -77,6 +78,7 @@ type MessageSendParams = {
   forceDocument?: boolean;
   accountId?: string;
   replyToId?: string;
+  replyToMode?: ReplyToMode;
   threadId?: string | number;
   dryRun?: boolean;
   bestEffort?: boolean;
@@ -407,6 +409,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       accountId: params.accountId,
       payloads: normalizedPayloads,
       replyToId: params.replyToId,
+      replyToMode: params.replyToMode,
       threadId: params.threadId,
       gifPlayback: params.gifPlayback,
       forceDocument: params.forceDocument,

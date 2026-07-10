@@ -999,6 +999,7 @@ describe("executeSendAction", () => {
       message: "hello",
       payload: { text: "hello", presentation },
       replyToId: "reply-1",
+      replyToMode: "first",
       threadId: "thread-1",
     });
 
@@ -1015,6 +1016,7 @@ describe("executeSendAction", () => {
       channel: "discord",
       queuePolicy: "best_effort",
       replyToId: "reply-1",
+      replyToMode: "first",
       threadId: "thread-1",
     });
     const [payload] = requireArray(sendArgs.payloads, "send payloads");

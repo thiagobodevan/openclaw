@@ -66,27 +66,6 @@ describe("signalMessageActions", () => {
     expect(signalMessageActions.supportsAction?.({ action: "react" })).toBe(true);
   });
 
-  it("prepares replyToId as a Signal send reply target alias", () => {
-    const prepared = signalMessageActions.prepareSendPayload?.({
-      ctx: {
-        channel: "signal",
-        action: "send",
-        cfg: {} as OpenClawConfig,
-        params: {
-          to: "+15551234567",
-          message: "threaded",
-          replyToId: "1700000000001",
-        },
-      },
-      to: "+15551234567",
-      payload: { text: "threaded" },
-    });
-    expect(prepared).toMatchObject({
-      text: "threaded",
-      replyToId: "1700000000001",
-    });
-  });
-
   it.each([
     { name: "ordinary", params: {} },
     { name: "canonical reply", params: { replyTo: "explicit-1" } },

@@ -106,7 +106,7 @@ function shouldReplaceReplyContext(
   return sourceTimestamp >= (current?.sourceTimestamp ?? 0);
 }
 
-export async function registerSignalReplyAuthorForInboundMessage(params: {
+export async function registerSignalReplyContext(params: {
   accountId?: string | null;
   to: string;
   replyToId?: string | null;

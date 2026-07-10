@@ -108,6 +108,7 @@ async function sendCoreMessage(params: {
   forceDocument?: boolean;
   bestEffort?: boolean;
   replyToId?: string;
+  replyToMode?: ChannelThreadingToolContext["replyToMode"];
   threadId?: string | number;
   queuePolicy: NonNullable<SendMessageParams["queuePolicy"]>;
   payloads?: SendMessageParams["payloads"];
@@ -133,6 +134,7 @@ async function sendCoreMessage(params: {
     channel: params.ctx.channel || undefined,
     accountId: params.ctx.accountId ?? undefined,
     replyToId: params.replyToId,
+    replyToMode: params.replyToMode,
     threadId: params.threadId,
     gifPlayback: params.gifPlayback,
     forceDocument: params.forceDocument,
@@ -274,6 +276,7 @@ export async function executeSendAction(params: {
   forceDocument?: boolean;
   bestEffort?: boolean;
   replyToId?: string;
+  replyToMode?: ChannelThreadingToolContext["replyToMode"];
   threadId?: string | number;
 }): Promise<{
   handledBy: "plugin" | "core";
