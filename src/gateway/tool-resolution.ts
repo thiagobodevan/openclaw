@@ -35,6 +35,7 @@ import type {
   TaskSuggestionDeliveryMode,
 } from "../auto-reply/get-reply-options.types.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
+import type { ReplyToMode } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
@@ -55,6 +56,7 @@ export function resolveGatewayScopedTools(params: {
   currentChannelId?: string;
   currentThreadTs?: string;
   currentMessageId?: string | number;
+  replyToMode?: ReplyToMode;
   currentInboundAudio?: boolean;
   clientCaps?: string[];
   accountId?: string;
@@ -194,6 +196,7 @@ export function resolveGatewayScopedTools(params: {
     currentChannelId: params.currentChannelId ?? params.agentTo,
     currentThreadTs: params.currentThreadTs ?? params.agentThreadId,
     currentMessageId: params.currentMessageId,
+    replyToMode: params.replyToMode,
     currentInboundAudio: params.currentInboundAudio,
     sessionId: params.sessionId,
     onYield: params.onYield,

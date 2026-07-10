@@ -595,6 +595,7 @@ export async function prepareCliRunContext(
             OPENCLAW_MCP_CURRENT_THREAD_TS: params.currentThreadTs ?? "",
             OPENCLAW_MCP_CURRENT_MESSAGE_ID:
               params.currentMessageId != null ? String(params.currentMessageId) : "",
+            OPENCLAW_MCP_REPLY_TO_MODE: params.replyToMode ?? "",
             OPENCLAW_MCP_CURRENT_INBOUND_AUDIO: params.currentInboundAudio === true ? "true" : "",
             OPENCLAW_MCP_INBOUND_EVENT_KIND: params.currentInboundEventKind ?? "",
             OPENCLAW_MCP_SOURCE_REPLY_DELIVERY_MODE: params.sourceReplyDeliveryMode ?? "",

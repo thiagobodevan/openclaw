@@ -428,13 +428,19 @@ describe("agent-runner-utils", () => {
     expect(context.currentMessageId).toBe("2284");
   });
 
-  it("uses OriginatingTo for threading tool context on discord native commands", () => {
+  it("resolves reply mode without a channel-specific tool context", () => {
+    hoisted.getChannelPluginMock.mockReturnValue({
+      threading: {
+        resolveReplyToMode: ({ accountId }: { accountId?: string | null }) =>
+          accountId === "work" ? "first" : "off",
+      },
+    });
     const context = buildThreadingToolContext({
       sessionCtx: {
-        Provider: "discord",
-        To: "slash:1177378744822943744",
-        OriginatingChannel: "discord",
-        OriginatingTo: "channel:123456789012345678",
+        Provider: "signal",
+        To: "+15551234567",
+        AccountId: "work",
+        ChatType: "direct",
         MessageSid: "msg-9",
         CurrentMessageId: "reply-msg-9",
       },
@@ -442,8 +448,9 @@ describe("agent-runner-utils", () => {
       hasRepliedRef: undefined,
     });
 
-    expect(context.currentChannelId).toBe("channel:123456789012345678");
+    expect(context.currentChannelId).toBe("+15551234567");
     expect(context.currentMessageId).toBe("reply-msg-9");
+    expect(context.replyToMode).toBe("first");
   });
 
   it("does not expose restart-sentinel synthetic ids as message-tool reply targets", () => {

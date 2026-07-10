@@ -36,6 +36,7 @@ export { resolveModelFallbackOptions } from "./agent-runner-run-params.js";
 import { hasInboundAudio } from "./inbound-media.js";
 import { resolveOriginMessageProvider, resolveOriginMessageTo } from "./origin-routing.js";
 import type { FollowupRun } from "./queue.js";
+import { resolveReplyToMode } from "./reply-threading.js";
 
 const BUN_FETCH_SOCKET_ERROR_RE = /socket connection was closed unexpectedly/i;
 type EmbeddedReplyRoute = Pick<
@@ -147,11 +148,20 @@ export function buildThreadingToolContext(params: {
   const provider = normalizeChannelId(rawProvider) ?? normalizeAnyChannelId(rawProvider);
   // Fallback for unrecognized/plugin channels (e.g., iMessage before plugin registry init)
   const threading = provider ? getChannelPlugin(provider)?.threading : undefined;
+  const replyToMode =
+    sessionCtx.ReplyToMode ??
+    resolveReplyToMode(
+      config,
+      provider ?? (rawProvider as ChannelId),
+      sessionCtx.AccountId,
+      sessionCtx.ChatType,
+    );
   if (!threading?.buildToolContext) {
     return {
       currentChannelId: normalizeOptionalString(originTo),
       currentChannelProvider: provider ?? (rawProvider as ChannelId),
       currentMessageId,
+      replyToMode,
       hasRepliedRef,
     };
   }
@@ -176,12 +186,14 @@ export function buildThreadingToolContext(params: {
       hasRepliedRef,
     }) ?? {};
   const hasAdapterCurrentMessageId = Object.hasOwn(context, "currentMessageId");
+  const hasAdapterReplyToMode = Object.hasOwn(context, "replyToMode");
   return {
     ...context,
     currentChannelProvider: provider!, // guaranteed non-null since threading exists
     // Some providers expose only thread resources as reply targets; explicit
     // `undefined` means the adapter rejected the generic message-id fallback.
     currentMessageId: hasAdapterCurrentMessageId ? context.currentMessageId : currentMessageId,
+    replyToMode: hasAdapterReplyToMode ? context.replyToMode : replyToMode,
   };
 }
 

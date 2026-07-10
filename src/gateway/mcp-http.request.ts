@@ -8,6 +8,7 @@ import type {
 } from "../auto-reply/get-reply-options.types.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
+import type { ReplyToMode } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
@@ -60,6 +61,7 @@ type McpRequestContext = {
   currentChannelId: string | undefined;
   currentThreadTs: string | undefined;
   currentMessageId: string | undefined;
+  replyToMode: ReplyToMode | undefined;
   currentInboundAudio: boolean | undefined;
   accountId: string | undefined;
   inboundEventKind: InboundEventKind | undefined;
@@ -95,6 +97,13 @@ function normalizeMcpTaskSuggestionDeliveryMode(
 function normalizeMcpBooleanHeader(value: string | undefined): boolean | undefined {
   const trimmed = normalizeOptionalString(value);
   return trimmed ? isTruthyEnvValue(trimmed) : undefined;
+}
+
+function normalizeMcpReplyToMode(value: string | undefined): ReplyToMode | undefined {
+  const mode = normalizeOptionalString(value);
+  return mode === "off" || mode === "first" || mode === "all" || mode === "batched"
+    ? mode
+    : undefined;
 }
 
 function rejectsBrowserLoopbackRequest(req: IncomingMessage): boolean {
@@ -394,6 +403,7 @@ export function resolveMcpRequestContext(
       currentChannelId: undefined,
       currentThreadTs: undefined,
       currentMessageId: undefined,
+      replyToMode: undefined,
       currentInboundAudio: undefined,
       accountId: undefined,
       inboundEventKind: undefined,
@@ -414,6 +424,7 @@ export function resolveMcpRequestContext(
     currentChannelId: normalizeOptionalString(getHeader(req, "x-openclaw-current-channel-id")),
     currentThreadTs: normalizeOptionalString(getHeader(req, "x-openclaw-current-thread-ts")),
     currentMessageId: normalizeOptionalString(getHeader(req, "x-openclaw-current-message-id")),
+    replyToMode: normalizeMcpReplyToMode(getHeader(req, "x-openclaw-reply-to-mode")),
     currentInboundAudio: normalizeMcpBooleanHeader(
       getHeader(req, "x-openclaw-current-inbound-audio"),
     ),

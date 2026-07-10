@@ -129,6 +129,7 @@ import {
 } from "./agent-runner-failure-copy.js";
 import {
   buildEmbeddedRunExecutionParams,
+  buildThreadingToolContext,
   resolveQueuedReplyRuntimeConfig,
   resolveModelFallbackOptions,
   resolveRunFastModeForFallbackCandidate,
@@ -2024,12 +2025,11 @@ async function runAgentTurnWithFallbackInternal(
               });
               const cliCurrentThreadId =
                 params.followupRun.originatingThreadId ?? params.sessionCtx.MessageThreadId;
-              const isRestartSentinelContinuation =
-                params.sessionCtx.InputProvenance?.kind === "internal_system" &&
-                params.sessionCtx.InputProvenance.sourceTool === "restart-sentinel";
-              const cliCurrentMessageId = isRestartSentinelContinuation
-                ? params.sessionCtx.ReplyToId
-                : currentMessageId;
+              const cliThreadingContext = buildThreadingToolContext({
+                sessionCtx: params.sessionCtx,
+                config: runtimeConfig,
+                hasRepliedRef: params.opts?.hasRepliedRef,
+              });
               const cliToolSummaryTracker = createCliToolSummaryTracker({
                 detailMode: params.toolProgressDetail,
                 shouldEmitToolResult: params.shouldEmitToolResult,
@@ -2166,7 +2166,8 @@ async function runAgentTurnWithFallbackInternal(
                     channelContext: params.followupRun.run.channelContext,
                     currentThreadTs:
                       cliCurrentThreadId != null ? String(cliCurrentThreadId) : undefined,
-                    currentMessageId: cliCurrentMessageId,
+                    currentMessageId: cliThreadingContext.currentMessageId,
+                    replyToMode: cliThreadingContext.replyToMode,
                     currentInboundAudio: hasInboundAudio(params.sessionCtx),
                     agentAccountId: params.followupRun.run.agentAccountId,
                     senderIsOwner: params.followupRun.run.senderIsOwner,
