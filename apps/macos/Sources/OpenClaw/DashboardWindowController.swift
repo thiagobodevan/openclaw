@@ -490,13 +490,21 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
     }
 
     private static func installNativeChromeScript(into userContentController: WKUserContentController) {
-        // Desktop widths need no rules here: the Control UI's own
-        // `html.openclaw-native-macos` styles inset the topbar past the
-        // traffic lights and keep the brand strip passive under the drag
-        // regions installed in makeWindow (layout.css).
+        // The current Control UI owns its desktop topbar inset. Older remote
+        // Gateways still serve desktop navigation inside the sidebar, so the
+        // app must keep those legacy controls below its native drag regions.
         let css = """
         html.openclaw-native-macos {
           --openclaw-native-titlebar-height: 50px;
+        }
+        @media (min-width: 1101px) {
+          /* Pre-topbar Gateways render desktop controls in these legacy
+             containers. Current desktop UI uses .sidebar-panel and
+             .settings-sidebar__head, so this cannot double-pad its chrome. */
+          html.openclaw-native-macos .shell-nav .sidebar-shell,
+          html.openclaw-native-macos .shell-nav .settings-sidebar__header {
+            padding-top: max(14px, var(--openclaw-native-titlebar-height)) !important;
+          }
         }
         @media (max-width: 1100px) {
           /* The drawer topbar replaces the desktop bar below this breakpoint.
