@@ -726,7 +726,7 @@ describe("crabline transport", () => {
           senderName: "Alice",
           text: "Provision Matrix room.",
         });
-        transport.state.reset();
+        await transport.state.reset();
         const delivery = transport.buildAgentDelivery({ target: `group:${roomId}` });
         const providerRoomId = delivery.to.replace(/^room:/u, "");
         const manifest = JSON.parse(

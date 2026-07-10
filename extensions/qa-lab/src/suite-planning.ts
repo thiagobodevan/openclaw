@@ -124,15 +124,15 @@ function selectQaFlowSuiteScenarios(params: {
     const selectedScenarios = [...requestedScenarioIds].map(
       (scenarioId) => scenarioById.get(scenarioId)!,
     );
-    const nonFlowScenarios = selectedScenarios.filter(
+    const unsupportedScenarios = selectedScenarios.filter(
       (scenario) => scenario.execution.kind !== "flow",
     );
-    if (nonFlowScenarios.length > 0) {
-      const scenarioList = nonFlowScenarios
+    if (unsupportedScenarios.length > 0) {
+      const scenarioList = unsupportedScenarios
         .map((scenario) => `${scenario.id} (${scenario.execution.kind})`)
         .join(", ");
       throw new Error(
-        `flow execution requires execution.kind: flow; unsupported scenario(s): ${scenarioList}`,
+        `suite execution requires flow scenarios; unsupported scenario(s): ${scenarioList}`,
       );
     }
     const channelDriverMismatches = selectedScenarios.flatMap((scenario) => {
@@ -336,6 +336,7 @@ function shouldUseIsolatedQaSuiteScenarioWorkers(params: {
       params.scenarios.some(
         (scenario) =>
           isQaMergePatchObject(scenario.gatewayConfigPatch) ||
+          (scenario.execution.kind === "flow" && scenario.execution.providerMode !== undefined) ||
           (scenario.execution.kind === "flow" && scenario.execution.transportPolicy !== undefined),
       ))
   );
@@ -417,10 +418,12 @@ async function mapQaSuiteWithConcurrency<T, U>(
   opts?: {
     startStaggerMs?: number;
     sleepImpl?: (ms: number) => Promise<unknown>;
+    shouldStop?: (result: U, index: number) => boolean;
   },
 ) {
-  const results = Array.from<U>({ length: items.length });
+  const results = Array.from<U | undefined>({ length: items.length });
   let nextIndex = 0;
+  let stopped = false;
   let nextStartGate = Promise.resolve();
   const workerCount = Math.min(Math.max(1, Math.floor(concurrency)), items.length);
   const startStaggerMs = Math.max(0, Math.floor(opts?.startStaggerMs ?? 0));
@@ -453,15 +456,19 @@ async function mapQaSuiteWithConcurrency<T, U>(
     })();
   }
   const workers = Array.from({ length: workerCount }, async () => {
-    while (nextIndex < items.length) {
+    while (!stopped && nextIndex < items.length) {
       const index = nextIndex;
       nextIndex += 1;
       await waitForStartSlot(nextIndex < items.length);
-      results[index] = await mapper(items[index], index);
+      const result = await mapper(items[index], index);
+      results[index] = result;
+      if (opts?.shouldStop?.(result, index)) {
+        stopped = true;
+      }
     }
   });
   await Promise.all(workers);
-  return results;
+  return results.filter((result): result is U => result !== undefined);
 }
 
 async function resolveQaSuiteOutputDir(repoRoot: string, outputDir?: string) {

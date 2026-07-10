@@ -101,7 +101,6 @@ const allowedRuntimeMigrationPaths = [
 
 const allowedFixturePaths = new Set([
   "extensions/qa-lab/src/providers/shared/auth-store.ts",
-  "extensions/qa-matrix/src/runners/contract/scenario-runtime-e2ee-destructive.ts",
 ]);
 
 const allowedCurrentLegacyWriteViolations = [
