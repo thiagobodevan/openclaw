@@ -1,11 +1,15 @@
 {
-  "fallbackKeys": [],
-  "generatedAt": "2026-07-11T21:30:40.213Z",
+  "fallbackKeys": [
+    "chat.catalog.remoteViewOnly",
+    "chat.catalog.unsupportedViewOnly",
+    "chat.loadOlder"
+  ],
+  "generatedAt": "2026-07-11T18:17:41.337Z",
   "locale": "nl",
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "provider": "openai",
-  "sourceHash": "859d8f7d0d87a8dfe4542f6fb3fe05187f6176c1181a1ed87ce540a09cb358d7",
-  "totalKeys": 2219,
-  "translatedKeys": 2219,
+  "sourceHash": "4f36f3e113b43a03a3ab49041d13c782f2b1c85a20218c3b202a7f70c9557ccc",
+  "totalKeys": 2125,
+  "translatedKeys": 2122,
   "workflow": 1
 }
