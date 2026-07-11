@@ -579,7 +579,10 @@ function extendGraphWithCommitsAndParents(cwd, graph, commits) {
   }
 }
 
-function commitRangePathPatch(cwd, baseCommit, headCommit, path) {
+function commitRangePathsPatch(cwd, baseCommit, headCommit, paths) {
+  if (paths.length === 0) {
+    return undefined;
+  }
   const patch = git(cwd, [
     ...canonicalDiffArgs("diff"),
     "--binary",
@@ -588,7 +591,7 @@ function commitRangePathPatch(cwd, baseCommit, headCommit, path) {
     baseCommit,
     headCommit,
     "--",
-    path,
+    ...paths,
   ]);
   if (patch === "") {
     return undefined;
@@ -599,6 +602,10 @@ function commitRangePathPatch(cwd, baseCommit, headCommit, path) {
     patch,
     patchId: git(cwd, ["patch-id", "--stable"], { input: patch }).trim().split(/\s+/)[0],
   };
+}
+
+function commitRangePathPatch(cwd, baseCommit, headCommit, path) {
+  return commitRangePathsPatch(cwd, baseCommit, headCommit, [path]);
 }
 
 function commitPathPatch(cwd, graph, commit, path) {
@@ -961,18 +968,6 @@ function countLineSequence(lines, sequence) {
   return count;
 }
 
-function lineSequenceStart(lines, sequence) {
-  if (sequence.length === 0 || sequence.length > lines.length) {
-    return undefined;
-  }
-  for (let index = 0; index <= lines.length - sequence.length; index += 1) {
-    if (sequence.every((line, offset) => lines[index + offset] === line)) {
-      return index + 1;
-    }
-  }
-  return undefined;
-}
-
 function candidateHunkAnchorEvidence(
   cwd,
   graph,
@@ -1086,115 +1081,152 @@ function candidateHunkAnchorEvidence(
   };
 }
 
-function candidateSubsetHunkEvidence(
-  cwd,
-  graph,
-  sourceCandidate,
-  targetCommit,
-  witnessCommit,
-  path,
-) {
-  const targetRecord = graph.get(targetCommit);
-  const witnessRecord = graph.get(witnessCommit);
-  if (
-    !targetRecord ||
-    targetRecord.parents.length !== 1 ||
-    !witnessRecord ||
-    witnessRecord.parents.length !== 1
-  ) {
-    return undefined;
-  }
-  const sourcePatch = zeroContextPatch(cwd, sourceCandidate.parent, sourceCandidate.commit, [path]);
-  const sourceHunks = parseTextPatchHunks(sourcePatch);
-  if (
-    sourcePatch === "" ||
-    !sourceHunks ||
-    sourceHunks.some((hunk) => hunk.preimageLines.length === 0 || hunk.postimageLines.length === 0)
-  ) {
-    return undefined;
-  }
-  const snapshots = {
-    sourceCommit: readTextPathLines(cwd, sourceCandidate.commit, path),
-    sourceParent: readTextPathLines(cwd, sourceCandidate.parent, path),
-    targetCommit: readTextPathLines(cwd, targetCommit, path),
-    targetParent: readTextPathLines(cwd, targetRecord.parents[0], path),
-    witnessCommit: readTextPathLines(cwd, witnessCommit, path),
-    witnessParent: readTextPathLines(cwd, witnessRecord.parents[0], path),
+function replacementFingerprint(preimageLine, postimageLine) {
+  return {
+    newCount: 1,
+    oldCount: 1,
+    postimageSha256: createHash("sha256").update(`${postimageLine}\n`).digest("hex"),
+    preimageSha256: createHash("sha256").update(`${preimageLine}\n`).digest("hex"),
   };
-  if (Object.values(snapshots).some((lines) => !lines)) {
+}
+
+function orderedReplacementFingerprints(patch, { requireOnlyReplacements = false } = {}) {
+  if (patch === "") {
+    return [];
+  }
+  const hunks = parseTextPatchHunks(patch);
+  if (!hunks) {
     return undefined;
   }
-  const hunks = sourceHunks.map((hunk) => ({
-    newCount: hunk.newCount,
-    newStart: hunk.newStart,
-    oldCount: hunk.oldCount,
-    oldStart: hunk.oldStart,
-    postimageSha256: createHash("sha256")
-      .update(hunk.postimageLines.map((line) => `${line}\n`).join(""))
+  const fingerprints = [];
+  for (const hunk of hunks) {
+    const isReplacement = hunk.oldCount > 0 && hunk.oldCount === hunk.newCount;
+    if (!isReplacement) {
+      if (requireOnlyReplacements) {
+        return undefined;
+      }
+      continue;
+    }
+    for (let index = 0; index < hunk.oldCount; index += 1) {
+      fingerprints.push(
+        replacementFingerprint(hunk.preimageLines[index], hunk.postimageLines[index]),
+      );
+    }
+  }
+  return fingerprints;
+}
+
+function potentialReplacementFingerprints(patch) {
+  if (patch === "") {
+    return [];
+  }
+  const hunks = parseTextPatchHunks(patch);
+  if (!hunks) {
+    return undefined;
+  }
+  const fingerprints = [];
+  for (const hunk of hunks) {
+    if (hunk.oldCount === hunk.newCount) {
+      for (let index = 0; index < hunk.oldCount; index += 1) {
+        fingerprints.push(
+          replacementFingerprint(hunk.preimageLines[index], hunk.postimageLines[index]),
+        );
+      }
+      continue;
+    }
+    // Mixed insert/delete hunks do not expose a unique pairing. Treat every
+    // old/new combination as potential allocation so ownership fails closed.
+    for (const preimageLine of hunk.preimageLines) {
+      for (const postimageLine of hunk.postimageLines) {
+        fingerprints.push(replacementFingerprint(preimageLine, postimageLine));
+      }
+    }
+  }
+  return fingerprints;
+}
+
+function multisetCounts(values) {
+  const counts = new Map();
+  for (const value of values) {
+    const serialized = JSON.stringify(value);
+    counts.set(serialized, (counts.get(serialized) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function multisetContains(container, subset) {
+  const remaining = multisetCounts(container);
+  for (const value of subset) {
+    const serialized = JSON.stringify(value);
+    const count = remaining.get(serialized) ?? 0;
+    if (count === 0) {
+      return false;
+    }
+    remaining.set(serialized, count - 1);
+  }
+  return true;
+}
+
+function multisetIntersection(left, right) {
+  const remaining = multisetCounts(right);
+  const overlap = [];
+  for (const value of left) {
+    const serialized = JSON.stringify(value);
+    const count = remaining.get(serialized) ?? 0;
+    if (count === 0) {
+      continue;
+    }
+    overlap.push(value);
+    remaining.set(serialized, count - 1);
+  }
+  return overlap;
+}
+
+function multisetSummary(values) {
+  const records = [...multisetCounts(values).entries()]
+    .map(([serialized, count]) => ({
+      count,
+      fingerprint: JSON.parse(serialized),
+    }))
+    .toSorted((left, right) =>
+      JSON.stringify(left.fingerprint).localeCompare(JSON.stringify(right.fingerprint)),
+    );
+  const expanded = values.map((value) => JSON.stringify(value)).toSorted();
+  return {
+    count: values.length,
+    distinctCount: records.length,
+    records,
+    sha256: createHash("sha256")
+      .update(expanded.map((value) => `${value}\n`).join(""))
       .digest("hex"),
-    preimageSha256: createHash("sha256")
-      .update(hunk.preimageLines.map((line) => `${line}\n`).join(""))
-      .digest("hex"),
-    sourceCommitPostimageOccurrences: countLineSequence(
-      snapshots.sourceCommit,
-      hunk.postimageLines,
-    ),
-    sourceCommitPostimageStart: lineSequenceStart(snapshots.sourceCommit, hunk.postimageLines),
-    sourceParentPreimageOccurrences: countLineSequence(snapshots.sourceParent, hunk.preimageLines),
-    sourceParentPreimageStart: lineSequenceStart(snapshots.sourceParent, hunk.preimageLines),
-    targetCommitPostimageOccurrences: countLineSequence(
-      snapshots.targetCommit,
-      hunk.postimageLines,
-    ),
-    targetCommitPostimageStart: lineSequenceStart(snapshots.targetCommit, hunk.postimageLines),
-    targetParentPreimageOccurrences: countLineSequence(snapshots.targetParent, hunk.preimageLines),
-    targetParentPreimageStart: lineSequenceStart(snapshots.targetParent, hunk.preimageLines),
-    witnessCommitPostimageOccurrences: countLineSequence(
-      snapshots.witnessCommit,
-      hunk.postimageLines,
-    ),
-    witnessCommitPostimageStart: lineSequenceStart(snapshots.witnessCommit, hunk.postimageLines),
-    witnessParentPreimageOccurrences: countLineSequence(
-      snapshots.witnessParent,
-      hunk.preimageLines,
-    ),
-    witnessParentPreimageStart: lineSequenceStart(snapshots.witnessParent, hunk.preimageLines),
-  }));
-  if (
-    hunks.some(
-      (hunk) =>
-        [
-          hunk.sourceCommitPostimageOccurrences,
-          hunk.sourceParentPreimageOccurrences,
-          hunk.targetCommitPostimageOccurrences,
-          hunk.targetParentPreimageOccurrences,
-          hunk.witnessCommitPostimageOccurrences,
-          hunk.witnessParentPreimageOccurrences,
-        ].some((count) => count !== 1) ||
-        [
-          hunk.sourceCommitPostimageStart,
-          hunk.targetCommitPostimageStart,
-          hunk.witnessCommitPostimageStart,
-        ].some((start) => start !== hunk.newStart) ||
-        [
-          hunk.sourceParentPreimageStart,
-          hunk.targetParentPreimageStart,
-          hunk.witnessParentPreimageStart,
-        ].some((start) => start !== hunk.oldStart),
-    )
-  ) {
+  };
+}
+
+function candidateSubsetHunkEvidence(cwd, sourceCandidate, ownershipCandidate, path) {
+  const sourcePatch = zeroContextPatch(cwd, sourceCandidate.parent, sourceCandidate.commit, [path]);
+  const targetPatch = zeroContextPatch(cwd, ownershipCandidate.parent, ownershipCandidate.commit, [
+    path,
+  ]);
+  const sourceFingerprints = orderedReplacementFingerprints(sourcePatch, {
+    requireOnlyReplacements: true,
+  });
+  const targetFingerprints = orderedReplacementFingerprints(targetPatch);
+  if (!sourceFingerprints?.length || !targetFingerprints?.length) {
+    return undefined;
+  }
+  if (!multisetContains(targetFingerprints, sourceFingerprints)) {
     return undefined;
   }
   return {
-    hunks: recordSummary(hunks),
     path,
     sourceCommit: sourceCandidate.commit,
+    sourceHunks: multisetSummary(sourceFingerprints),
     sourceParent: sourceCandidate.parent,
     sourcePatchSha256: createHash("sha256").update(sourcePatch).digest("hex"),
-    targetCommit,
-    targetParent: targetRecord.parents[0],
-    witnessCommit,
-    witnessParent: witnessRecord.parents[0],
+    targetCommit: ownershipCandidate.commit,
+    targetHunks: multisetSummary(targetFingerprints),
+    targetParent: ownershipCandidate.parent,
+    targetPatchSha256: createHash("sha256").update(targetPatch).digest("hex"),
   };
 }
 
@@ -1285,7 +1317,7 @@ function candidateFirstParentSurvivalEvidence(
   extendGraphWithCommitsAndParents(cwd, graph, pathHistory);
   let supersededAt = null;
   const survival = pathHistory.map((commit, index) => {
-    const proof = candidateExactPathTreeProof(cwd, graph, commit, candidate);
+    const proof = candidatePatchTreeProof(cwd, graph, commit, candidate);
     if (index === 0 && !proof) {
       fail(`${label} does not contain the candidate at its first-parent start`);
     }
@@ -4984,42 +5016,61 @@ export function buildReleaseSourceInventory(
       ) {
         fail(`${label} does not bind the rebased member to an independent main stack`);
       }
-      const stackBaseProof = candidateExactPathTreeProof(
+      const ownershipPatch = commitRangePathsPatch(
+        cwd,
+        targetRecord.parents[0],
+        overlapEntry.targetCommit,
+        sourceCandidate.paths,
+      );
+      const ownershipCandidate = ownershipPatch
+        ? {
+            ...ownershipPatch,
+            commit: overlapEntry.targetCommit,
+            kind: "trusted-comparison-target-subset",
+            number: overlapEntry.number,
+            paths: sourceCandidate.paths,
+            tree: targetRecord.tree,
+          }
+        : undefined;
+      if (!ownershipCandidate) {
+        fail(`${label} does not have a target-owned candidate patch`);
+      }
+      const stackBaseProof = candidatePatchTreeProof(
         cwd,
         graph,
         landedStack.baseCommit,
-        sourceCandidate,
+        ownershipCandidate,
       );
-      const mergeCommitProof = candidateExactPathTreeProof(
+      const mergeCommitProof = candidatePatchTreeProof(
         cwd,
         graph,
         metadata.mergeCommit,
-        sourceCandidate,
+        ownershipCandidate,
       );
-      const sourceTargetProof = candidateExactPathTreeProof(
+      const sourceTargetProof = candidatePatchTreeProof(
         cwd,
         graph,
         sourceTarget,
-        sourceCandidate,
+        ownershipCandidate,
       );
-      const targetCandidateProof = candidateExactPathTreeProof(
+      const targetCandidateProof = candidatePatchTreeProof(
         cwd,
         graph,
         overlapEntry.targetCommit,
-        sourceCandidate,
+        ownershipCandidate,
       );
-      const witnessCandidateProof = candidateExactPathTreeProof(
+      const witnessCandidateProof = candidatePatchTreeProof(
         cwd,
         graph,
         overlapEntry.witnessCommit,
-        sourceCandidate,
+        ownershipCandidate,
       );
       const witnessSurvival = candidateFirstParentSurvivalEvidence(
         cwd,
         graph,
         overlapEntry.witnessCommit,
         landedStack.baseCommit,
-        sourceCandidate,
+        ownershipCandidate,
         label,
       );
       const targetSurvival = candidateFirstParentSurvivalEvidence(
@@ -5027,7 +5078,7 @@ export function buildReleaseSourceInventory(
         graph,
         overlapEntry.targetCommit,
         sourceTarget,
-        sourceCandidate,
+        ownershipCandidate,
         label,
       );
       const stackNetPatch = zeroContextPatch(
@@ -5037,30 +5088,48 @@ export function buildReleaseSourceInventory(
         sourceCandidate.paths,
       );
       const stackNetChangedLineHashes = changedLineHashes(stackNetPatch);
-      const stackAllocatedCandidateLines = sourceChangedLineHashes.filter((hash) =>
-        stackNetChangedLineHashes.includes(hash),
-      );
-      if (
-        !stackBaseProof ||
-        !mergeCommitProof ||
-        !sourceTargetProof ||
-        !targetCandidateProof ||
-        !witnessCandidateProof ||
-        stackAllocatedCandidateLines.length > 0
-      ) {
+      const candidateHunks = sourceCandidate.paths.flatMap((path) => {
+        const fingerprints = orderedReplacementFingerprints(
+          zeroContextPatch(cwd, sourceCandidate.parent, sourceCandidate.commit, [path]),
+          { requireOnlyReplacements: true },
+        );
+        if (!fingerprints) {
+          fail(`${label} path ${path} lacks replacement hunk fingerprints`);
+        }
+        return fingerprints.map((fingerprint) => ({ fingerprint, path }));
+      });
+      const stackNetHunks = sourceCandidate.paths.flatMap((path) => {
+        const fingerprints = potentialReplacementFingerprints(
+          zeroContextPatch(cwd, landedStack.baseCommit, metadata.mergeCommit, [path]),
+        );
+        if (!fingerprints) {
+          fail(`${label} stack path ${path} lacks replacement hunk fingerprints`);
+        }
+        return fingerprints.map((fingerprint) => ({ fingerprint, path }));
+      });
+      const candidateHunkOverlap = multisetIntersection(candidateHunks, stackNetHunks);
+      const missingTreeProof = [
+        ["stack base", stackBaseProof],
+        ["merge commit", mergeCommitProof],
+        ["source target", sourceTargetProof],
+        ["target", targetCandidateProof],
+        ["witness", witnessCandidateProof],
+      ].find(([, proof]) => !proof);
+      if (missingTreeProof) {
+        fail(`${label} target-owned candidate does not round-trip the ${missingTreeProof[0]} tree`);
+      }
+      if (candidateHunkOverlap.length > 0) {
         fail(`${label} is allocated by the rebased pull request stack`);
       }
       const pathEvidence = sourceCandidate.paths.map((path) => {
         const hunkEvidence = candidateSubsetHunkEvidence(
           cwd,
-          graph,
           sourceCandidate,
-          overlapEntry.targetCommit,
-          overlapEntry.witnessCommit,
+          ownershipCandidate,
           path,
         );
         if (!hunkEvidence) {
-          fail(`${label} path ${path} lacks unique immutable subset hunk evidence`);
+          fail(`${label} path ${path} lacks multiplicity-bound subset hunk evidence`);
         }
         return {
           ...hunkEvidence,
@@ -5097,11 +5166,13 @@ export function buildReleaseSourceInventory(
           baseCommit: landedStack.baseCommit,
           baseTree: graph.get(landedStack.baseCommit).tree,
           candidateChangedLineHashes: setSummary(sourceChangedLineHashes),
-          candidateLineOverlap: setSummary(stackAllocatedCandidateLines),
+          candidateHunkOverlap: multisetSummary(candidateHunkOverlap),
+          candidateHunks: multisetSummary(candidateHunks),
           commits: recordSummary(stackMappings),
           mergeCommit: metadata.mergeCommit,
           mergeCommitProof,
           netChangedLineHashes: setSummary(stackNetChangedLineHashes),
+          netHunks: multisetSummary(stackNetHunks),
           sourceTargetProof,
           stackBaseProof,
         },

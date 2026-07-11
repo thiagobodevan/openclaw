@@ -207,8 +207,8 @@ every human `Thanks @...` attribution.
      target, witness, stack base, and merge result path trees. First-parent
      lineage from witness to stack base and target to source target is monotonic:
      the candidate may disappear once through later supersession, but it may
-     never reappear. The candidate must also be absent from the stack's net
-     changed-line allocation. The target remains
+     never reappear. The candidate's exact replacement-hunk multiset must also
+     be absent from the stack's net patch. The target remains
      association/reference/trailer-free direct release work; the witness must
      have an independent PR association. Exactly the source-head and landed-head
      final-tree scanner matches are acknowledged. Any extra scanner match,

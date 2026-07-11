@@ -4089,6 +4089,12 @@ describe("release source inventory", () => {
   it("accepts an explicit strict member subset already owned by a broader main commit", () =>
     withRepository((cwd) => {
       const oldOverlap = [
+        "fixture-header",
+        "stable-a",
+        "stable-b",
+        "stable-c",
+        "stable-d",
+        "stable-e",
         "alpha=0.142.0",
         "beta=0.142.0",
         "candidate-a=0.142.0",
@@ -4097,7 +4103,8 @@ describe("release source inventory", () => {
         "",
       ].join("\n");
       const broadOverlap = oldOverlap.replaceAll("0.142.0", "0.143.0");
-      const landedIntermediateOverlap = broadOverlap
+      const pullRequestOverlap = `pr-local-fixture\n${broadOverlap}`;
+      const landedIntermediateOverlap = pullRequestOverlap
         .replace("candidate-a=0.143.0", "candidate-a=0.142.0")
         .replace("candidate-b=0.143.0", "candidate-b=0.142.0")
         .replace("candidate-c=0.143.0", "candidate-c=0.142.0");
@@ -4158,7 +4165,11 @@ describe("release source inventory", () => {
       });
       const sourceMember = createCommit(cwd, {
         authorTimestamp: 35,
-        files: { ...broadFiles, "feature.txt": "head\n" },
+        files: {
+          ...broadFiles,
+          "feature.txt": "head\n",
+          "overlap.txt": pullRequestOverlap,
+        },
         parents: [sourceFeature],
         subject: "test: align version fixtures",
         timestamp: 35,
@@ -4176,7 +4187,11 @@ describe("release source inventory", () => {
       });
       const landedMember = createCommit(cwd, {
         authorTimestamp: 35,
-        files: { ...witnessFiles, "feature.txt": "head\n" },
+        files: {
+          ...witnessFiles,
+          "feature.txt": "head\n",
+          "overlap.txt": pullRequestOverlap,
+        },
         parents: [landedFeature],
         subject: "test: align version fixtures",
         timestamp: 41,
@@ -4273,7 +4288,7 @@ describe("release source inventory", () => {
           details: expect.objectContaining({
             landedStack: expect.objectContaining({
               baseCommit: witness,
-              candidateLineOverlap: expect.objectContaining({ count: 0 }),
+              candidateHunkOverlap: expect.objectContaining({ count: 0 }),
               commits: expect.objectContaining({ count: 2 }),
               mergeCommit: landedMember,
             }),
