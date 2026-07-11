@@ -1,6 +1,8 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { testing as sessionBindingTesting } from "openclaw/plugin-sdk/conversation-runtime";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as discordClient from "../client.js";
+import * as discordApi from "../internal/api.js";
 import { resolveDiscordCurrentConversationRoute } from "../outbound-session-route.js";
 import { buildDiscordMessageProcessContext } from "./message-handler.context.js";
 import {
@@ -10,6 +12,10 @@ import {
 
 beforeEach(() => {
   sessionBindingTesting.resetSessionBindingAdaptersForTests();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("discord buildDiscordMessageProcessContext sender bot status", () => {
@@ -108,6 +114,15 @@ describe("discord buildDiscordMessageProcessContext sender bot status", () => {
       NativeChannelId: "thread-1",
       ThreadParentId: "parent-1",
     });
+    vi.spyOn(discordClient, "createDiscordRestClient").mockReturnValue({
+      token: "test-token",
+      rest: {} as never,
+      account: {} as never,
+    });
+    vi.spyOn(discordApi, "getChannel").mockResolvedValue({
+      id: "thread-1",
+      parent_id: "parent-1",
+    } as never);
     await expect(
       resolveDiscordCurrentConversationRoute({
         cfg,

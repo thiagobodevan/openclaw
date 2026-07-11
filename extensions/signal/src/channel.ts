@@ -35,6 +35,7 @@ import { signalMessageActions } from "./message-actions.js";
 import { looksLikeSignalTargetId, normalizeSignalMessagingTarget } from "./normalize.js";
 import { resolveSignalOutboundTarget } from "./outbound-session.js";
 import { resolveSignalReactionLevel } from "./reaction-level.js";
+import { resolveSignalCurrentConversationRoute } from "./session-route.js";
 import { signalSetupAdapter } from "./setup-core.js";
 import {
   createSignalPluginBase,
@@ -381,6 +382,7 @@ export const signalPlugin: ChannelPlugin<ResolvedSignalAccount, SignalProbe> =
         normalizeTarget: normalizeSignalMessagingTarget,
         inferTargetChatType: ({ to }) => inferSignalTargetChatType(to),
         resolveOutboundSessionRoute: (params) => resolveSignalOutboundSessionRoute(params),
+        resolveCurrentConversationRoute: resolveSignalCurrentConversationRoute,
         targetResolver: {
           looksLikeId: looksLikeSignalTargetId,
           hint: "<E.164|uuid:ID|group:ID|signal:group:ID|signal:+E.164>",

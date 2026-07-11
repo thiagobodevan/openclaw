@@ -95,6 +95,15 @@ function createRuntimeEnv() {
   } as unknown as RuntimeEnv;
 }
 
+function createServiceConfig(): CoreConfig {
+  return {
+    agents: {
+      list: [{ id: "main", default: true }, { id: "nextcloud-service" }],
+    },
+    channels: { "nextcloud-talk": {} },
+  } as CoreConfig;
+}
+
 function requireFirstMockArg(mock: ReturnType<typeof vi.fn>, label: string): unknown {
   const [call] = mock.mock.calls;
   if (!call) {
@@ -176,7 +185,7 @@ describe("nextcloud-talk inbound behavior", () => {
     await handleNextcloudTalkInbound({
       message: createMessage({ timestamp: 1_736_380_800_000 }),
       account: createAccount(),
-      config: { channels: { "nextcloud-talk": {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime: createRuntimeEnv(),
       statusSink,
     });
@@ -197,7 +206,7 @@ describe("nextcloud-talk inbound behavior", () => {
     expect(sendArgs[0]).toBe("room-1");
     expect(sendArgs[1]).toBe("Pair with code 123456");
     expect(sendArgs[2]).toEqual({
-      cfg: { channels: { "nextcloud-talk": {} } },
+      cfg: createServiceConfig(),
       accountId: "default",
     });
     expect(statusSink).toHaveBeenCalledWith({ lastInboundAt: 1_736_380_800_000 });
@@ -235,7 +244,7 @@ describe("nextcloud-talk inbound behavior", () => {
           groupAllowFrom: ["user-1"],
         },
       }),
-      config: { channels: { "nextcloud-talk": {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime,
     });
 
@@ -243,12 +252,13 @@ describe("nextcloud-talk inbound behavior", () => {
     expect(runtime.log).toHaveBeenCalledWith("nextcloud-talk: drop room room-group (no mention)");
   });
 
-  it("denies an unbound shared route before authenticated room hydration", async () => {
+  it("fails closed before routing when the authenticated room kind is unavailable", async () => {
     const coreRuntime = installRuntime({ routeAgentId: "main", routeMatchedBy: "default" });
     createChannelPairingControllerMock.mockReturnValue({
       readStoreForDmPolicy: vi.fn(),
       issueChallenge: vi.fn(),
     });
+    resolveNextcloudTalkRoomKindMock.mockResolvedValue(undefined);
     const runtime = createRuntimeEnv();
 
     await handleNextcloudTalkInbound({
@@ -261,16 +271,56 @@ describe("nextcloud-talk inbound behavior", () => {
           groupAllowFrom: ["user-1"],
         },
       }),
-      config: { channels: { "nextcloud-talk": {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime,
     });
 
-    expect(coreRuntime.channel.routing.resolveAgentRoute).toHaveBeenCalledOnce();
-    expect(resolveNextcloudTalkRoomKindMock).not.toHaveBeenCalled();
+    expect(resolveNextcloudTalkRoomKindMock).toHaveBeenCalledOnce();
+    expect(coreRuntime.channel.routing.resolveAgentRoute).not.toHaveBeenCalled();
     expect(coreRuntime.channel.inbound.dispatchReply).not.toHaveBeenCalled();
     expect(runtime.log).toHaveBeenCalledWith(
-      "nextcloud-talk: drop room room-1 (identity=unbound_shared)",
+      "nextcloud-talk: drop room room-1 (room kind unavailable)",
     );
+  });
+
+  it("routes production-shaped direct webhooks by authenticated sender identity", async () => {
+    const coreRuntime = createPluginRuntimeMock();
+    vi.mocked(coreRuntime.channel.routing.resolveAgentRoute).mockReturnValue({
+      agentId: "nextcloud-service",
+      channel: "nextcloud-talk",
+      accountId: "default",
+      sessionKey: "agent:nextcloud-service:nextcloud-talk:direct:user-1",
+      mainSessionKey: "agent:nextcloud-service:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.peer",
+    });
+    setNextcloudTalkRuntime(coreRuntime as unknown as PluginRuntime);
+    createChannelPairingControllerMock.mockReturnValue({
+      readStoreForDmPolicy: vi.fn(),
+      issueChallenge: vi.fn(),
+    });
+
+    await handleNextcloudTalkInbound({
+      message: createMessage({ isGroupChat: true }),
+      account: createAccount({
+        config: {
+          dmPolicy: "allowlist",
+          allowFrom: ["user-1"],
+          groupPolicy: "allowlist",
+          groupAllowFrom: [],
+        },
+      }),
+      config: createServiceConfig(),
+      runtime: createRuntimeEnv(),
+    });
+
+    expect(resolveNextcloudTalkRoomKindMock).toHaveBeenCalledOnce();
+    expect(coreRuntime.channel.routing.resolveAgentRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        peer: { kind: "direct", id: "user-1" },
+      }),
+    );
+    expect(coreRuntime.channel.inbound.dispatchReply).toHaveBeenCalledOnce();
   });
 
   it("blocks unauthorized group text control commands even when room sender access allows chat", async () => {
@@ -308,7 +358,7 @@ describe("nextcloud-talk inbound behavior", () => {
           },
         },
       }),
-      config: { channels: { "nextcloud-talk": {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime,
     });
 
@@ -346,7 +396,7 @@ describe("nextcloud-talk inbound behavior", () => {
           groupAllowFrom: [],
         },
       }),
-      config: { channels: { "nextcloud-talk": {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime: createRuntimeEnv(),
     });
 

@@ -13,7 +13,12 @@ import {
   resolveStableSenderIsOwner,
 } from "../routing/conversation-identity.js";
 import { resolvePersistedConversationIdentityContext } from "../routing/persisted-conversation-identity.js";
-import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
+import {
+  createChannelTestPluginBase,
+  createDirectOutboundTestAdapter,
+  createOutboundTestPlugin,
+  createTestRegistry,
+} from "../test-utils/channel-plugins.js";
 import { resolveConversationCapabilityProfile } from "./conversation-capability-profile.js";
 
 const identityConfig: OpenClawConfig = {
@@ -306,7 +311,7 @@ describe("resolveConversationCapabilityProfile", () => {
 
   it("carries the persisted native guild sender into current route revalidation", async () => {
     const sessionKey = "agent:team-ops:discord:channel:123";
-    let currentSenderId: string | undefined;
+    let currentSenderId: string | null | undefined;
 
     const result = await resolvePersistedConversationIdentityContext({
       cfg: identityConfig,
@@ -381,10 +386,18 @@ describe("resolveConversationCapabilityProfile", () => {
           plugin: {
             ...createChannelTestPluginBase({ id: "slack" }),
             bindings: {
-              compileConfiguredBinding: ({ conversationId: configuredId }) => ({
+              compileConfiguredBinding: ({
                 conversationId: configuredId,
-              }),
-              matchInboundConversation: ({ compiledBinding, conversationId: incomingId }) =>
+              }: {
+                conversationId: string;
+              }) => ({ conversationId: configuredId }),
+              matchInboundConversation: ({
+                compiledBinding,
+                conversationId: incomingId,
+              }: {
+                compiledBinding: { conversationId: string };
+                conversationId: string;
+              }) =>
                 compiledBinding.conversationId === incomingId
                   ? { conversationId: incomingId, matchPriority: 2 }
                   : null,
@@ -417,7 +430,7 @@ describe("resolveConversationCapabilityProfile", () => {
         sessionEntry: {
           sessionId: "configured-slack-direct",
           updatedAt: 1,
-          chatType: "direct",
+          chatType: "direct" as const,
           channel: "slack",
           route: {
             channel: "slack",
@@ -459,7 +472,7 @@ describe("resolveConversationCapabilityProfile", () => {
         sessionEntry: {
           sessionId: "matrix-per-room-direct",
           updatedAt: 1,
-          chatType: "direct",
+          chatType: "direct" as const,
           channel: "matrix",
           route: {
             channel: "matrix",
@@ -478,6 +491,13 @@ describe("resolveConversationCapabilityProfile", () => {
         },
         audienceless: "deny",
         resolvePluginRoute: async (params) => {
+          expect(params.requireAudienceValidation).toBe(true);
+          expect(params.audienceEvidence).toEqual(
+            expect.arrayContaining([
+              { source: "route", value: "room:@alice:example.org" },
+              { source: "origin-native", value: "!dm:example.org" },
+            ]),
+          );
           resolvedConversationId = params.conversationId;
           return {
             kind: "resolved",
@@ -489,6 +509,7 @@ describe("resolveConversationCapabilityProfile", () => {
               mainSessionKey: "agent:team-ops:main",
               lastRoutePolicy: "session",
               matchedBy: "binding.peer",
+              audienceValidated: true,
             },
           };
         },
@@ -503,6 +524,128 @@ describe("resolveConversationCapabilityProfile", () => {
       chatType: "direct",
     });
     expect(resolvedConversationId).toBe("!dm:example.org");
+  });
+
+  it("accepts a canonical shared address when the provider has no current-route resolver", async () => {
+    const sessionKey = "agent:team-ops:slack:group:g123";
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: {
+          agents: identityConfig.agents,
+          bindings: [{ agentId: "team-ops", match: { channel: "slack" } }],
+        },
+        agentId: "team-ops",
+        sessionKey,
+        sessionEntry: {
+          sessionId: "slack-shared-canonical-address",
+          updatedAt: 1,
+          chatType: "group",
+          route: {
+            channel: "slack",
+            accountId: "default",
+            target: { to: "channel:G123", chatType: "group" },
+          },
+          origin: {
+            provider: "slack",
+            accountId: "default",
+            chatType: "group",
+            from: "slack:group:G123",
+            to: "channel:G123",
+            nativeChannelId: "G123",
+            nativeProvider: "slack",
+          },
+          groupId: "G123",
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => ({
+          kind: "unsupported",
+          effectiveAccountId: "default",
+        }),
+      }),
+    ).resolves.toMatchObject({
+      decision: {
+        mode: "organization",
+        allowed: true,
+        reason: "bound_service_agent",
+      },
+      routeMatchedBy: "binding.account",
+      messageProvider: "slack",
+      chatType: "group",
+    });
+  });
+
+  it("requires provider proof before treating a shared address as direct", async () => {
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: {
+          agents: identityConfig.agents,
+          bindings: [{ agentId: "team-ops", match: { channel: "slack" } }],
+        },
+        agentId: "team-ops",
+        sessionKey: "agent:team-ops:main",
+        sessionEntry: {
+          sessionId: "slack-shared-address-marked-direct",
+          updatedAt: 1,
+          chatType: "direct",
+          route: {
+            channel: "slack",
+            accountId: "default",
+            target: { to: "channel:C123", chatType: "direct" },
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async (params) => {
+          expect(params.requireAudienceValidation).toBe(true);
+          expect(params.audienceEvidence).toEqual([{ source: "route", value: "channel:C123" }]);
+          return { kind: "unsupported", effectiveAccountId: "default" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+  });
+
+  it("prefers the direct session route over stale top-level group metadata", async () => {
+    const sessionKey = "agent:team-ops:slack:direct:U123";
+    let resolvedChatType: string | undefined;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: {
+          agents: identityConfig.agents,
+          bindings: [{ agentId: "team-ops", match: { channel: "slack" } }],
+        },
+        agentId: "team-ops",
+        sessionKey,
+        sessionEntry: {
+          sessionId: "slack-direct-after-shared",
+          updatedAt: 1,
+          channel: "slack",
+          chatType: "channel",
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async (params) => {
+          resolvedChatType = params.chatType;
+          return {
+            kind: "resolved",
+            route: {
+              agentId: "team-ops",
+              channel: "slack",
+              accountId: "default",
+              sessionKey,
+              mainSessionKey: "agent:team-ops:main",
+              lastRoutePolicy: "session",
+              matchedBy: "binding.channel",
+            },
+          };
+        },
+      }),
+    ).resolves.toMatchObject({
+      decision: { mode: "organization", allowed: true, reason: "bound_service_agent" },
+      chatType: "direct",
+    });
+    expect(resolvedChatType).toBe("direct");
   });
 
   it("carries a persisted parent conversation into current route resolution", async () => {
@@ -569,7 +712,7 @@ describe("resolveConversationCapabilityProfile", () => {
         origin: {
           provider: "slack",
           accountId: "work",
-          chatType: "direct",
+          chatType: "direct" as const,
           from: "slack:U123",
           to: "user:U123",
           nativeChannelId: "D123",
@@ -597,7 +740,7 @@ describe("resolveConversationCapabilityProfile", () => {
         origin: {
           provider: "slack",
           accountId: "work",
-          chatType: "direct",
+          chatType: "direct" as const,
           from: "slack:U123",
           to: "user:U123",
           nativeChannelId: "D123",
@@ -758,6 +901,135 @@ describe("resolveConversationCapabilityProfile", () => {
     expect(resolvedSenderId).toBe("U123");
   });
 
+  it("ignores an internal overlay target when proving an external group audience", async () => {
+    const sessionKey = "agent:team-ops:main";
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "team-ops",
+        sessionKey,
+        sessionEntry: {
+          sessionId: "service-main-external-group",
+          updatedAt: 1,
+          chatType: "channel",
+          channel: "webchat",
+          groupId: "C123",
+          space: "G123",
+          lastChannel: "discord",
+          lastTo: "channel:C123",
+          lastAccountId: "default",
+          route: {
+            channel: "webchat",
+            target: { to: "session:team-ops", chatType: "direct" },
+          },
+          origin: {
+            provider: "webchat",
+            surface: "webchat",
+            accountId: "default",
+            chatType: "direct",
+            to: "session:team-ops",
+            nativeChannelId: "C123",
+            nativeProvider: "discord",
+          },
+        },
+        audienceless: "internal",
+        resolvePluginRoute: async (params) => {
+          expect(params).toMatchObject({
+            channel: "discord",
+            target: "channel:C123",
+            conversationId: "C123",
+            groupSpace: "G123",
+          });
+          expect(params.requireAudienceValidation).toBeFalsy();
+          expect(params.audienceEvidence).toBeUndefined();
+          return {
+            kind: "resolved",
+            route: {
+              agentId: "team-ops",
+              channel: "discord",
+              accountId: "default",
+              sessionKey,
+              mainSessionKey: sessionKey,
+              lastRoutePolicy: "session",
+              matchedBy: "binding.guild",
+            },
+          };
+        },
+      }),
+    ).resolves.toMatchObject({
+      decision: {
+        mode: "organization",
+        allowed: true,
+        reason: "bound_service_agent",
+      },
+      routeMatchedBy: "binding.guild",
+      messageProvider: "discord",
+      chatType: "channel",
+    });
+  });
+
+  it("does not use native group evidence owned by another provider", async () => {
+    const sessionKey = "agent:team-ops:main";
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "team-ops",
+        sessionKey,
+        sessionEntry: {
+          sessionId: "service-main-other-native-group",
+          updatedAt: 1,
+          chatType: "channel",
+          channel: "webchat",
+          groupId: "C-old",
+          groupChannel: "#stale-other-provider",
+          lastChannel: "discord",
+          lastTo: "channel:C999",
+          lastAccountId: "default",
+          origin: {
+            provider: "webchat",
+            surface: "webchat",
+            chatType: "direct",
+            to: "session:team-ops",
+            nativeChannelId: "C123",
+            nativeProvider: "slack",
+          },
+        },
+        audienceless: "internal",
+        resolvePluginRoute: async (params) => {
+          expect(params).toMatchObject({
+            channel: "discord",
+            target: "channel:C999",
+          });
+          expect(params.conversationId).toBeUndefined();
+          expect(params.requireAudienceValidation).toBeFalsy();
+          expect(params.audienceEvidence).toBeUndefined();
+          return {
+            kind: "resolved",
+            route: {
+              agentId: "team-ops",
+              channel: "discord",
+              accountId: "default",
+              sessionKey,
+              mainSessionKey: sessionKey,
+              lastRoutePolicy: "session",
+              matchedBy: "binding.peer",
+            },
+          };
+        },
+      }),
+    ).resolves.toMatchObject({
+      decision: {
+        mode: "organization",
+        allowed: true,
+        reason: "bound_service_agent",
+      },
+      messageProvider: "discord",
+      chatType: "channel",
+    });
+  });
+
   it("does not reuse another channel's native identity after an internal dock overlay", async () => {
     const sessionKey = "agent:team-ops:main";
     let resolvedTarget: string | undefined;
@@ -863,15 +1135,279 @@ describe("resolveConversationCapabilityProfile", () => {
         }),
       }),
     ).resolves.toMatchObject({
-      decision: { mode: "external", allowed: false, reason: "untrusted_direct" },
-      senderId: undefined,
-      senderIsOwner: false,
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
     });
   });
 
-  it("does not reuse an old workspace after a same-provider route change", async () => {
+  it("resolves an omitted account through the channel default", async () => {
+    const sessionKey = "agent:personal:slack:direct:U999";
+    let resolvedAccountId: string | null | undefined;
+    const plugin = createOutboundTestPlugin({
+      id: "slack",
+      outbound: createDirectOutboundTestAdapter({ channel: "slack" }),
+      messaging: {
+        resolveCurrentConversationRoute: (params) => {
+          resolvedAccountId = params.accountId;
+          return {
+            agentId: "personal",
+            channel: "slack",
+            accountId: params.accountId ?? "unexpected",
+            sessionKey,
+            matchedBy: "default" as const,
+          };
+        },
+      },
+    });
+    plugin.config.listAccountIds = () => ["primary", "work"];
+    plugin.config.defaultAccountId = () => "primary";
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "slack",
+          source: "test",
+          plugin,
+        },
+      ]),
+    );
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey,
+        sessionEntry: {
+          sessionId: "personal-new-peer-with-old-account",
+          updatedAt: 1,
+          route: {
+            channel: "slack",
+            target: { to: "user:U999", chatType: "direct" },
+          },
+          origin: {
+            provider: "slack",
+            chatType: "direct",
+            from: "slack:U999",
+            to: "user:U999",
+            nativeChannelId: "D999",
+            nativeDirectUserId: "U999",
+            nativeProvider: "slack",
+          },
+        },
+        audienceless: "deny",
+      }),
+    ).resolves.toMatchObject({
+      decision: { mode: "external", allowed: false, reason: "untrusted_direct" },
+    });
+    expect(resolvedAccountId).toBe("primary");
+  });
+
+  it("requires channel-owned proof when direct peer facts conflict", async () => {
+    let routeLookupCalled = false;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey: "agent:personal:main",
+        sessionEntry: {
+          sessionId: "personal-conflicting-direct-peer",
+          updatedAt: 1,
+          route: {
+            channel: "slack",
+            accountId: "default",
+            target: { to: "user:D999", chatType: "direct" },
+          },
+          origin: {
+            provider: "slack",
+            accountId: "default",
+            chatType: "direct",
+            from: "slack:U999",
+            to: "user:D999",
+            nativeChannelId: "D999",
+            nativeDirectUserId: "U999",
+            nativeSenderId: "U999",
+            nativeProvider: "slack",
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => {
+          routeLookupCalled = true;
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+    expect(routeLookupCalled).toBe(true);
+  });
+
+  it("rejects contradictory persisted direct senders before route lookup", async () => {
+    let routeLookupCalled = false;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey: "agent:personal:matrix:channel:!dm:example.org",
+        sessionEntry: {
+          sessionId: "matrix-conflicting-direct-senders",
+          updatedAt: 1,
+          channel: "matrix",
+          chatType: "group",
+          origin: {
+            provider: "matrix",
+            accountId: "default",
+            chatType: "direct",
+            from: "matrix:@bob:example.org",
+            to: "room:!dm:example.org",
+            nativeChannelId: "!dm:example.org",
+            nativeDirectUserId: "@alice:example.org",
+            nativeSenderId: "@alice:example.org",
+            nativeProvider: "matrix",
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => {
+          routeLookupCalled = true;
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+    expect(routeLookupCalled).toBe(false);
+  });
+
+  it("requires channel-owned proof when persisted direct targets disagree without origin metadata", async () => {
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey: "agent:personal:main",
+        sessionEntry: {
+          sessionId: "personal-conflicting-direct-targets",
+          updatedAt: 1,
+          route: {
+            channel: "slack",
+            accountId: "default",
+            target: { to: "user:U123", chatType: "direct" },
+          },
+          lastChannel: "slack",
+          lastAccountId: "default",
+          lastTo: "user:U999",
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async (params) => {
+          expect(params).toMatchObject({
+            channel: "slack",
+            target: "user:U123",
+            requireAudienceValidation: true,
+            audienceEvidence: [
+              { source: "route", value: "user:U123" },
+              { source: "last", value: "user:U999" },
+            ],
+          });
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+  });
+
+  it("requires channel-owned proof for conflicting group audience evidence", async () => {
     const sessionKey = "agent:team-ops:discord:channel:C999";
-    let resolvedGroupSpace: string | null | undefined = "not-called";
+    const sessionEntry = {
+      sessionId: "team-new-discord-channel",
+      updatedAt: 1,
+      groupId: "C999",
+      space: "guild-old",
+      route: {
+        channel: "discord",
+        accountId: "default",
+        target: { to: "channel:C999", chatType: "channel" as const },
+      },
+      origin: {
+        provider: "discord",
+        accountId: "default",
+        chatType: "channel" as const,
+        to: "channel:C999",
+        nativeChannelId: "C123",
+        nativeProvider: "discord",
+      },
+    };
+    const currentRoute = {
+      agentId: "team-ops",
+      channel: "discord",
+      accountId: "default",
+      sessionKey,
+      mainSessionKey: "agent:team-ops:main",
+      lastRoutePolicy: "session" as const,
+      matchedBy: "binding.guild" as const,
+    };
+    const blindResult = await resolvePersistedConversationIdentityContext({
+      cfg: identityConfig,
+      agentId: "team-ops",
+      sessionKey,
+      sessionEntry,
+      audienceless: "deny",
+      resolvePluginRoute: async (params) => {
+        expect(params).toMatchObject({
+          target: "channel:C999",
+          conversationId: "C123",
+          groupSpace: "guild-old",
+          requireAudienceValidation: true,
+          audienceEvidence: expect.arrayContaining([
+            { source: "route", value: "channel:C999" },
+            { source: "origin-native", value: "C123" },
+          ]),
+        });
+        return { kind: "resolved", route: currentRoute };
+      },
+    });
+    expect(blindResult).toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "team-ops",
+        sessionKey,
+        sessionEntry,
+        audienceless: "deny",
+        resolvePluginRoute: async () => ({
+          kind: "resolved",
+          route: { ...currentRoute, audienceValidated: true },
+        }),
+      }),
+    ).resolves.toMatchObject({
+      decision: { mode: "organization", allowed: true, reason: "bound_service_agent" },
+      routeMatchedBy: "binding.guild",
+    });
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "team-ops",
+        sessionKey,
+        sessionEntry,
+        audienceless: "deny",
+        resolvePluginRoute: async () => ({
+          kind: "resolved",
+          route: {
+            ...currentRoute,
+            accountId: "other",
+            audienceValidated: true,
+          },
+        }),
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+  });
+
+  it("treats equivalent explicit shared target kinds as one audience", async () => {
+    const sessionKey = "agent:team-ops:msteams:group:19:conversation@thread.tacv2";
 
     await expect(
       resolvePersistedConversationIdentityContext({
@@ -879,46 +1415,313 @@ describe("resolveConversationCapabilityProfile", () => {
         agentId: "team-ops",
         sessionKey,
         sessionEntry: {
-          sessionId: "team-new-discord-channel",
+          sessionId: "teams-explicit-kind-conflict",
           updatedAt: 1,
-          space: "guild-old",
+          groupId: "19:conversation@thread.tacv2",
           route: {
-            channel: "discord",
+            channel: "msteams",
             accountId: "default",
-            target: { to: "channel:C999", chatType: "channel" },
+            target: {
+              to: "group:19:conversation@thread.tacv2",
+              chatType: "group",
+            },
           },
           origin: {
-            provider: "discord",
+            provider: "msteams",
             accountId: "default",
-            chatType: "channel",
-            to: "channel:C123",
-            nativeChannelId: "C123",
-            nativeProvider: "discord",
+            chatType: "group",
+            nativeChannelId: "channel:19:conversation@thread.tacv2",
+            nativeProvider: "msteams",
           },
         },
         audienceless: "deny",
         resolvePluginRoute: async (params) => {
-          resolvedGroupSpace = params.groupSpace;
+          expect(params.requireAudienceValidation).toBe(false);
+          expect(params.audienceEvidence).toBeUndefined();
+          return { kind: "unresolved" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+  });
+
+  it("rejects conflicting persisted account ownership before route lookup", async () => {
+    let routeLookupCalled = false;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "team-ops",
+        sessionKey: "agent:team-ops:matrix:channel:room-1",
+        sessionEntry: {
+          sessionId: "matrix-account-conflict",
+          updatedAt: 1,
+          route: {
+            channel: "matrix",
+            accountId: "default",
+            target: { to: "room:room-1", chatType: "channel" },
+          },
+          lastChannel: "matrix",
+          lastTo: "room:room-1",
+          lastAccountId: "other",
+          origin: {
+            provider: "matrix",
+            accountId: "default",
+            chatType: "channel",
+            nativeChannelId: "room-1",
+            nativeProvider: "matrix",
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => {
+          routeLookupCalled = true;
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+    expect(routeLookupCalled).toBe(false);
+  });
+
+  it("rejects a selected-provider account conflict even when direct peers disagree", async () => {
+    let routeLookupCalled = false;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey: "agent:personal:main",
+        sessionEntry: {
+          sessionId: "slack-account-and-peer-conflict",
+          updatedAt: 1,
+          route: {
+            channel: "slack",
+            accountId: "primary",
+            target: { to: "user:U123", chatType: "direct" },
+          },
+          origin: {
+            provider: "slack",
+            accountId: "other",
+            chatType: "direct",
+            from: "slack:U999",
+            to: "user:U999",
+            nativeDirectUserId: "U999",
+            nativeSenderId: "U999",
+            nativeProvider: "slack",
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => {
+          routeLookupCalled = true;
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+    expect(routeLookupCalled).toBe(false);
+  });
+
+  it("rejects conflicting persisted thread ownership before route lookup", async () => {
+    let routeLookupCalled = false;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "team-ops",
+        sessionKey: "agent:team-ops:slack:channel:C123:thread:thread-a",
+        sessionEntry: {
+          sessionId: "slack-thread-conflict",
+          updatedAt: 1,
+          route: {
+            channel: "slack",
+            accountId: "default",
+            target: { to: "channel:C123", chatType: "channel" },
+            thread: { id: "thread-b" },
+          },
+          origin: {
+            provider: "slack",
+            accountId: "default",
+            chatType: "channel",
+            nativeChannelId: "C123",
+            nativeProvider: "slack",
+            threadId: "thread-a",
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => {
+          routeLookupCalled = true;
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+    expect(routeLookupCalled).toBe(false);
+  });
+
+  it("normalizes a peer-scoped direct topic before comparing native thread facts", async () => {
+    const sessionKey = "agent:personal:telegram:direct:1234:thread:1234:42";
+    let resolvedThreadId: string | number | null | undefined;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey,
+        sessionEntry: {
+          sessionId: "telegram-direct-topic",
+          updatedAt: 1,
+          route: {
+            channel: "telegram",
+            accountId: "default",
+            target: { to: "user:1234", chatType: "direct" },
+            thread: { id: 42 },
+          },
+          lastChannel: "telegram",
+          lastTo: "user:1234",
+          lastAccountId: "default",
+          lastThreadId: 42,
+          origin: {
+            provider: "telegram",
+            accountId: "default",
+            chatType: "direct",
+            from: "telegram:1234",
+            to: "user:1234",
+            nativeChannelId: "1234",
+            nativeDirectUserId: "1234",
+            nativeSenderId: "1234",
+            nativeProvider: "telegram",
+            threadId: 42,
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async (params) => {
+          resolvedThreadId = params.threadId;
           return {
             kind: "resolved",
             route: {
-              agentId: "team-ops",
-              channel: params.channel,
-              accountId: params.accountId ?? "default",
+              agentId: "personal",
+              channel: "telegram",
+              accountId: "default",
               sessionKey,
-              mainSessionKey: "agent:team-ops:main",
+              mainSessionKey: "agent:personal:main",
               lastRoutePolicy: "session",
-              matchedBy: "binding.peer",
+              matchedBy: "default",
+              senderIsOwner: true,
             },
           };
         },
       }),
     ).resolves.toMatchObject({
-      decision: { mode: "organization", allowed: true, reason: "bound_service_agent" },
-      groupSpace: undefined,
+      decision: { mode: "personal", allowed: true, reason: "owner_direct" },
     });
-    expect(resolvedGroupSpace).toBeUndefined();
+    expect(resolvedThreadId).toBe("42");
   });
+
+  it("rejects an unproven peer-scoped thread suffix", async () => {
+    let routeLookupCalled = false;
+
+    await expect(
+      resolvePersistedConversationIdentityContext({
+        cfg: identityConfig,
+        agentId: "personal",
+        sessionKey: "agent:personal:telegram:direct:1234:thread:9999:42",
+        sessionEntry: {
+          sessionId: "telegram-unproven-direct-topic",
+          updatedAt: 1,
+          route: {
+            channel: "telegram",
+            accountId: "default",
+            target: { to: "user:1234", chatType: "direct" },
+          },
+          origin: {
+            provider: "telegram",
+            accountId: "default",
+            chatType: "direct",
+            from: "telegram:1234",
+            to: "user:1234",
+            nativeChannelId: "1234",
+            nativeDirectUserId: "1234",
+            nativeSenderId: "1234",
+            nativeProvider: "telegram",
+          },
+        },
+        audienceless: "deny",
+        resolvePluginRoute: async () => {
+          routeLookupCalled = true;
+          return { kind: "unsupported" };
+        },
+      }),
+    ).resolves.toEqual({
+      decision: { mode: "external", allowed: false, reason: "stale_route" },
+    });
+    expect(routeLookupCalled).toBe(false);
+  });
+
+  it.each([
+    {
+      name: "direct evidence for a shared route",
+      routeTarget: "group:shared-1",
+      originTarget: "user:shared-1",
+      requiresChannelProof: true,
+    },
+    {
+      name: "a channel target for a group route",
+      routeTarget: "channel:shared-1",
+      originTarget: "shared-1",
+      requiresChannelProof: false,
+    },
+  ])(
+    "classifies $name before channel proof",
+    async ({ routeTarget, originTarget, requiresChannelProof }) => {
+      const sessionKey = "agent:team-ops:msteams:group:shared-1";
+
+      await expect(
+        resolvePersistedConversationIdentityContext({
+          cfg: identityConfig,
+          agentId: "team-ops",
+          sessionKey,
+          sessionEntry: {
+            sessionId: "teams-generic-kind-conflict",
+            updatedAt: 1,
+            groupId: "shared-1",
+            route: {
+              channel: "msteams",
+              accountId: "default",
+              target: { to: routeTarget, chatType: "group" },
+            },
+            origin: {
+              provider: "msteams",
+              accountId: "default",
+              chatType: "group",
+              nativeChannelId: originTarget,
+              nativeProvider: "msteams",
+            },
+          },
+          audienceless: "deny",
+          resolvePluginRoute: async (params) => {
+            expect(params.requireAudienceValidation).toBe(requiresChannelProof);
+            if (requiresChannelProof) {
+              expect(params.audienceEvidence).toEqual(
+                expect.arrayContaining([
+                  { source: "route", value: routeTarget },
+                  { source: "origin-native", value: originTarget },
+                ]),
+              );
+            } else {
+              expect(params.audienceEvidence).toBeUndefined();
+            }
+            return { kind: "unresolved" };
+          },
+        }),
+      ).resolves.toEqual({
+        decision: { mode: "external", allowed: false, reason: "stale_route" },
+      });
+    },
+  );
 
   it("revalidates a generic runtime binding on the persisted child thread", async () => {
     const threadId = "1710000000.000100";

@@ -100,7 +100,6 @@ import {
   getTelegramTextParts,
   hasBotMention,
   buildTelegramThreadParams,
-  buildTelegramGroupPeerId,
   isTelegramCommandsAllowFromConfigured,
   resolveTelegramCommandAuthorization,
   resolveTelegramDirectPeerId,
@@ -3569,7 +3568,7 @@ export const registerTelegramHandlers = ({
   const handleInboundMessageLike = async (event: InboundTelegramEvent) => {
     let dispatchDedupeKeys: string[] = [];
     try {
-      if (!event.identityDecision.allowed) {
+      if (event.isGroup && !event.identityDecision.allowed) {
         logVerbose(
           `Blocked telegram message from ${event.senderId || "unknown"} (${event.identityDecision.reason})`,
         );
@@ -3590,6 +3589,14 @@ export const registerTelegramHandlers = ({
         dmAccess: "challenge",
       });
       if (!gate.allowed) {
+        return;
+      }
+      // A DM pairing challenge is a control-plane response, not an agent turn.
+      // Admitted sender access still cannot bypass conversation identity.
+      if (!event.isGroup && !event.identityDecision.allowed) {
+        logVerbose(
+          `Blocked telegram message from ${event.senderId || "unknown"} (${event.identityDecision.reason})`,
+        );
         return;
       }
       const { effectiveDmAllow } = gate;
@@ -3696,12 +3703,6 @@ export const registerTelegramHandlers = ({
       senderId: msg.from?.id != null ? String(msg.from.id) : "",
       senderUsername: msg.from?.username,
     });
-    if (!stableIdentity.allowed) {
-      logVerbose(
-        `Blocked telegram message from ${msg.from?.id ?? "unknown"} (${stableIdentity.reason})`,
-      );
-      return;
-    }
     const isForum = await resolveTelegramForumFlag({
       chatId: msg.chat.id,
       chatType: msg.chat.type,

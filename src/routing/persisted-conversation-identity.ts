@@ -8,10 +8,14 @@ import {
   lookupRuntimeConversationBindingRoute,
   resolveConfiguredBindingRoute,
 } from "../channels/plugins/binding-routing.js";
-import type { ChannelCurrentConversationRoute } from "../channels/plugins/types.core.js";
+import type {
+  ChannelConversationAudienceEvidence,
+  ChannelCurrentConversationRoute,
+} from "../channels/plugins/types.core.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveSessionStoreKey } from "../gateway/session-store-key.js";
+import { normalizeSessionPeerId } from "../sessions/session-key-utils.js";
 import {
   INTERNAL_MESSAGE_CHANNEL,
   isInternalNonDeliveryChannel,
@@ -24,6 +28,7 @@ import type { PersistedPluginConversationRouteResult } from "./persisted-convers
 import { resolveAgentRoute, type AgentRouteMatch } from "./resolve-route.js";
 import {
   normalizeAgentId,
+  normalizeAccountId,
   parseAgentSessionKey,
   parseSessionDeliveryRoute,
   parseThreadSessionSuffix,
@@ -54,6 +59,8 @@ export type PersistedPluginConversationRouteResolver = (params: {
   groupSpace?: string | null;
   threadId?: string | number | null;
   senderId?: string | null;
+  audienceEvidence?: readonly ChannelConversationAudienceEvidence[];
+  requireAudienceValidation?: boolean;
 }) => Promise<PersistedPluginConversationRouteResult>;
 
 type PersistedConversationAudience = {
@@ -70,6 +77,8 @@ type PersistedConversationAudience = {
   groupId?: string;
   groupChannel?: string;
   groupSpace?: string;
+  requiresChannelOwnedAudienceResolution?: boolean;
+  audienceEvidence?: ChannelConversationAudienceEvidence[];
 };
 
 function deniedStaleRoute(): PersistedConversationIdentityContext {
@@ -88,6 +97,28 @@ function stripPersistedAddressPrefix(raw: string | undefined, channel: string): 
     value = value.slice(providerPrefix.length);
   }
   return normalizeOptionalString(value.replace(/^(?:user|direct|dm|group|channel|room):/i, ""));
+}
+
+function resolvePersistedAudienceKind(
+  raw: string | undefined,
+  channel: string,
+): "direct" | "shared" | undefined {
+  let value = normalizeOptionalString(raw);
+  if (!value) {
+    return undefined;
+  }
+  const providerPrefix = `${channel}:`;
+  if (value.toLowerCase().startsWith(providerPrefix.toLowerCase())) {
+    value = value.slice(providerPrefix.length).trim();
+  }
+  const match = /^(user|direct|dm|group|channel|room):/i.exec(value);
+  const kind = match?.[1]?.toLowerCase();
+  if (kind === "user" || kind === "direct" || kind === "dm") {
+    return "direct";
+  }
+  // Providers commonly address the same shared conversation as either a
+  // group or channel. Only a direct/shared conflict changes the audience.
+  return kind === "group" || kind === "channel" || kind === "room" ? "shared" : undefined;
 }
 
 function parseCompactDirectPeer(sessionKey: string): string | undefined {
@@ -146,98 +177,300 @@ function resolvePersistedConversationAudience(params: {
   if (!channel) {
     // Internal transport metadata does not turn an agent/main or named session
     // into a channel audience. The caller's audienceless policy still applies.
-    return undefined;
+    const declaredChannels = [
+      deliveryChannel,
+      routeChannel,
+      originProvider,
+      originSurface,
+      entryChannel,
+      lastChannel,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    return declaredChannels.length > 0 && declaredChannels.every(isInternalPersistedChannel)
+      ? undefined
+      : null;
   }
   const originMatchesChannel = originProvider === channel || originSurface === channel;
+  // Older session entries may omit `channel`; their origin still owns adjacent
+  // group metadata. A conflicting channel must never donate policy inputs.
+  const entryMetadataOwnedByChannel =
+    entryChannel === channel || (entryChannel === undefined && originMatchesChannel);
   const originNativeProvider = normalizeOptionalLowercaseString(entry?.origin?.nativeProvider);
+  // Native audience ids belong only to their declared provider. Reusing one
+  // across a later channel overlay could admit a different conversation.
+  const originNativeOwnedByChannel = originNativeProvider
+    ? originNativeProvider === channel
+    : originMatchesChannel;
+  const directProofOwnedByChannel = originMatchesChannel || originNativeProvider === channel;
   const routeTarget =
     routeChannel === channel ? normalizeOptionalString(entry?.route?.target?.to) : undefined;
   const deliveryTarget =
     deliveryChannel === channel ? normalizeOptionalString(delivery?.peerId) : undefined;
   const lastTarget = lastChannel === channel ? normalizeOptionalString(entry?.lastTo) : undefined;
-  const explicitPeerIds = [routeTarget, deliveryTarget, lastTarget]
+  // An internal overlay can hide the selected provider's entry metadata. Only
+  // an explicit selected target prefix may recover its audience kind.
+  const lastTargetKind = resolvePersistedAudienceKind(lastTarget, channel);
+  const persistedRouteChatType = normalizeChatType(
+    (routeChannel === channel ? entry?.route?.target?.chatType : undefined) ??
+      (compactDirectPeer ? "direct" : undefined) ??
+      (originMatchesChannel ? entry?.origin?.chatType : undefined) ??
+      (deliveryChannel === channel ? delivery?.peerKind : undefined) ??
+      (lastTargetKind === "direct"
+        ? "direct"
+        : lastTargetKind === "shared"
+          ? "channel"
+          : undefined) ??
+      (entryMetadataOwnedByChannel ? entry?.chatType : undefined),
+  );
+  const isGroupAudience =
+    persistedRouteChatType === "group" || persistedRouteChatType === "channel";
+  const originNativePeerIds = (
+    originNativeOwnedByChannel
+      ? [
+          entry?.origin?.nativeChannelId,
+          ...(isGroupAudience ? [] : [entry?.origin?.nativeDirectUserId]),
+        ]
+      : []
+  )
     .map((target) => stripPersistedAddressPrefix(target, channel))
     .filter((target): target is string => Boolean(target));
-  const originNativePeerIds = [entry?.origin?.nativeChannelId, entry?.origin?.nativeDirectUserId]
+  const originTransportPeerIds = [
+    entry?.origin?.to,
+    ...(isGroupAudience ? [] : [entry?.origin?.from]),
+  ]
     .map((target) => stripPersistedAddressPrefix(target, channel))
     .filter((target): target is string => Boolean(target));
-  const originTransportPeerIds = [entry?.origin?.to, entry?.origin?.from]
-    .map((target) => stripPersistedAddressPrefix(target, channel))
-    .filter((target): target is string => Boolean(target));
+  const ownedGroupId = entryMetadataOwnedByChannel
+    ? normalizeOptionalString(entry?.groupId)
+    : undefined;
+  const persistedGroupPeerId = isGroupAudience
+    ? stripPersistedAddressPrefix(ownedGroupId, channel)
+    : undefined;
   const originPeerIds = [...new Set([...originNativePeerIds, ...originTransportPeerIds])];
+  const normalizeDirectPeer = (raw: string | undefined, peerKind: string) => {
+    const peerId = stripPersistedAddressPrefix(raw, channel);
+    if (!peerId) {
+      return undefined;
+    }
+    return normalizeSessionPeerId({
+      channel,
+      peerKind,
+      peerId,
+    });
+  };
+  const resolveDirectTargetEvidence = (
+    raw: string | undefined,
+    fallbackKind: string | null | undefined,
+  ) => {
+    const declaredKind = resolvePersistedAudienceKind(raw, channel);
+    const proofKind =
+      declaredKind === "direct" ||
+      (declaredKind === undefined && normalizeChatType(fallbackKind ?? undefined) === "direct")
+        ? ("sender" as const)
+        : ("conversation" as const);
+    const peerId = normalizeDirectPeer(raw, proofKind === "sender" ? "direct" : "channel");
+    return peerId ? { peerId, proofKind } : undefined;
+  };
+  const directSenderPeerIds = (
+    !isGroupAudience
+      ? [
+          ...(originNativeOwnedByChannel
+            ? [entry?.origin?.nativeDirectUserId, entry?.origin?.nativeSenderId]
+            : []),
+          ...(originMatchesChannel ? [entry?.origin?.from] : []),
+        ]
+      : []
+  )
+    .map((target) => normalizeDirectPeer(target, "direct"))
+    .filter((target): target is string => Boolean(target));
+  const directConversationPeerIds = (
+    !isGroupAudience && originNativeOwnedByChannel ? [entry?.origin?.nativeChannelId] : []
+  )
+    .map((target) => normalizeDirectPeer(target, "channel"))
+    .filter((target): target is string => Boolean(target));
+  const directTargetEvidence = [
+    resolveDirectTargetEvidence(routeTarget, persistedRouteChatType),
+    resolveDirectTargetEvidence(deliveryTarget, delivery?.peerKind ?? persistedRouteChatType),
+    resolveDirectTargetEvidence(lastTarget, persistedRouteChatType),
+    ...(originMatchesChannel
+      ? [resolveDirectTargetEvidence(entry?.origin?.to, persistedRouteChatType)]
+      : []),
+  ].filter((target): target is NonNullable<typeof target> => Boolean(target));
+  const directSenderPeerIdSet = new Set(directSenderPeerIds);
+  const directConversationPeerIdSet = new Set(directConversationPeerIds);
+  // Sender ids share one provider-owned namespace. Once persisted sender facts
+  // disagree, choosing one would hide stale owner and per-sender policy state.
+  if (directSenderPeerIdSet.size > 1) {
+    return null;
+  }
+  const directSenderTargetPeerIds = new Set(
+    directTargetEvidence
+      .filter((evidence) => evidence.proofKind === "sender")
+      .map((evidence) => evidence.peerId),
+  );
+  const directConversationTargetPeerIds = new Set(
+    directTargetEvidence
+      .filter((evidence) => evidence.proofKind === "conversation")
+      .map((evidence) => evidence.peerId),
+  );
+  const directTargetClasses =
+    Number(directSenderTargetPeerIds.size > 0) + Number(directConversationTargetPeerIds.size > 0);
+  // A shared-form address cannot prove a direct audience without a matching
+  // provider-owned native conversation. The channel owner must certify it.
+  const directAudiencePeersMatch =
+    directSenderTargetPeerIds.size <= 1 &&
+    directConversationTargetPeerIds.size <= 1 &&
+    directTargetClasses <= 1 &&
+    (directProofOwnedByChannel
+      ? directSenderPeerIdSet.size <= 1 &&
+        directConversationPeerIdSet.size <= 1 &&
+        directTargetEvidence.every(({ peerId, proofKind }) =>
+          proofKind === "sender"
+            ? directSenderPeerIdSet.has(peerId)
+            : directConversationPeerIdSet.has(peerId),
+        )
+      : directConversationTargetPeerIds.size === 0);
   // Older direct-message entries can pair a native conversation id with the
   // delivery user only in origin.to/from. Trust that pairing only while the
   // origin provider still owns the selected audience, never after an overlay.
   const nativeAudiencePeerIds = originMatchesChannel ? originPeerIds : originNativePeerIds;
   const explicitAccountIds = [
-    routeTarget ? entry?.route?.accountId : undefined,
-    deliveryTarget ? delivery?.accountId : undefined,
-    lastTarget ? entry?.lastAccountId : undefined,
+    routeChannel === channel ? entry?.route?.accountId : undefined,
+    deliveryChannel === channel ? delivery?.accountId : undefined,
+    lastChannel === channel ? entry?.lastAccountId : undefined,
   ]
     .map(normalizeOptionalString)
     .filter((accountId): accountId is string => Boolean(accountId));
   const originAccountId = normalizeOptionalString(entry?.origin?.accountId);
-  const explicitPeersMatchOrigin =
-    explicitPeerIds.length === 0 ||
-    explicitPeerIds.every((peerId) => originPeerIds.includes(peerId));
-  const explicitPeersMatchNativeOrigin =
-    nativeAudiencePeerIds.length > 0 &&
-    (explicitPeerIds.length === 0 ||
-      explicitPeerIds.every((peerId) => nativeAudiencePeerIds.includes(peerId)));
+  // Account ids are generic route ownership facts. Priority-picking one would
+  // hide a stale cross-account session before the channel owner can validate it.
+  const normalizedExplicitAccountIds = explicitAccountIds.map(normalizeAccountId);
+  if (new Set(normalizedExplicitAccountIds).size > 1) {
+    return null;
+  }
+  // Group providers can encode the same audience as a parent/child or
+  // organization/conversation pair. Core preserves conflicts for the channel
+  // owner to interpret instead of treating provider-specific strings as equal.
+  const groupAudienceEvidence: ChannelConversationAudienceEvidence[] = isGroupAudience
+    ? [
+        ...(routeTarget ? [{ source: "route" as const, value: routeTarget }] : []),
+        ...(deliveryTarget ? [{ source: "delivery" as const, value: deliveryTarget }] : []),
+        ...(lastTarget ? [{ source: "last" as const, value: lastTarget }] : []),
+        ...(originNativeOwnedByChannel && entry?.origin?.nativeChannelId
+          ? [{ source: "origin-native" as const, value: entry.origin.nativeChannelId }]
+          : []),
+        ...(originMatchesChannel && entry?.origin?.to
+          ? [{ source: "origin-target" as const, value: entry.origin.to }]
+          : []),
+        ...(ownedGroupId ? [{ source: "group" as const, value: ownedGroupId }] : []),
+      ]
+    : [];
+  const directAudienceEvidence: ChannelConversationAudienceEvidence[] = !isGroupAudience
+    ? [
+        ...(routeTarget ? [{ source: "route" as const, value: routeTarget }] : []),
+        ...(deliveryTarget ? [{ source: "delivery" as const, value: deliveryTarget }] : []),
+        ...(lastTarget ? [{ source: "last" as const, value: lastTarget }] : []),
+        ...(originNativeOwnedByChannel && entry?.origin?.nativeChannelId
+          ? [{ source: "origin-native" as const, value: entry.origin.nativeChannelId }]
+          : []),
+        ...(originMatchesChannel && entry?.origin?.to
+          ? [{ source: "origin-target" as const, value: entry.origin.to }]
+          : []),
+      ]
+    : [];
+  const groupAudiencePeerIds = groupAudienceEvidence.map((evidence) =>
+    normalizeSessionPeerId({
+      channel,
+      peerKind: persistedRouteChatType,
+      peerId: stripPersistedAddressPrefix(evidence.value, channel),
+    }),
+  );
+  const groupAudienceKinds = new Set(
+    groupAudienceEvidence.flatMap(
+      (evidence) => resolvePersistedAudienceKind(evidence.value, channel) ?? [],
+    ),
+  );
+  // Equal provider ids can name different audience kinds. Keep that conflict
+  // for the channel owner instead of treating the persisted route as proven.
+  const groupAudiencePeersAgree =
+    new Set(groupAudiencePeerIds).size <= 1 &&
+    groupAudienceKinds.size <= 1 &&
+    [...groupAudienceKinds].every((kind) => kind === "shared");
+  const requiresChannelOwnedAudienceResolution = isGroupAudience
+    ? !groupAudiencePeersAgree
+    : !directAudiencePeersMatch;
+  const explicitPeersMatchOrigin = isGroupAudience
+    ? originPeerIds.length > 0 || persistedGroupPeerId !== undefined
+    : originPeerIds.length > 0 && directAudiencePeersMatch;
+  const explicitPeersMatchNativeOrigin = isGroupAudience
+    ? nativeAudiencePeerIds.length > 0
+    : nativeAudiencePeerIds.length > 0 && directAudiencePeersMatch;
+  const originPeerMatchesSelectedAudience =
+    originMatchesChannel && (isGroupAudience || explicitPeersMatchOrigin);
+  const persistedAccountIds = [
+    ...normalizedExplicitAccountIds,
+    ...(originMatchesChannel && originAccountId ? [normalizeAccountId(originAccountId)] : []),
+  ];
+  if (new Set(persistedAccountIds).size > 1) {
+    return null;
+  }
   const explicitAccountsMatchOrigin =
     explicitAccountIds.length === 0 ||
     (originAccountId !== undefined &&
-      explicitAccountIds.every((accountId) => accountId === originAccountId));
+      explicitAccountIds.every(
+        (accountId) => normalizeAccountId(accountId) === normalizeAccountId(originAccountId),
+      ));
   const originOwnsSelectedAudience =
-    originMatchesChannel && explicitPeersMatchOrigin && explicitAccountsMatchOrigin;
+    originPeerMatchesSelectedAudience && explicitAccountsMatchOrigin;
   // Internal overlays can retain native ids from an earlier channel while
   // route metadata selects another audience on the same provider. Reuse
   // origin identity only when provider, account, and native peer still agree.
   const originNativeMatchesAudience = originNativeProvider
     ? originNativeProvider === channel &&
-      explicitPeersMatchNativeOrigin &&
+      (isGroupAudience || explicitPeersMatchNativeOrigin) &&
       explicitAccountsMatchOrigin
     : originOwnsSelectedAudience;
-  const chatType = normalizeChatType(
-    (routeChannel === channel ? entry?.route?.target?.chatType : undefined) ??
-      (originOwnsSelectedAudience ? entry?.origin?.chatType : undefined) ??
-      (deliveryChannel === channel ? delivery?.peerKind : undefined) ??
-      (compactDirectPeer ? "direct" : undefined) ??
-      entry?.chatType,
-  );
+  const originAvailableForValidation =
+    requiresChannelOwnedAudienceResolution && !isGroupAudience && originNativeOwnedByChannel;
+  const chatType = persistedRouteChatType;
   if (!channel || !chatType) {
     return null;
   }
 
-  const originTarget = originOwnsSelectedAudience
-    ? normalizeOptionalString(entry?.origin?.to)
-    : undefined;
+  const originTarget =
+    originOwnsSelectedAudience || (originAvailableForValidation && originMatchesChannel)
+      ? normalizeOptionalString(entry?.origin?.to)
+      : undefined;
 
-  const originNativeChannelId = originNativeMatchesAudience
-    ? normalizeOptionalString(entry?.origin?.nativeChannelId)
-    : undefined;
-  const originNativeDirectUserId = originNativeMatchesAudience
-    ? normalizeOptionalString(entry?.origin?.nativeDirectUserId)
-    : undefined;
-  const originNativeSenderId = originNativeMatchesAudience
-    ? normalizeOptionalString(entry?.origin?.nativeSenderId)
-    : undefined;
-  const originParentConversationId = originNativeMatchesAudience
-    ? normalizeOptionalString(entry?.origin?.parentConversationId)
-    : undefined;
+  const originNativeChannelId =
+    originNativeMatchesAudience || originAvailableForValidation
+      ? normalizeOptionalString(entry?.origin?.nativeChannelId)
+      : undefined;
+  const originNativeDirectUserId =
+    originNativeMatchesAudience || originAvailableForValidation
+      ? normalizeOptionalString(entry?.origin?.nativeDirectUserId)
+      : undefined;
+  const originNativeSenderId =
+    originNativeMatchesAudience || originAvailableForValidation
+      ? normalizeOptionalString(entry?.origin?.nativeSenderId)
+      : undefined;
+  const originParentConversationId =
+    originNativeMatchesAudience || originAvailableForValidation
+      ? normalizeOptionalString(entry?.origin?.parentConversationId)
+      : undefined;
   const routeDirectPeer =
     originNativeDirectUserId ??
-    (deliveryChannel === channel && normalizeChatType(delivery?.peerKind) === "direct"
+    (delivery && deliveryChannel === channel && normalizeChatType(delivery.peerKind) === "direct"
       ? normalizeOptionalString(delivery.peerId)
       : undefined) ??
     compactDirectPeer;
   const target =
     routeTarget ??
-    (chatType === "direct" ? routeDirectPeer : originNativeChannelId) ??
+    (chatType === "direct" ? routeDirectPeer : undefined) ??
     deliveryTarget ??
     originTarget ??
     lastTarget ??
-    normalizeOptionalString(entry?.groupId) ??
+    ownedGroupId ??
+    originNativeChannelId ??
     (chatType === "direct" && originOwnsSelectedAudience
       ? stripPersistedAddressPrefix(entry?.origin?.from, channel)
       : undefined);
@@ -249,26 +482,50 @@ function resolvePersistedConversationAudience(params: {
   if (!peerId) {
     return null;
   }
+  const sessionThreadId = normalizeOptionalString(
+    parseThreadSessionSuffix(params.sessionKey).threadId,
+  );
+  const persistedNativeThreadIds = [
+    routeChannel === channel ? entry?.route?.thread?.id : undefined,
+    lastChannel === channel ? entry?.lastThreadId : undefined,
+    originOwnsSelectedAudience || originAvailableForValidation
+      ? entry?.origin?.threadId
+      : undefined,
+  ]
+    .map((threadId) => (threadId == null ? undefined : normalizeOptionalString(String(threadId))))
+    .filter((threadId): threadId is string => Boolean(threadId));
+  // Native persisted facts must agree exactly. A session suffix may add the
+  // exact peer as collision scope, but only when a native fact proves its tail.
+  if (new Set(persistedNativeThreadIds).size > 1) {
+    return null;
+  }
+  const nativeThreadId = persistedNativeThreadIds[0];
+  if (sessionThreadId?.includes(":") && !nativeThreadId) {
+    return null;
+  }
+  if (
+    sessionThreadId &&
+    nativeThreadId &&
+    sessionThreadId !== nativeThreadId &&
+    sessionThreadId !== `${peerId}:${nativeThreadId}`
+  ) {
+    return null;
+  }
+  const threadId = nativeThreadId ?? sessionThreadId;
   const senderId =
     originNativeSenderId ??
     originNativeDirectUserId ??
-    (originOwnsSelectedAudience
+    (originOwnsSelectedAudience || originAvailableForValidation
       ? stripPersistedAddressPrefix(entry?.origin?.from, channel)
       : undefined) ??
     undefined;
   const groupId =
-    chatType === "direct"
-      ? undefined
-      : (normalizeOptionalString(entry?.groupId) ?? originNativeChannelId ?? peerId);
+    chatType === "direct" ? undefined : (ownedGroupId ?? originNativeChannelId ?? peerId);
   const bindingConversationId =
     chatType === "direct" ? (routeTarget ?? originTarget ?? lastTarget ?? target) : undefined;
   return {
     channel,
-    accountId:
-      (deliveryChannel === channel ? normalizeOptionalString(delivery?.accountId) : undefined) ??
-      (routeChannel === channel ? normalizeOptionalString(entry?.route?.accountId) : undefined) ??
-      (lastChannel === channel ? normalizeOptionalString(entry?.lastAccountId) : undefined) ??
-      (originOwnsSelectedAudience ? originAccountId : undefined),
+    accountId: persistedAccountIds[0],
     target,
     // Plugin routes retain the native conversation id. Generic direct
     // bindings use the provider-native delivery identity separately.
@@ -277,17 +534,21 @@ function resolvePersistedConversationAudience(params: {
     bindingConversationId,
     peerId,
     chatType,
-    threadId:
-      (routeChannel === channel ? entry?.route?.thread?.id : undefined) ??
-      (lastChannel === channel ? entry?.lastThreadId : undefined) ??
-      (originOwnsSelectedAudience ? entry?.origin?.threadId : undefined) ??
-      (deliveryChannel === channel ? delivery?.threadId : undefined),
+    threadId,
     senderId,
     groupId,
-    groupChannel: normalizeOptionalString(entry?.groupChannel),
+    groupChannel: entryMetadataOwnedByChannel
+      ? normalizeOptionalString(entry?.groupChannel)
+      : undefined,
     // Workspace ids are owned by the same persisted origin as native peer ids.
     // A newer peer route must not inherit an older guild/team binding scope.
     groupSpace: originNativeMatchesAudience ? normalizeOptionalString(entry?.space) : undefined,
+    requiresChannelOwnedAudienceResolution,
+    audienceEvidence: requiresChannelOwnedAudienceResolution
+      ? isGroupAudience
+        ? groupAudienceEvidence
+        : directAudienceEvidence
+      : undefined,
   };
 }
 
@@ -382,14 +643,37 @@ async function resolveCurrentRoute(params: {
     groupSpace: params.audience.groupSpace,
     threadId: params.audience.threadId,
     senderId: params.audience.senderId,
+    audienceEvidence: params.audience.audienceEvidence,
+    requireAudienceValidation: params.audience.requiresChannelOwnedAudienceResolution,
   });
   if (pluginResult.kind === "resolved") {
-    return pluginResult.route;
+    if (
+      pluginResult.effectiveAccountId !== undefined &&
+      normalizeAccountId(pluginResult.route.accountId) !==
+        normalizeAccountId(pluginResult.effectiveAccountId)
+    ) {
+      return null;
+    }
+    return params.audience.requiresChannelOwnedAudienceResolution &&
+      pluginResult.route.audienceValidated !== true
+      ? null
+      : pluginResult.route;
   }
   if (pluginResult.kind === "unresolved") {
     return null;
   }
-  return resolveGenericCurrentRoute(params);
+  if (params.audience.requiresChannelOwnedAudienceResolution) {
+    // Conflicting persisted group forms need the channel's target grammar.
+    // Generic fallback must not discard one form and revive stale authority.
+    return null;
+  }
+  return resolveGenericCurrentRoute({
+    cfg: params.cfg,
+    audience: {
+      ...params.audience,
+      accountId: pluginResult.effectiveAccountId ?? params.audience.accountId,
+    },
+  });
 }
 
 /** Revalidates a persisted session against the current agent and channel route owners. */
@@ -472,6 +756,9 @@ export async function resolvePersistedConversationIdentityContext(params: {
     : undefined;
   if (
     !currentRoute ||
+    normalizeOptionalLowercaseString(currentRoute.channel) !== audience.channel ||
+    (audience.accountId !== undefined &&
+      normalizeAccountId(currentRoute.accountId) !== normalizeAccountId(audience.accountId)) ||
     normalizeAgentId(currentRoute.agentId) !== normalizeAgentId(params.agentId) ||
     currentStoreKey !== targetStoreKey
   ) {

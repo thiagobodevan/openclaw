@@ -337,15 +337,18 @@ describe("createTelegramBot", () => {
   it("records outbound prompt-context sends into ambient group history", async () => {
     onSpy.mockClear();
     replySpy.mockClear();
-    const cfg = {
-      messages: { groupChat: { unmentionedInbound: "room_event", mentionPatterns: [] } },
-      channels: {
-        telegram: {
-          groupPolicy: "open",
-          groups: { "*": { requireMention: false } },
+    const cfg = buildIdentityAdmittedTelegramConfig({
+      config: {
+        messages: { groupChat: { unmentionedInbound: "room_event", mentionPatterns: [] } },
+        channels: {
+          telegram: {
+            groupPolicy: "open",
+            groups: { "*": { requireMention: false } },
+          },
         },
       },
-    } satisfies OpenClawConfig;
+      bindGroups: true,
+    });
     loadConfig.mockReturnValue(cfg);
     createTelegramBot({
       token: "tok",
@@ -2298,21 +2301,26 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    loadConfig.mockReturnValue({
-      agents: {
-        defaults: {
-          envelopeTimezone: "utc",
+    loadConfig.mockReturnValue(
+      buildIdentityAdmittedTelegramConfig({
+        config: {
+          agents: {
+            defaults: {
+              envelopeTimezone: "utc",
+            },
+          },
+          channels: {
+            telegram: {
+              groupPolicy: "allowlist",
+              groupAllowFrom: ["111", "222"],
+              historyLimit: 0,
+              groups: { "*": { requireMention: true } },
+            },
+          },
         },
-      },
-      channels: {
-        telegram: {
-          groupPolicy: "allowlist",
-          groupAllowFrom: ["111", "222"],
-          historyLimit: 0,
-          groups: { "*": { requireMention: true } },
-        },
-      },
-    });
+        bindGroups: true,
+      }),
+    );
 
     createTelegramBot({ token: "tok" });
     const handler = getOnHandler("message") as (ctx: Record<string, unknown>) => Promise<void>;

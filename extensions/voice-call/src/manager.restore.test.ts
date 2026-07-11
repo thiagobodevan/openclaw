@@ -149,6 +149,30 @@ describe("CallManager verification on restore", () => {
     expect(loadActiveCallsFromStore(storePath).activeCalls.size).toBe(0);
   });
 
+  it("hangs up legacy restored inbound calls without admitted identity", async () => {
+    const getCallStatus = vi.fn();
+    const validateInboundIdentity = vi.fn(() => true);
+    const { manager, provider, storePath } = await initializeManager({
+      callOverrides: {
+        direction: "inbound",
+        inboundIdentity: undefined,
+      },
+      configureProvider: (configuredProvider) => {
+        configuredProvider.getCallStatus = getCallStatus;
+      },
+      validateInboundIdentity,
+    });
+
+    expect(manager.getActiveCalls()).toHaveLength(0);
+    expect(validateInboundIdentity).not.toHaveBeenCalled();
+    expect(getCallStatus).not.toHaveBeenCalled();
+    expect(requireSingleHangupCall(provider)).toMatchObject({
+      reason: "hangup-bot",
+    });
+    await flushPendingCallRecordWritesForTest();
+    expect(loadActiveCallsFromStore(storePath).activeCalls.size).toBe(0);
+  });
+
   it("keeps calls when provider returns unknown (transient error)", async () => {
     const { call, manager } = await initializeManager({
       providerResult: { status: "error", isTerminal: false, isUnknown: true },

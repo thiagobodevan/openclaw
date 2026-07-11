@@ -3,8 +3,11 @@ import { resolveStableChannelMessageIngress } from "openclaw/plugin-sdk/channel-
 import { createChannelPairingChallengeIssuer } from "openclaw/plugin-sdk/channel-pairing";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
-import { resolveConversationIdentityAdmission } from "openclaw/plugin-sdk/routing";
-import { normalizeSmsPhoneNumber } from "./phone.js";
+import {
+  resolveConversationIdentityMode,
+  resolveStableSenderIsOwner,
+} from "openclaw/plugin-sdk/routing";
+import { normalizeSmsAllowFrom, normalizeSmsPhoneNumber } from "./phone.js";
 import { sendSmsTextChunks } from "./send.js";
 import type { ResolvedSmsAccount, SmsInboundMessage } from "./types.js";
 
@@ -101,26 +104,6 @@ export async function dispatchSmsInboundEvent(params: {
       id: from,
     },
   });
-  const identityDecision = resolveConversationIdentityAdmission({
-    cfg: params.cfg,
-    ctx: {
-      AgentId: route.agentId,
-      AgentRouteMatchedBy: route.matchedBy,
-      SessionKey: route.sessionKey,
-      AccountId: route.accountId,
-      ChatType: "direct",
-      SenderId: from,
-      From: `sms:${from}`,
-      To: params.msg.to,
-      Provider: CHANNEL_ID,
-      Surface: CHANNEL_ID,
-      CommandAuthorized: false,
-    },
-  });
-  if (!identityDecision.allowed) {
-    params.log?.warn?.(`SMS sender ${from} is not admitted (${identityDecision.reason})`);
-    return;
-  }
   const auth = await authorizeSmsSender({
     cfg: params.cfg,
     account: params.account,
@@ -138,6 +121,23 @@ export async function dispatchSmsInboundEvent(params: {
       return;
     }
     params.log?.warn?.(`SMS sender ${from} is not authorized`);
+    return;
+  }
+  const senderIsOwner = resolveStableSenderIsOwner({
+    senderId: from,
+    commandOwnerAllowFrom: params.cfg.commands?.ownerAllowFrom,
+    providerAllowFrom: auth.senderAccess.effectiveAllowFrom,
+    normalizeEntry: normalizeSmsAllowFrom,
+  });
+  const identityDecision = resolveConversationIdentityMode({
+    config: params.cfg,
+    agentId: route.agentId,
+    routeMatchedBy: route.matchedBy,
+    chatType: "direct",
+    senderIsOwner,
+  });
+  if (!identityDecision.allowed) {
+    params.log?.warn?.(`SMS sender ${from} is not admitted (${identityDecision.reason})`);
     return;
   }
 

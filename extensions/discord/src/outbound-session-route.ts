@@ -6,7 +6,7 @@ import {
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { buildOutboundBaseSessionKey, type RoutePeer } from "openclaw/plugin-sdk/routing";
 import { createDiscordRestClient } from "./client.js";
-import { getGuildMember } from "./internal/api.js";
+import { getChannel, getGuildMember } from "./internal/api.js";
 import {
   buildDiscordRoutePeer,
   resolveDiscordConversationBindingRoute,
@@ -87,7 +87,51 @@ export async function resolveDiscordCurrentConversationRoute(
   if (!isDirectMessage && nativeConversationId && nativeConversationId !== parsed.id) {
     return null;
   }
+  if (params.requireAudienceValidation) {
+    const audienceMatches =
+      params.audienceEvidence !== undefined &&
+      params.audienceEvidence.length > 0 &&
+      params.audienceEvidence.every((evidence) => {
+        try {
+          const candidate = parseDiscordTarget(evidence.value, {
+            defaultKind: isDirectMessage ? "user" : "channel",
+          });
+          return candidate?.id === parsed.id && candidate.kind === parsed.kind;
+        } catch {
+          return false;
+        }
+      });
+    if (!audienceMatches) {
+      return null;
+    }
+  }
   const conversationId = isDirectMessage ? (nativeConversationId ?? parsed.id) : parsed.id;
+  const parentConversationId = params.parentConversationId?.trim();
+  let restClient: ReturnType<typeof createDiscordRestClient> | undefined;
+  const getRest = () =>
+    (restClient ??= createDiscordRestClient({
+      cfg: params.cfg,
+      accountId: params.accountId ?? undefined,
+    })).rest;
+  if (parentConversationId) {
+    if (isDirectMessage) {
+      return null;
+    }
+    try {
+      const channel = await getChannel(getRest(), parsed.id);
+      const liveParentId =
+        "parent_id" in channel && typeof channel.parent_id === "string"
+          ? channel.parent_id.trim()
+          : "";
+      if (liveParentId !== parentConversationId) {
+        return null;
+      }
+    } catch {
+      // Parent-inherited routes require a live child-parent proof. Otherwise a
+      // moved or deleted thread could retain the former parent's service agent.
+      return null;
+    }
+  }
   let memberRoleIds: string[] | undefined;
   const guildId = params.groupSpace?.trim();
   const peer = buildDiscordRoutePeer({
@@ -110,7 +154,7 @@ export async function resolveDiscordCurrentConversationRoute(
     accountId: params.accountId,
     guildId,
     peer,
-    parentConversationId: params.parentConversationId,
+    parentConversationId,
   });
   const routeWithAllConfiguredRoles =
     configuredRoleIds.length > 0
@@ -120,7 +164,7 @@ export async function resolveDiscordCurrentConversationRoute(
           guildId,
           memberRoleIds: configuredRoleIds,
           peer,
-          parentConversationId: params.parentConversationId,
+          parentConversationId,
         })
       : routeWithoutRoleProof;
   const requiresMemberRoleProof =
@@ -132,11 +176,7 @@ export async function resolveDiscordCurrentConversationRoute(
       return null;
     }
     try {
-      const { rest } = createDiscordRestClient({
-        cfg: params.cfg,
-        accountId: params.accountId ?? undefined,
-      });
-      const member = await getGuildMember(rest, guildId, senderId);
+      const member = await getGuildMember(getRest(), guildId, senderId);
       memberRoleIds = [...member.roles];
     } catch {
       // Role-scoped routes require current provider proof. A failed read cannot
@@ -155,12 +195,17 @@ export async function resolveDiscordCurrentConversationRoute(
     directUserId: isDirectMessage ? (senderId ?? parsed.id) : undefined,
     conversationId,
     configuredConversationId: isDirectMessage ? nativeConversationId : conversationId,
-    parentConversationId: params.parentConversationId,
+    parentConversationId,
     runtime,
   });
   // Plugin-owned targets require their owner handoff and cannot authorize a
   // new agent turn from persisted channel metadata alone.
-  return routeState.pluginOwnedBinding ? null : routeState.effectiveRoute;
+  if (routeState.pluginOwnedBinding) {
+    return null;
+  }
+  return params.requireAudienceValidation
+    ? { ...routeState.effectiveRoute, audienceValidated: true }
+    : routeState.effectiveRoute;
 }
 
 function resolveDiscordOutboundTargetKindHint(params: {

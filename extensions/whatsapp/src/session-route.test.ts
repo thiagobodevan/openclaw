@@ -116,6 +116,24 @@ describe("resolveWhatsAppCurrentConversationRoute", () => {
     });
   });
 
+  it("rejects conflicting persisted group evidence", async () => {
+    const peerId = "120363000000000000@g.us";
+
+    await expect(
+      resolveWhatsAppCurrentConversationRoute({
+        cfg: {},
+        accountId: "default",
+        target: peerId,
+        chatType: "group",
+        audienceEvidence: [
+          { source: "route", value: peerId },
+          { source: "group", value: "120363999999999999@g.us" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("does not turn wildcard pairing approval into owner proof", async () => {
     readStoreAllowFromForDmPolicyMock.mockResolvedValue(["*"]);
 

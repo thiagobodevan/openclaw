@@ -137,7 +137,15 @@ export const clickClackPlugin: ChannelPlugin<ResolvedClickClackAccount> = create
           canRecoverCurrentThread: () => true,
         });
       },
-      resolveCurrentConversationRoute: ({ cfg, accountId, target, chatType }) => {
+      resolveCurrentConversationRoute: ({
+        cfg,
+        accountId,
+        target,
+        chatType,
+        senderId,
+        audienceEvidence,
+        requireAudienceValidation,
+      }) => {
         let parsed: ReturnType<typeof parseClickClackTarget>;
         try {
           parsed = parseClickClackTarget(target);
@@ -148,17 +156,41 @@ export const clickClackPlugin: ChannelPlugin<ResolvedClickClackAccount> = create
         if (isDirect !== (parsed.chatType === "direct")) {
           return null;
         }
+        const directSenderId = senderId?.trim();
+        if (isDirect && directSenderId && directSenderId !== parsed.id) {
+          return null;
+        }
+        if (requireAudienceValidation) {
+          const selectedTarget = buildClickClackTarget(parsed);
+          const audienceMatches =
+            audienceEvidence !== undefined &&
+            audienceEvidence.length > 0 &&
+            audienceEvidence.every((evidence) => {
+              try {
+                const candidate = parseClickClackTarget(evidence.value);
+                // A thread id does not prove its parent channel. Mixed thread and
+                // channel forms need live owner state, so this resolver fails closed.
+                return buildClickClackTarget(candidate) === selectedTarget;
+              } catch {
+                return false;
+              }
+            });
+          if (!audienceMatches) {
+            return null;
+          }
+        }
         const account = resolveClickClackAccount({
           cfg: cfg as CoreConfig,
           accountId,
         });
-        return resolveClickClackAgentRoute({
+        const route = resolveClickClackAgentRoute({
           cfg,
           accountId: account.accountId,
           configuredAgentId: account.agentId,
           target: buildClickClackTarget(parsed),
           isDirect,
         });
+        return requireAudienceValidation ? { ...route, audienceValidated: true } : route;
       },
       resolveSessionConversation: ({ rawId }) => {
         const parsed = parseClickClackTarget(rawId);

@@ -938,6 +938,13 @@ describe("signal createSignalEventHandler inbound context", () => {
     const handler = createSignalEventHandler(
       createBaseSignalEventHandlerDeps({
         cfg: {
+          agents: { list: [{ id: "main", default: true }, { id: "signal-service" }] },
+          bindings: [
+            {
+              agentId: "signal-service",
+              match: { channel: "signal", accountId: "work" },
+            },
+          ],
           messages: {
             ackReaction: "👀",
             ackReactionScope: "direct",

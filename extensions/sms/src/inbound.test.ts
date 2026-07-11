@@ -84,21 +84,18 @@ function createRuntime() {
 
 describe("dispatchSmsInboundEvent", () => {
   it("creates and sends a pairing challenge for first-time SMS senders", async () => {
-    const { runtime, readAllowFromStore, upsertPairingRequest, resolveAgentRoute } =
+    const { runtime, readAllowFromStore, upsertPairingRequest, resolveAgentRoute, run } =
       createRuntime();
     resolveAgentRoute.mockReturnValue({
-      agentId: "team-ops",
+      agentId: "main",
       accountId: "default",
-      sessionKey: "agent:team-ops:sms:direct:+15551234567",
-      matchedBy: "binding.peer",
+      sessionKey: "agent:main:sms:direct:+15551234567",
+      matchedBy: "default",
     });
+    sendSmsViaTwilio.mockClear();
 
     await dispatchSmsInboundEvent({
-      cfg: {
-        agents: {
-          list: [{ id: "main", default: true }, { id: "team-ops" }],
-        },
-      },
+      cfg: {},
       account: createAccount(),
       channelRuntime: runtime,
       msg: {
@@ -127,11 +124,44 @@ describe("dispatchSmsInboundEvent", () => {
         text: expect.stringContaining("PAIR123"),
       }),
     );
+    expect(run).not.toHaveBeenCalled();
   });
 
-  it("denies an untrusted personal route before pairing reads, writes, or SMS egress", async () => {
+  it("dispatches a paired sender to the default personal route", async () => {
     const { runtime, readAllowFromStore, upsertPairingRequest, resolveAgentRoute, run } =
       createRuntime();
+    readAllowFromStore.mockResolvedValue(["+15551234567"]);
+    resolveAgentRoute.mockReturnValue({
+      agentId: "main",
+      accountId: "default",
+      sessionKey: "agent:main:sms:direct:+15551234567",
+      matchedBy: "default",
+    });
+    sendSmsViaTwilio.mockClear();
+
+    await dispatchSmsInboundEvent({
+      cfg: {},
+      account: createAccount(),
+      channelRuntime: runtime,
+      msg: {
+        from: "+15551234567",
+        to: "+15557654321",
+        body: "hello",
+        messageSid: "SM-paired",
+        accountSid: "AC123",
+      },
+    });
+
+    expect(readAllowFromStore).toHaveBeenCalledOnce();
+    expect(upsertPairingRequest).not.toHaveBeenCalled();
+    expect(sendSmsViaTwilio).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("denies a paired sender that does not match the configured command owner", async () => {
+    const { runtime, readAllowFromStore, upsertPairingRequest, resolveAgentRoute, run } =
+      createRuntime();
+    readAllowFromStore.mockResolvedValue(["+15551234567"]);
     resolveAgentRoute.mockReturnValue({
       agentId: "main",
       accountId: "default",
@@ -156,7 +186,7 @@ describe("dispatchSmsInboundEvent", () => {
       },
     });
 
-    expect(readAllowFromStore).not.toHaveBeenCalled();
+    expect(readAllowFromStore).toHaveBeenCalledOnce();
     expect(upsertPairingRequest).not.toHaveBeenCalled();
     expect(sendSmsViaTwilio).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
@@ -174,7 +204,11 @@ describe("dispatchSmsInboundEvent", () => {
     resolveStorePath.mockReturnValue("/tmp/openclaw-sessions");
 
     await dispatchSmsInboundEvent({
-      cfg: {},
+      cfg: {
+        agents: {
+          list: [{ id: "main", default: true }, { id: "team-ops" }],
+        },
+      },
       account: createAccount({
         dmPolicy: "allowlist",
         allowFrom: ["+15551234567"],

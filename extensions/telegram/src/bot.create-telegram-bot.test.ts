@@ -1690,7 +1690,6 @@ describe("createTelegramBot", () => {
       sendMessageSpy.mockClear();
       replySpy.mockClear();
       loadConfig.mockReturnValue({
-        commands: { ownerAllowFrom: [`telegram:${testCase.senderId}`] },
         channels: { telegram: { dmPolicy: "pairing" } },
       });
       readChannelAllowFromStore.mockResolvedValue([]);
@@ -1736,7 +1735,7 @@ describe("createTelegramBot", () => {
     }
   });
 
-  it("denies an untrusted direct message before pairing state is read or mutated", async () => {
+  it("issues a pairing challenge before denying an untrusted direct agent turn", async () => {
     loadConfig.mockReturnValue({
       commands: { ownerAllowFrom: [] },
       channels: { telegram: { dmPolicy: "pairing" } },
@@ -1769,9 +1768,10 @@ describe("createTelegramBot", () => {
       getFile: async () => ({ download: async () => new Uint8Array() }),
     });
 
-    expect(readChannelAllowFromStore).not.toHaveBeenCalled();
-    expect(upsertChannelPairingRequest).not.toHaveBeenCalled();
-    expect(sendMessageSpy).not.toHaveBeenCalled();
+    expect(readChannelAllowFromStore).toHaveBeenCalledTimes(1);
+    expect(upsertChannelPairingRequest).toHaveBeenCalledTimes(1);
+    expect(sendMessageSpy).toHaveBeenCalledTimes(1);
+    expect(sendMessageSpy.mock.calls[0]?.[1]).toEqual(expect.stringContaining("Pairing code:"));
     expect(replySpy).not.toHaveBeenCalled();
   });
 
@@ -2027,7 +2027,7 @@ describe("createTelegramBot", () => {
     expect(replySpy).not.toHaveBeenCalled();
   });
 
-  it("blocks unauthorized DM media before download or pairing state", async () => {
+  it("pairs unauthorized DM media senders without downloading or dispatching media", async () => {
     loadConfig.mockReturnValue({
       channels: { telegram: { dmPolicy: "pairing" } },
     });
@@ -2064,8 +2064,8 @@ describe("createTelegramBot", () => {
 
       expect(getFileSpy).not.toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect(upsertChannelPairingRequest).not.toHaveBeenCalled();
-      expect(sendMessageSpy).not.toHaveBeenCalled();
+      expect(upsertChannelPairingRequest).toHaveBeenCalledTimes(1);
+      expect(sendMessageSpy).toHaveBeenCalledTimes(1);
       expect(replySpy).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();
@@ -2328,7 +2328,7 @@ describe("createTelegramBot", () => {
       fetchSpy.mockRestore();
     }
   });
-  it("blocks unauthorized DM media groups before download or pairing state", async () => {
+  it("pairs unauthorized DM media-group senders without downloading or dispatching media", async () => {
     loadConfig.mockReturnValue({
       channels: { telegram: { dmPolicy: "pairing" } },
     });
@@ -2366,8 +2366,8 @@ describe("createTelegramBot", () => {
 
       expect(getFileSpy).not.toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect(upsertChannelPairingRequest).not.toHaveBeenCalled();
-      expect(sendMessageSpy).not.toHaveBeenCalled();
+      expect(upsertChannelPairingRequest).toHaveBeenCalledTimes(1);
+      expect(sendMessageSpy).toHaveBeenCalledTimes(1);
       expect(replySpy).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();

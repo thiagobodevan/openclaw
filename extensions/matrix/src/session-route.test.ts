@@ -171,7 +171,7 @@ function expectFallbackUserRoute(
   expect(fallbackRoute.peer.id).toBe(userId);
   expect(fallbackRoute.chatType).toBe("direct");
   expect(fallbackRoute.from).toBe(`matrix:${userId}`);
-  expect(fallbackRoute.to).toBe(`room:${userId}`);
+  expect(fallbackRoute.to).toBe(`user:${userId}`);
 }
 
 function expectRoute(route: ReturnType<typeof resolveMatrixOutboundSessionRoute>) {
@@ -290,6 +290,19 @@ describe("resolveMatrixOutboundSessionRoute", () => {
     );
     expect(channelRoute.baseSessionKey).toBe("agent:main:matrix:channel:!ops:example.org");
     expect(channelRoute.threadId).toBe("$RootEvent:Example.Org");
+  });
+
+  it("preserves a qualified room alias when no canonical room id is available", () => {
+    const route = resolveMatrixOutboundSessionRoute({
+      cfg: {},
+      agentId: "main",
+      target: "channel:#ops:example.org",
+    });
+
+    const aliasRoute = expectRoute(route);
+    expect(aliasRoute.peer).toEqual({ kind: "channel", id: "#ops:example.org" });
+    expect(aliasRoute.sessionKey).toBe("agent:main:matrix:channel:#ops:example.org");
+    expect(aliasRoute.to).toBe("room:#ops:example.org");
   });
 
   it("resolves per-room DM metadata from the base key when currentSessionKey has a thread suffix", async () => {

@@ -10,6 +10,7 @@ import {
   buildThreadAwareOutboundSessionRoute,
   clearAccountEntryFields,
   createChatChannelPlugin,
+  type ChannelCurrentConversationRouteParams,
 } from "openclaw/plugin-sdk/channel-core";
 import { createAccountStatusSink } from "openclaw/plugin-sdk/channel-outbound";
 import { createChannelMessageAdapterFromOutbound } from "openclaw/plugin-sdk/channel-outbound";
@@ -588,14 +589,7 @@ function resolveTelegramOutboundSessionRoute(params: {
   };
 }
 
-function resolveTelegramCurrentConversationRoute(params: {
-  cfg: OpenClawConfig;
-  accountId?: string | null;
-  target: string;
-  chatType: "direct" | "group" | "channel";
-  threadId?: string | number | null;
-  senderId?: string | null;
-}) {
+function resolveTelegramCurrentConversationRoute(params: ChannelCurrentConversationRouteParams) {
   const parsed = parseTelegramTarget(params.target);
   const chatId = parsed.chatId.trim();
   if (!chatId) {
@@ -605,8 +599,47 @@ function resolveTelegramCurrentConversationRoute(params: {
   if (parsed.chatType !== "unknown" && (parsed.chatType === "group") !== isGroup) {
     return null;
   }
+  const senderId = params.senderId?.trim();
+  if (!isGroup && senderId && senderId !== chatId) {
+    return null;
+  }
+  const nativeConversation = params.conversationId
+    ? parseTelegramTarget(params.conversationId)
+    : undefined;
+  if (nativeConversation && nativeConversation.chatId.trim() !== chatId) {
+    return null;
+  }
+  // A topic may choose different policy or agent config. Parent evidence can
+  // supplement a selected topic, but topic evidence cannot scope a parent turn.
+  const parameterTopic = parseTelegramThreadId(params.threadId);
+  const selectedTopics = new Set(
+    [parsed.messageThreadId, nativeConversation?.messageThreadId, parameterTopic].filter(
+      (topic): topic is number => topic !== undefined,
+    ),
+  );
+  if (selectedTopics.size > 1) {
+    return null;
+  }
+  const topicThreadId = [...selectedTopics][0];
+  if (params.requireAudienceValidation) {
+    const identities = params.audienceEvidence?.map((evidence) =>
+      parseTelegramTarget(evidence.value),
+    );
+    const topics = new Set(identities?.flatMap((identity) => identity.messageThreadId ?? []));
+    if (
+      !identities?.length ||
+      !identities.every(
+        (identity) =>
+          identity.chatId.trim() === chatId &&
+          (isGroup ? identity.chatType !== "direct" : identity.chatType !== "group"),
+      ) ||
+      topics.size > 1 ||
+      (topics.size > 0 && (topicThreadId === undefined || !topics.has(topicThreadId)))
+    ) {
+      return null;
+    }
+  }
 
-  const topicThreadId = parsed.messageThreadId ?? parseTelegramThreadId(params.threadId);
   const account = resolveTelegramAccount({
     cfg: params.cfg,
     accountId: params.accountId ?? undefined,
@@ -624,7 +657,12 @@ function resolveTelegramCurrentConversationRoute(params: {
   });
   // Plugin-owned targets are not agent sessions, so they cannot authorize a
   // scheduled agent turn through a historical channel session.
-  return current.bindingMode.kind === "plugin-owned-runtime" ? null : current.route;
+  if (current.bindingMode.kind === "plugin-owned-runtime") {
+    return null;
+  }
+  return params.requireAudienceValidation
+    ? { ...current.route, audienceValidated: true }
+    : current.route;
 }
 
 function buildTelegramCanonicalTopicThreadId(params: { chatId: string; topicId: number }): string {

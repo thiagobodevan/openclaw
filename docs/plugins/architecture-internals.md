@@ -750,7 +750,10 @@ outbound host generic and use the messaging adapter surface for provider rules:
   channel sessions when current topic or binding rules can change the selected
   agent. It may carry exact channel-owned sender ownership (for example, a
   current pairing approval), but wildcard/open access is never owner proof. It
-  must not renew leases or mutate conversation state.
+  must not renew leases or mutate conversation state. When core requests
+  audience validation, the plugin must parse every supplied audience fact with
+  its native target grammar and return explicit validation only when they all
+  select the same current route.
 
 Recommended split:
 

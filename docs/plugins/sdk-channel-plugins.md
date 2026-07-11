@@ -145,6 +145,12 @@ depend on it. `parentConversationId` carries the native parent when current
 routing or bindings are inherited by a child conversation. Core denies stored
 child routes whose required parent metadata cannot be revalidated; one new
 inbound event refreshes older session metadata before deferred work can resume.
+When `requireAudienceValidation` is true, require one or more labeled
+`audienceEvidence` values and parse each with the provider's target grammar. Return
+`audienceValidated: true` only when all values identify the selected current
+audience, including any provider-native parent, topic, or workspace encoding;
+otherwise return `null`. Never discard a conflicting value or compare display
+names as route identity.
 
 Bundled plugins that need the same parsing before the channel registry boots
 can also expose a top-level `session-key-api.ts` file with a matching

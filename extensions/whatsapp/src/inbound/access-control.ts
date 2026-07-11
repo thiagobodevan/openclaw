@@ -119,35 +119,6 @@ export async function checkInboundAccessControl(params: {
         providerAllowFrom: access.senderAccess.effectiveAllowFrom,
         normalizeEntry: normalizeWhatsAppAllowFromEntry,
       }));
-  if (!params.group) {
-    const route = resolveAgentRoute({
-      cfg: params.cfg,
-      channel: "whatsapp",
-      accountId: policy.account.accountId,
-      peer: { kind: "direct", id: params.from },
-    });
-    const configuredRoute = resolveConfiguredBindingRoute({
-      cfg: params.cfg,
-      route,
-      channel: "whatsapp",
-      accountId: policy.account.accountId,
-      conversationId: params.from,
-    }).route;
-    const identity = resolveConversationIdentityMode({
-      config: params.cfg,
-      agentId: configuredRoute.agentId,
-      routeMatchedBy: configuredRoute.matchedBy,
-      chatType: "direct",
-      senderIsOwner,
-    });
-    if (!identity.allowed) {
-      logWhatsAppVerbose(
-        params.verbose,
-        `Blocked dm before pairing (conversation identity: ${identity.reason})`,
-      );
-      return blockedInboundAccess(policy);
-    }
-  }
   const { senderAccess } = access;
   if (params.group && senderAccess.decision !== "allow") {
     if (senderAccess.reasonCode === "group_policy_disabled") {
@@ -220,6 +191,36 @@ export async function checkInboundAccessControl(params: {
       logWhatsAppVerbose(
         params.verbose,
         `Blocked unauthorized sender ${params.from} (dmPolicy=${policy.dmPolicy})`,
+      );
+      return blockedInboundAccess(policy);
+    }
+
+    // Pairing is a channel-owned control-plane response. Once sender access
+    // passes, identity admission still protects the agent turn itself.
+    const route = resolveAgentRoute({
+      cfg: params.cfg,
+      channel: "whatsapp",
+      accountId: policy.account.accountId,
+      peer: { kind: "direct", id: params.from },
+    });
+    const configuredRoute = resolveConfiguredBindingRoute({
+      cfg: params.cfg,
+      route,
+      channel: "whatsapp",
+      accountId: policy.account.accountId,
+      conversationId: params.from,
+    }).route;
+    const identity = resolveConversationIdentityMode({
+      config: params.cfg,
+      agentId: configuredRoute.agentId,
+      routeMatchedBy: configuredRoute.matchedBy,
+      chatType: "direct",
+      senderIsOwner,
+    });
+    if (!identity.allowed) {
+      logWhatsAppVerbose(
+        params.verbose,
+        `Blocked dm after access control (conversation identity: ${identity.reason})`,
       );
       return blockedInboundAccess(policy);
     }

@@ -405,6 +405,13 @@ export type ChannelCurrentConversationRoute = {
   matchedBy: AgentRouteMatch;
   /** Channel-owned current owner proof, including persisted pairing approval. */
   senderIsOwner?: boolean;
+  /** Owner verified every conflicting persisted audience fact against its target grammar. */
+  audienceValidated?: boolean;
+};
+
+export type ChannelConversationAudienceEvidence = {
+  source: "route" | "delivery" | "last" | "origin-native" | "origin-target" | "group";
+  value: string;
 };
 
 export type ChannelThreadingAdapter = {
@@ -682,6 +689,10 @@ export type ChannelMessagingAdapter = {
     groupSpace?: string | null;
     threadId?: string | number | null;
     senderId?: string | null;
+    /** Conflicting persisted audience forms requiring channel-native equivalence checks. */
+    audienceEvidence?: readonly ChannelConversationAudienceEvidence[];
+    /** A route is accepted only when it returns `audienceValidated: true`. */
+    requireAudienceValidation?: boolean;
   }) =>
     | ChannelCurrentConversationRoute
     | Promise<ChannelCurrentConversationRoute | null | undefined>

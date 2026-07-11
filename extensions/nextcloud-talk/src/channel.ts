@@ -29,7 +29,10 @@ import {
 import { resolveNextcloudTalkGroupToolPolicy } from "./policy.js";
 import { getNextcloudTalkRuntime } from "./runtime.js";
 import { collectRuntimeConfigAssignments, secretTargetRegistryEntries } from "./secret-contract.js";
-import { resolveNextcloudTalkOutboundSessionRoute } from "./session-route.js";
+import {
+  resolveNextcloudTalkCurrentConversationRoute,
+  resolveNextcloudTalkOutboundSessionRoute,
+} from "./session-route.js";
 import { nextcloudTalkSetupAdapter } from "./setup-core.js";
 import { nextcloudTalkSetupWizard } from "./setup-surface.js";
 import type { CoreConfig } from "./types.js";
@@ -125,6 +128,7 @@ export const nextcloudTalkPlugin: ChannelPlugin<ResolvedNextcloudTalkAccount> =
         targetPrefixes: ["nextcloud-talk", "nc-talk", "nc"],
         normalizeTarget: normalizeNextcloudTalkMessagingTarget,
         resolveOutboundSessionRoute: (params) => resolveNextcloudTalkOutboundSessionRoute(params),
+        resolveCurrentConversationRoute: resolveNextcloudTalkCurrentConversationRoute,
         targetResolver: {
           looksLikeId: looksLikeNextcloudTalkTargetId,
           hint: "<roomToken>",

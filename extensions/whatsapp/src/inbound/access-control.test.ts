@@ -124,7 +124,7 @@ async function checkCommandAuthorizedForGroup(params: {
 }
 
 describe("checkInboundAccessControl admission contract", () => {
-  it("denies an unbound personal DM before pairing state is written", async () => {
+  it("issues pairing control-plane state before denying an unbound personal DM turn", async () => {
     const cfg = {
       agents: {
         list: [{ id: "personal", default: true }, { id: "service" }],
@@ -152,8 +152,15 @@ describe("checkInboundAccessControl admission contract", () => {
     });
 
     expect(result.allowed).toBe(false);
-    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
-    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).toHaveBeenCalledWith({
+      channel: "whatsapp",
+      id: "+15550001111",
+      accountId: "default",
+      meta: { name: "Guest" },
+    });
+    expect(sendMessageMock).toHaveBeenCalledWith("15550001111@s.whatsapp.net", {
+      text: expect.stringContaining("Pairing code:"),
+    });
   });
 
   it("does not treat a wildcard DM allowlist as personal owner proof", async () => {

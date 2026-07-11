@@ -137,63 +137,49 @@ export async function handleNextcloudTalkInbound(params: {
   const senderName = message.senderName;
   const roomToken = message.roomToken;
   const roomName = message.roomName;
-  let isGroup = message.isGroupChat;
-
-  const resolveIdentityRoute = () => {
-    const route = core.channel.routing.resolveAgentRoute({
-      cfg: config as OpenClawConfig,
-      channel: CHANNEL_ID,
-      accountId: account.accountId,
-      peer: {
-        kind: isGroup ? "group" : "direct",
-        id: isGroup ? roomToken : senderId,
-      },
-    });
-    const decision = resolveConversationIdentityAdmission({
-      cfg: config as OpenClawConfig,
-      ctx: {
-        AgentId: route.agentId,
-        AgentRouteMatchedBy: route.matchedBy,
-        SessionKey: route.sessionKey,
-        AccountId: route.accountId,
-        ChatType: isGroup ? "group" : "direct",
-        ChatId: isGroup ? roomToken : undefined,
-        GroupChannel: isGroup ? roomToken : undefined,
-        SenderId: senderId,
-        From: isGroup ? `nextcloud-talk:room:${roomToken}` : `nextcloud-talk:${senderId}`,
-        To: `nextcloud-talk:${roomToken}`,
-        Provider: CHANNEL_ID,
-        Surface: CHANNEL_ID,
-      },
-    });
-    return { route, decision };
-  };
-  let identityRoute = resolveIdentityRoute();
-  // The webhook audience fact is conservative. Never use authenticated room
-  // hydration to turn an unbound shared route into a personal conversation.
-  if (!identityRoute.decision.allowed) {
-    runtime.log?.(
-      `nextcloud-talk: drop ${isGroup ? "room" : "DM sender"} ${isGroup ? roomToken : senderId} (identity=${identityRoute.decision.reason})`,
-    );
-    return;
-  }
-
+  // Webhooks omit the audience kind, so the authenticated Talk room record is
+  // the only authority for choosing a direct sender route versus a shared room.
   const roomKind = await resolveNextcloudTalkRoomKind({
     account,
     roomToken,
     runtime,
   });
-  const hydratedIsGroup =
-    roomKind === "direct" ? false : roomKind === "group" ? true : message.isGroupChat;
-  if (hydratedIsGroup !== isGroup) {
-    isGroup = hydratedIsGroup;
-    identityRoute = resolveIdentityRoute();
-    if (!identityRoute.decision.allowed) {
-      runtime.log?.(
-        `nextcloud-talk: drop ${isGroup ? "room" : "DM sender"} ${isGroup ? roomToken : senderId} (identity=${identityRoute.decision.reason})`,
-      );
-      return;
-    }
+  if (!roomKind) {
+    runtime.log?.(`nextcloud-talk: drop room ${roomToken} (room kind unavailable)`);
+    return;
+  }
+  const isGroup = roomKind === "group";
+  const identityRoute = core.channel.routing.resolveAgentRoute({
+    cfg: config as OpenClawConfig,
+    channel: CHANNEL_ID,
+    accountId: account.accountId,
+    peer: {
+      kind: isGroup ? "group" : "direct",
+      id: isGroup ? roomToken : senderId,
+    },
+  });
+  const decision = resolveConversationIdentityAdmission({
+    cfg: config as OpenClawConfig,
+    ctx: {
+      AgentId: identityRoute.agentId,
+      AgentRouteMatchedBy: identityRoute.matchedBy,
+      SessionKey: identityRoute.sessionKey,
+      AccountId: identityRoute.accountId,
+      ChatType: isGroup ? "group" : "direct",
+      ChatId: isGroup ? roomToken : undefined,
+      GroupChannel: isGroup ? roomToken : undefined,
+      SenderId: senderId,
+      From: isGroup ? `nextcloud-talk:room:${roomToken}` : `nextcloud-talk:${senderId}`,
+      To: `nextcloud-talk:${roomToken}`,
+      Provider: CHANNEL_ID,
+      Surface: CHANNEL_ID,
+    },
+  });
+  if (!decision.allowed) {
+    runtime.log?.(
+      `nextcloud-talk: drop ${isGroup ? "room" : "DM sender"} ${isGroup ? roomToken : senderId} (identity=${decision.reason})`,
+    );
+    return;
   }
 
   statusSink?.({ lastInboundAt: message.timestamp });
@@ -354,7 +340,7 @@ export async function handleNextcloudTalkInbound(params: {
     return;
   }
   const commandAuthorized = access.commandAccess.authorized;
-  const route = identityRoute.route;
+  const route = identityRoute;
   const buildEnvelope = createInboundEnvelopeBuilder({
     cfg: config as OpenClawConfig,
     route,

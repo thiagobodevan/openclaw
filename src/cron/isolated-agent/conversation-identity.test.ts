@@ -298,6 +298,7 @@ describe("resolveCronConversationIdentityContext", () => {
           channel: "telegram",
           sessionKey: params.sessionKey,
           matchedBy: "config.agent",
+          audienceValidated: true,
         },
       }),
     });
@@ -317,6 +318,7 @@ describe("resolveCronConversationIdentityContext", () => {
           channel: "telegram",
           sessionKey: "agent:replacement:telegram:group:-100:topic:9",
           matchedBy: "config.agent" as const,
+          audienceValidated: true,
         },
       },
     ]) {

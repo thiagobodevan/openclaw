@@ -213,20 +213,21 @@ export class CallManager {
     const verifyTasks: Array<{ callId: CallId; call: CallRecord; promise: Promise<void> }> = [];
     let skippedNoProviderCallId = 0;
     let skippedOlderThanMaxDuration = 0;
-    let skippedRemovedInboundIdentity = 0;
+    let skippedInvalidInboundIdentity = 0;
     const skippedTerminalStatuses = new Map<string, number>();
     let keptVerifiedActive = 0;
     let keptUnknownProviderStatus = 0;
     let keptVerificationFailures = 0;
 
     for (const [callId, call] of candidates) {
-      if (
+      const invalidInboundIdentity =
         call.direction === "inbound" &&
-        call.inboundIdentity &&
-        this.validateInboundIdentity &&
-        !this.validateInboundIdentity(call.inboundIdentity, call)
-      ) {
-        skippedRemovedInboundIdentity += 1;
+        this.validateInboundIdentity !== undefined &&
+        (!call.inboundIdentity || !this.validateInboundIdentity(call.inboundIdentity, call));
+      // Older records may predate identity persistence. Once validation is
+      // installed, missing identity cannot be upgraded safely; terminate it.
+      if (invalidInboundIdentity) {
+        skippedInvalidInboundIdentity += 1;
         markRestoredCallSkipped(call, "completed");
         persistCallRecord(this.storePath, call);
         if (call.providerCallId) {
@@ -238,7 +239,7 @@ export class CallManager {
             })
             .catch((err: unknown) => {
               console.warn(
-                `[voice-call] Failed to hang up restored call for removed agent ${callId}:`,
+                `[voice-call] Failed to hang up restored call with invalid identity ${callId}:`,
                 err instanceof Error ? err.message : String(err),
               );
             });
@@ -310,9 +311,9 @@ export class CallManager {
         `[voice-call] Skipped ${skippedOlderThanMaxDuration} restored call(s) older than maxDurationSeconds`,
       );
     }
-    if (skippedRemovedInboundIdentity > 0) {
+    if (skippedInvalidInboundIdentity > 0) {
       console.log(
-        `[voice-call] Skipped ${skippedRemovedInboundIdentity} restored inbound call(s) for removed agents`,
+        `[voice-call] Skipped ${skippedInvalidInboundIdentity} restored inbound call(s) without a current admitted identity`,
       );
     }
     for (const [status, count] of [...skippedTerminalStatuses].toSorted(([a], [b]) =>

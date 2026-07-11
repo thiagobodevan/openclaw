@@ -253,6 +253,104 @@ describe("resolveMatrixInboundRoute", () => {
     expect(route?.matchedBy).toBe("binding.peer");
   });
 
+  it("rejects a group target that disagrees with its native room", () => {
+    expect(
+      resolveMatrixCurrentConversationRoute({
+        cfg: baseCfg,
+        accountId: "ops",
+        target: "room:!current:example.org",
+        conversationId: "!stale:example.org",
+        chatType: "group",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a malformed native room identity", () => {
+    expect(
+      resolveMatrixCurrentConversationRoute({
+        cfg: baseCfg,
+        accountId: "ops",
+        target: "room:not-a-room",
+        conversationId: "not-a-room",
+        chatType: "group",
+      }),
+    ).toBeNull();
+  });
+
+  it("revalidates a canonical room route without native conversation metadata", () => {
+    const route = resolveMatrixCurrentConversationRoute({
+      cfg: {
+        ...baseCfg,
+        bindings: [matrixBinding("room-agent", { kind: "channel", id: "!current:example.org" })],
+      },
+      accountId: "ops",
+      target: "room:!current:example.org",
+      chatType: "group",
+    });
+
+    expect(route).toMatchObject({
+      agentId: "room-agent",
+      sessionKey: "agent:room-agent:matrix:channel:!current:example.org",
+      matchedBy: "binding.peer",
+    });
+  });
+
+  it.each([
+    { target: "#ops:example.org", conversationId: undefined },
+    { target: "channel:#ops:example.org", conversationId: "#ops:example.org" },
+  ])("revalidates qualified room alias target $target", ({ target, conversationId }) => {
+    const route = resolveMatrixCurrentConversationRoute({
+      cfg: {
+        ...baseCfg,
+        bindings: [matrixBinding("room-agent", { kind: "channel", id: "#ops:example.org" })],
+      },
+      accountId: "ops",
+      target,
+      conversationId,
+      chatType: "group",
+      audienceEvidence: [
+        { source: "route", value: target },
+        { source: "origin-target", value: "matrix:channel:#ops:example.org" },
+      ],
+      requireAudienceValidation: true,
+    });
+
+    expect(route).toMatchObject({
+      agentId: "room-agent",
+      sessionKey: "agent:room-agent:matrix:channel:#ops:example.org",
+      matchedBy: "binding.peer",
+      audienceValidated: true,
+    });
+  });
+
+  it("rejects an unqualified room alias", () => {
+    expect(
+      resolveMatrixCurrentConversationRoute({
+        cfg: baseCfg,
+        accountId: "ops",
+        target: "channel:#ops",
+        chatType: "group",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects conflicting persisted room evidence", () => {
+    expect(
+      resolveMatrixCurrentConversationRoute({
+        cfg: baseCfg,
+        accountId: "ops",
+        target: "room:!current:example.org",
+        conversationId: "!current:example.org",
+        chatType: "group",
+        audienceEvidence: [
+          { source: "route", value: "room:!current:example.org" },
+          { source: "group", value: "room:!stale:example.org" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).toBeNull();
+  });
+
   it("rejects a persisted Matrix DM without a stable native sender", () => {
     expect(
       resolveMatrixCurrentConversationRoute({
@@ -260,6 +358,24 @@ describe("resolveMatrixInboundRoute", () => {
         accountId: "ops",
         target: "room:!dm:example.org",
         chatType: "direct",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects conflicting persisted Matrix DM sender evidence", () => {
+    expect(
+      resolveMatrixCurrentConversationRoute({
+        cfg: baseCfg,
+        accountId: "ops",
+        target: "room:!dm:example.org",
+        conversationId: "!dm:example.org",
+        chatType: "direct",
+        senderId: "@alice:example.org",
+        audienceEvidence: [
+          { source: "origin-native", value: "!dm:example.org" },
+          { source: "origin-target", value: "user:@bob:example.org" },
+        ],
+        requireAudienceValidation: true,
       }),
     ).toBeNull();
   });

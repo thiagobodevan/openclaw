@@ -64,29 +64,101 @@ export function resolveFeishuOutboundSessionRoute(params: ChannelOutboundSession
   });
 }
 
+function parseFeishuAudienceTarget(raw: unknown): {
+  id: string;
+  kind: "direct" | "group" | "unknown";
+} | null {
+  const id = parseFeishuTargetId(raw);
+  if (!id || typeof raw !== "string") {
+    return null;
+  }
+  const withoutProvider = raw
+    .trim()
+    .replace(/^(feishu|lark):/i, "")
+    .trim();
+  const prefix = /^(chat|group|channel|user|dm|open_id):/i.exec(withoutProvider)?.[1];
+  const normalizedPrefix = prefix?.toLowerCase();
+  // Native Feishu id families own the audience kind. A conflicting generic
+  // prefix must not recast a shared chat as a user, or a user as a chat.
+  if (id.startsWith("oc_")) {
+    return { id, kind: "group" };
+  }
+  if (id.startsWith("ou_") || id.startsWith("on_")) {
+    return { id, kind: "direct" };
+  }
+  if (normalizedPrefix === "user" || normalizedPrefix === "dm" || normalizedPrefix === "open_id") {
+    return { id, kind: "direct" };
+  }
+  if (
+    normalizedPrefix === "chat" ||
+    normalizedPrefix === "group" ||
+    normalizedPrefix === "channel"
+  ) {
+    return { id, kind: "group" };
+  }
+  return {
+    id,
+    kind: "unknown",
+  };
+}
+
 export function resolveFeishuCurrentConversationRoute(
   params: ChannelCurrentConversationRouteParams,
 ) {
-  const targetId = parseFeishuTargetId(params.target);
-  if (!targetId) {
+  const target = parseFeishuAudienceTarget(params.target);
+  if (!target) {
     return null;
   }
+  const targetId = target.id;
   const isGroup = params.chatType !== "direct";
-  const persistedConversationId = parseFeishuTargetId(params.conversationId) ?? targetId;
+  const ambientSenderId = params.senderId?.trim() || undefined;
+  const targetIsDirect =
+    target.kind === "direct" ||
+    (target.kind === "unknown" && ambientSenderId !== undefined && ambientSenderId === targetId);
+  if ((isGroup && target.kind === "direct") || (!isGroup && !targetIsDirect)) {
+    return null;
+  }
+  const persistedTarget = params.conversationId
+    ? parseFeishuAudienceTarget(params.conversationId)
+    : undefined;
+  if (
+    params.conversationId &&
+    (!persistedTarget ||
+      (isGroup && persistedTarget.kind === "direct") ||
+      (!isGroup &&
+        (persistedTarget.id !== targetId ||
+          (persistedTarget.kind !== "direct" &&
+            !(persistedTarget.kind === "unknown" && ambientSenderId === targetId)))))
+  ) {
+    return null;
+  }
+  const persistedConversationId = persistedTarget?.id ?? targetId;
   const parsedConversation = isGroup
     ? parseFeishuConversationId({
         conversationId: persistedConversationId,
         parentConversationId: params.parentConversationId ?? undefined,
       })
     : null;
-  if (isGroup && !parsedConversation) {
-    return null;
-  }
   const account = resolveFeishuAccount({ cfg: params.cfg, accountId: params.accountId });
   if (!isGroup) {
-    const senderId = params.senderId?.trim();
-    if (senderId && senderId !== targetId) {
+    if (ambientSenderId !== targetId) {
       return null;
+    }
+    if (params.requireAudienceValidation) {
+      const identities = params.audienceEvidence?.map((evidence) =>
+        parseFeishuAudienceTarget(evidence.value),
+      );
+      if (
+        !identities?.length ||
+        !identities.every(
+          (identity) =>
+            identity?.id === targetId &&
+            (identity.kind === "direct" ||
+              (identity.kind === "unknown" && ambientSenderId === targetId)),
+        )
+      ) {
+        return null;
+      }
     }
     const directRoute = resolveAgentRoute({
       cfg: params.cfg,
@@ -108,13 +180,25 @@ export function resolveFeishuCurrentConversationRoute(
       route: configuredRoute.route,
       conversation,
     });
-    return runtimeRoute.bindingRecord && !runtimeRoute.boundSessionKey ? null : runtimeRoute.route;
+    if (runtimeRoute.bindingRecord && !runtimeRoute.boundSessionKey) {
+      return null;
+    }
+    return params.requireAudienceValidation
+      ? { ...runtimeRoute.route, audienceValidated: true }
+      : runtimeRoute.route;
   }
   const chatId = parsedConversation?.chatId ?? targetId;
+  const parsedTarget = parseFeishuConversationId({ conversationId: targetId });
+  if (!parsedConversation || parsedTarget?.chatId !== chatId) {
+    return null;
+  }
   const groupConfig = resolveFeishuGroupConfig({ cfg: account.config, groupId: chatId });
-  const senderOpenId = params.senderId?.trim() || parsedConversation?.senderOpenId || "";
-  const topicId =
-    parsedConversation?.topicId || (params.threadId == null ? "" : String(params.threadId).trim());
+  const ambientThreadId =
+    params.threadId == null ? undefined : String(params.threadId).trim() || undefined;
+  const senderOpenId =
+    ambientSenderId || parsedTarget.senderOpenId || parsedConversation.senderOpenId || "";
+  const canonicalTopicId = parsedTarget.topicId || parsedConversation.topicId;
+  const topicId = canonicalTopicId || ambientThreadId;
   const groupSession = resolveFeishuGroupSession({
     chatId,
     senderOpenId,
@@ -124,6 +208,61 @@ export function resolveFeishuCurrentConversationRoute(
     groupConfig,
     feishuCfg: account.config,
   });
+  const selectedConversation = parseFeishuConversationId({ conversationId: groupSession.peerId });
+  if (!selectedConversation) {
+    return null;
+  }
+  const scopeUsesTopic =
+    groupSession.groupSessionScope === "group_topic" ||
+    groupSession.groupSessionScope === "group_topic_sender";
+  const scopeUsesSender =
+    groupSession.groupSessionScope === "group_sender" ||
+    groupSession.groupSessionScope === "group_topic_sender";
+  const selectedTopics = new Set(
+    [
+      parsedTarget.topicId,
+      parsedConversation.topicId,
+      scopeUsesTopic && !canonicalTopicId ? ambientThreadId : undefined,
+    ].filter((topic): topic is string => Boolean(topic)),
+  );
+  const selectedSenders = new Set(
+    [
+      parsedTarget.senderOpenId,
+      parsedConversation.senderOpenId,
+      scopeUsesSender ? ambientSenderId : undefined,
+    ].filter((sender): sender is string => Boolean(sender)),
+  );
+  if (
+    selectedTopics.size > 1 ||
+    selectedSenders.size > 1 ||
+    (!scopeUsesTopic && selectedTopics.size > 0) ||
+    (!scopeUsesSender && selectedSenders.size > 0) ||
+    (selectedTopics.size > 0 && !selectedTopics.has(selectedConversation.topicId ?? "")) ||
+    (selectedSenders.size > 0 && !selectedSenders.has(selectedConversation.senderOpenId ?? ""))
+  ) {
+    return null;
+  }
+  if (params.requireAudienceValidation) {
+    const identities = params.audienceEvidence?.map((evidence) => {
+      const candidate = parseFeishuAudienceTarget(evidence.value);
+      return candidate && candidate.kind !== "direct"
+        ? parseFeishuConversationId({ conversationId: candidate.id })
+        : null;
+    });
+    if (
+      !identities?.length ||
+      !identities.every(
+        (identity) =>
+          identity?.chatId === chatId &&
+          (!identity.topicId ||
+            (scopeUsesTopic && identity.topicId === selectedConversation.topicId)) &&
+          (!identity.senderOpenId ||
+            (scopeUsesSender && identity.senderOpenId === selectedConversation.senderOpenId)),
+      )
+    ) {
+      return null;
+    }
+  }
   if (
     (groupSession.groupSessionScope === "group_sender" ||
       groupSession.groupSessionScope === "group_topic_sender") &&
@@ -180,6 +319,7 @@ export function resolveFeishuCurrentConversationRoute(
       mainSessionKey,
       lastRoutePolicy: deriveLastRoutePolicy({ sessionKey, mainSessionKey }),
       matchedBy: "config.agent" as const,
+      ...(params.requireAudienceValidation ? { audienceValidated: true } : {}),
     };
   }
   if (runtimeRoute.bindingRecord && !runtimeRoute.boundSessionKey) {
@@ -187,5 +327,7 @@ export function resolveFeishuCurrentConversationRoute(
     // cannot authorize work on their unmaterialized target.
     return null;
   }
-  return runtimeRoute.route;
+  return params.requireAudienceValidation
+    ? { ...runtimeRoute.route, audienceValidated: true }
+    : runtimeRoute.route;
 }

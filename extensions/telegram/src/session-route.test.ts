@@ -150,6 +150,135 @@ describe("telegram session route", () => {
     expect(touch).not.toHaveBeenCalled();
   });
 
+  it("rejects a group target that disagrees with its native conversation", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "-100",
+        conversationId: "-200",
+        chatType: "group",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects conflicting persisted topic evidence", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "-100",
+        conversationId: "-100:topic:9",
+        chatType: "group",
+        threadId: 9,
+        audienceEvidence: [
+          { source: "route", value: "-100:topic:9" },
+          { source: "delivery", value: "-100:topic:10" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects topic evidence when the selected group is unscoped", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "-100",
+        conversationId: "-100",
+        chatType: "group",
+        audienceEvidence: [
+          { source: "route", value: "-100" },
+          { source: "origin-native", value: "-100:topic:9" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects conflicting persisted direct targets", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "12345",
+        chatType: "direct",
+        senderId: "12345",
+        audienceEvidence: [
+          { source: "route", value: "12345" },
+          { source: "last", value: "67890" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a direct target that disagrees with its native conversation", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "12345",
+        conversationId: "67890",
+        chatType: "direct",
+        senderId: "12345",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects conflicting persisted direct topic facts", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "12345:topic:9",
+        conversationId: "12345:topic:9",
+        chatType: "direct",
+        senderId: "12345",
+        threadId: 10,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a direct target that disagrees with its persisted sender", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "12345",
+        chatType: "direct",
+        senderId: "67890",
+        audienceEvidence: [
+          { source: "route", value: "12345" },
+          { source: "origin-target", value: "12345" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("certifies matching direct target and sender evidence", async () => {
+    expect(
+      telegramPlugin.messaging?.resolveCurrentConversationRoute?.({
+        cfg: {},
+        accountId: "default",
+        target: "12345",
+        chatType: "direct",
+        senderId: "12345",
+        audienceEvidence: [
+          { source: "route", value: "12345" },
+          { source: "origin-target", value: "telegram:12345" },
+        ],
+        requireAudienceValidation: true,
+      }),
+    ).toMatchObject({
+      channel: "telegram",
+      accountId: "default",
+      audienceValidated: true,
+    });
+  });
+
   it("scopes direct topic session suffixes by chat id", async () => {
     const route = await telegramPlugin.messaging?.resolveOutboundSessionRoute?.({
       cfg: {},

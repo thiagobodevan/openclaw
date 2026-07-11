@@ -241,13 +241,14 @@ async function runGuildPreflight(params: {
 }
 
 async function runDmPreflight(params: {
+  cfg?: import("openclaw/plugin-sdk/config-contracts").OpenClawConfig;
   channelId: string;
   message: import("../internal/discord.js").Message;
   discordConfig: DiscordConfig;
 }) {
   return preflightDiscordMessage({
     ...createPreflightArgs({
-      cfg: DEFAULT_PREFLIGHT_CFG,
+      cfg: params.cfg ?? DEFAULT_PREFLIGHT_CFG,
       discordConfig: params.discordConfig,
       data: {
         channel_id: params.channelId,
@@ -1017,6 +1018,47 @@ describe("preflightDiscordMessage", () => {
           tag: "Echo",
           name: "Echo",
         },
+      }),
+    );
+  });
+
+  it("issues a pairing challenge before denying an unbound personal DM turn", async () => {
+    resolveDiscordDmCommandAccessMock.mockResolvedValue({
+      senderAccess: {
+        allowed: false,
+        decision: "pairing",
+        reasonCode: "dm_policy_pairing_required",
+      },
+      commandAccess: {
+        authorized: false,
+      },
+    });
+
+    const result = await runDmPreflight({
+      cfg: {
+        agents: { list: [{ id: "personal", default: true }] },
+      },
+      channelId: "dm-channel-unbound-1",
+      message: createDiscordMessage({
+        id: "dm-unbound-1",
+        channelId: "dm-channel-unbound-1",
+        content: "hello",
+        author: {
+          id: "guest-1",
+          bot: false,
+          username: "Guest",
+        },
+      }),
+      discordConfig: {
+        dmPolicy: "pairing",
+      } as DiscordConfig,
+    });
+
+    expect(result).toBeNull();
+    expect(resolveDiscordDmCommandAccessMock).toHaveBeenCalledTimes(1);
+    expect(handleDiscordDmCommandDecisionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sender: expect.objectContaining({ id: "guest-1" }),
       }),
     );
   });

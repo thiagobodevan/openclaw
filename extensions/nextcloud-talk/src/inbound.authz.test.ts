@@ -1,10 +1,16 @@
 // Nextcloud Talk tests cover inbound.authz plugin behavior.
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginRuntime, RuntimeEnv } from "../runtime-api.js";
 import type { ResolvedNextcloudTalkAccount } from "./accounts.js";
 import { handleNextcloudTalkInbound } from "./inbound.js";
 import { setNextcloudTalkRuntime } from "./runtime.js";
 import type { CoreConfig, NextcloudTalkInboundMessage } from "./types.js";
+
+const resolveNextcloudTalkRoomKindMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./room-info.js", () => ({
+  resolveNextcloudTalkRoomKind: resolveNextcloudTalkRoomKindMock,
+}));
 
 function installInboundAuthzRuntime(params: {
   readAllowFromStore: () => Promise<string[]>;
@@ -45,6 +51,10 @@ function createTestRuntimeEnv(): RuntimeEnv {
 }
 
 describe("nextcloud-talk inbound authz", () => {
+  beforeEach(() => {
+    resolveNextcloudTalkRoomKindMock.mockReset().mockResolvedValue("group");
+  });
+
   it("does not treat DM pairing-store entries as group allowlist entries", async () => {
     const readAllowFromStore = vi.fn(async () => ["attacker"]);
     const buildMentionRegexes = vi.fn(() => [/@openclaw/i]);

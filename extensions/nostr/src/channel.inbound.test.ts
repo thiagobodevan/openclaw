@@ -101,7 +101,12 @@ async function startGatewayHarness(params: {
   const task = startNostrGatewayAccount(
     createStartAccountContext({
       account: params.account,
-      cfg: params.cfg,
+      cfg: {
+        agents: {
+          list: [{ id: "main", default: true }, { id: "agent-nostr" }],
+        },
+        ...params.cfg,
+      },
       abortSignal: abort.signal,
     }),
   );

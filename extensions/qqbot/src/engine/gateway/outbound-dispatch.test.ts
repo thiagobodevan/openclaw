@@ -386,7 +386,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -415,7 +420,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -450,7 +460,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -485,7 +500,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -593,7 +613,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -631,7 +656,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -688,7 +718,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -723,7 +758,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -768,7 +808,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -813,7 +858,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,
@@ -848,7 +898,12 @@ describe("dispatchOutbound", () => {
 
       await dispatchOutbound(
         makeInbound({
-          route: { sessionKey: "qqbot:c2c:user-openid", accountId: "qq-main", agentId: "agent-1" },
+          route: {
+            sessionKey: "qqbot:c2c:user-openid",
+            accountId: "qq-main",
+            agentId: "agent-1",
+            matchedBy: "binding.peer",
+          },
         }),
         {
           runtime,

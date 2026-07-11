@@ -237,8 +237,7 @@ export async function preflightDiscordMessage(
   }
 
   // Channel type and parent id are the minimum provider facts required to
-  // classify DMs, group DMs, and inherited thread routes. Admit that route
-  // before message hydration, thread expansion, or optional identity egress.
+  // classify DMs, group DMs, and inherited thread routes.
   const isGuildMessage = Boolean(params.data.guild_id);
   const channelInfo = await resolveDiscordChannelInfo(params.client, messageChannelId);
   if (isPreflightAborted(params.abortSignal)) {
@@ -264,27 +263,35 @@ export async function preflightDiscordMessage(
     author,
     member: params.data.member,
   });
-  const identity = resolveConversationIdentityMode({
-    config: params.cfg,
-    agentId: routeState.effectiveRoute.agentId,
-    routeMatchedBy: routeState.effectiveRoute.matchedBy,
-    chatType: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
-    groupId: isDirectMessage ? undefined : messageChannelId,
-    groupChannel: isDirectMessage ? undefined : channelInfo?.name,
-    groupSpace: params.data.guild_id,
-    senderIsOwner: resolveDiscordStableSenderIsOwner({
-      cfg: params.cfg,
-      providerAllowFrom: params.allowFrom,
-      sender: preliminarySender,
-    }),
-  });
-  if (!identity.allowed) {
-    logInboundDrop({
-      log: logVerbose,
-      channel: "discord",
-      reason: "conversation identity not admitted",
-      target: messageChannelId,
+  const isConversationIdentityAllowed = (sender: typeof preliminarySender) => {
+    const identity = resolveConversationIdentityMode({
+      config: params.cfg,
+      agentId: routeState.effectiveRoute.agentId,
+      routeMatchedBy: routeState.effectiveRoute.matchedBy,
+      chatType: isDirectMessage ? "direct" : isGroupDm ? "group" : "channel",
+      groupId: isDirectMessage ? undefined : messageChannelId,
+      groupChannel: isDirectMessage ? undefined : channelInfo?.name,
+      groupSpace: params.data.guild_id,
+      senderIsOwner: resolveDiscordStableSenderIsOwner({
+        cfg: params.cfg,
+        providerAllowFrom: params.allowFrom,
+        sender,
+      }),
     });
+    if (!identity.allowed) {
+      logInboundDrop({
+        log: logVerbose,
+        channel: "discord",
+        reason: "conversation identity not admitted",
+        target: messageChannelId,
+      });
+      return false;
+    }
+    return true;
+  };
+  // Shared routes fail closed before hydration. Direct routes first retain the
+  // channel-owned pairing response, then apply identity before agent dispatch.
+  if (!isDirectMessage && !isConversationIdentityAllowed(preliminarySender)) {
     return null;
   }
   message = await hydrateDiscordMessageIfNeeded({
@@ -390,6 +397,9 @@ export async function preflightDiscordMessage(
       return null;
     }
     commandAuthorized = access.commandAuthorized;
+    if (!isConversationIdentityAllowed(sender)) {
+      return null;
+    }
   }
 
   const botId = params.botUserId;

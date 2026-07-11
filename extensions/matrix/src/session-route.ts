@@ -12,7 +12,11 @@ import { resolveMatrixAccountConfig } from "./matrix/account-config.js";
 import { resolveDefaultMatrixAccountId } from "./matrix/accounts.js";
 import { resolveMatrixInboundRoute } from "./matrix/monitor/route.js";
 import { resolveMatrixStoredSessionMeta } from "./matrix/session-store-metadata.js";
-import { resolveMatrixTargetIdentity } from "./matrix/target-ids.js";
+import {
+  isMatrixQualifiedRoomTarget,
+  isMatrixQualifiedUserId,
+  resolveMatrixTargetIdentity,
+} from "./matrix/target-ids.js";
 
 function resolveEffectiveMatrixAccountId(
   params: Pick<ChannelOutboundSessionRouteParams, "cfg" | "accountId">,
@@ -100,7 +104,12 @@ export function resolveMatrixOutboundSessionRoute(params: ChannelOutboundSession
         };
   const chatType = target.kind === "user" ? "direct" : "channel";
   const from = target.kind === "user" ? `matrix:${target.id}` : `matrix:channel:${target.id}`;
-  const to = `room:${roomScopedDmId ?? target.id}`;
+  const to =
+    roomScopedDmId !== undefined
+      ? `room:${roomScopedDmId}`
+      : target.kind === "user"
+        ? `user:${target.id}`
+        : `room:${target.id}`;
 
   const baseRoute = buildChannelOutboundSessionRoute({
     cfg: params.cfg,
@@ -126,25 +135,71 @@ export function resolveMatrixOutboundSessionRoute(params: ChannelOutboundSession
 export function resolveMatrixCurrentConversationRoute(
   params: ChannelCurrentConversationRouteParams,
 ) {
-  const target = resolveMatrixTargetIdentity(params.conversationId ?? params.target);
-  if (!target || target.kind !== "room") {
+  const target = resolveMatrixTargetIdentity(params.target);
+  const nativeConversationId = params.conversationId?.trim();
+  const parsedNativeConversation = nativeConversationId
+    ? resolveMatrixTargetIdentity(nativeConversationId)
+    : undefined;
+  const isDirectMessage = params.chatType === "direct";
+  if (
+    !target ||
+    (nativeConversationId !== undefined &&
+      (parsedNativeConversation?.kind !== "room" ||
+        !isMatrixQualifiedRoomTarget(parsedNativeConversation.id)))
+  ) {
     return null;
   }
-  const isDirectMessage = params.chatType === "direct";
+  const nativeConversation =
+    parsedNativeConversation?.kind === "room" ? parsedNativeConversation : undefined;
+  // Older room sessions may lack duplicate native metadata. A qualified room
+  // target is sufficient, but any retained native identity must still agree.
+  if (
+    !isDirectMessage &&
+    (target.kind !== "room" ||
+      (nativeConversation !== undefined &&
+        (nativeConversation.kind !== "room" || target.id !== nativeConversation.id)))
+  ) {
+    return null;
+  }
+  const room = nativeConversation ?? target;
+  if (room.kind !== "room" || !isMatrixQualifiedRoomTarget(room.id)) {
+    return null;
+  }
   const sender = isDirectMessage ? resolveMatrixTargetIdentity(params.senderId ?? "") : undefined;
   if (isDirectMessage && sender?.kind !== "user") {
     return null;
+  }
+  if (params.requireAudienceValidation) {
+    const audienceMatches =
+      params.audienceEvidence !== undefined &&
+      params.audienceEvidence.length > 0 &&
+      params.audienceEvidence.every((evidence) => {
+        const identity = resolveMatrixTargetIdentity(evidence.value);
+        if (!identity) {
+          return false;
+        }
+        if (!isDirectMessage) {
+          return identity.kind === "room" && identity.id === room.id;
+        }
+        if (identity.kind === "room") {
+          return identity.id === room.id;
+        }
+        return isMatrixQualifiedUserId(identity.id) && identity.id === sender?.id;
+      });
+    if (!audienceMatches) {
+      return null;
+    }
   }
   const accountId = resolveEffectiveMatrixAccountId(params);
   const { route } = resolveMatrixInboundRoute({
     cfg: params.cfg,
     accountId,
-    roomId: target.id,
+    roomId: room.id,
     senderId: sender?.id ?? params.senderId ?? "",
     isDirectMessage,
     dmSessionScope: resolveMatrixDmSessionScope({ cfg: params.cfg, accountId }),
     threadId: params.threadId == null ? undefined : String(params.threadId),
     resolveAgentRoute,
   });
-  return route;
+  return params.requireAudienceValidation ? { ...route, audienceValidated: true } : route;
 }

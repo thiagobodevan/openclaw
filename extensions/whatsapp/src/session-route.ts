@@ -59,6 +59,17 @@ export async function resolveWhatsAppCurrentConversationRoute(
   if (targetChatType !== params.chatType) {
     return null;
   }
+  if (params.requireAudienceValidation) {
+    const audienceMatches =
+      params.audienceEvidence !== undefined &&
+      params.audienceEvidence.length > 0 &&
+      params.audienceEvidence.every(
+        (evidence) => normalizeWhatsAppTarget(evidence.value) === normalized,
+      );
+    if (!audienceMatches) {
+      return null;
+    }
+  }
   const policy = resolveWhatsAppInboundPolicy({
     cfg: params.cfg,
     accountId: params.accountId,
@@ -95,7 +106,7 @@ export async function resolveWhatsAppCurrentConversationRoute(
     });
   }
   if (targetChatType !== "direct") {
-    return route;
+    return params.requireAudienceValidation ? { ...route, audienceValidated: true } : route;
   }
   const senderId = normalizeWhatsAppTarget(params.senderId ?? "");
   if (!senderId || senderId !== normalized) {
@@ -108,6 +119,7 @@ export async function resolveWhatsAppCurrentConversationRoute(
   });
   return {
     ...route,
+    ...(params.requireAudienceValidation ? { audienceValidated: true } : {}),
     senderIsOwner: resolveStableSenderIsOwner({
       senderId,
       commandOwnerAllowFrom: params.cfg.commands?.ownerAllowFrom,

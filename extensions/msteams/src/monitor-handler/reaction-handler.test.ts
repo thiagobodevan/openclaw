@@ -33,8 +33,16 @@ function buildMockRuntime(overrides?: Partial<PluginRuntime>): PluginRuntime {
 }
 
 function buildDeps(cfg: OpenClawConfig, _runtime?: PluginRuntime): MSTeamsMessageHandlerDeps {
+  const effectiveCfg: OpenClawConfig = cfg.agents
+    ? cfg
+    : {
+        ...cfg,
+        agents: {
+          list: [{ id: "main", default: true }, { id: "agent1" }],
+        },
+      };
   return {
-    cfg,
+    cfg: effectiveCfg,
     runtime: { error: vi.fn() } as unknown as MSTeamsMessageHandlerDeps["runtime"],
     appId: "test-app",
     app: {} as MSTeamsMessageHandlerDeps["app"],

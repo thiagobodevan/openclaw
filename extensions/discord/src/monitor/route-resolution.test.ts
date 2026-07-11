@@ -13,6 +13,21 @@ import {
   shouldIgnoreStaleDiscordRouteBinding,
 } from "./route-resolution.js";
 
+type BindingRouteInput = Parameters<
+  typeof conversationBindingRuntime.lookupRuntimeConversationBindingRoute
+>[0];
+
+function resolveBindingConversation(input: BindingRouteInput) {
+  return "conversation" in input
+    ? input.conversation
+    : {
+        channel: input.channel,
+        accountId: input.accountId,
+        conversationId: input.conversationId,
+        parentConversationId: input.parentConversationId,
+      };
+}
+
 function buildWorkerBindingConfig(peer: {
   kind: "channel" | "direct";
   id: string;
@@ -48,14 +63,16 @@ describe("discord route resolution helpers", () => {
       conversationId: "dm-1",
       configuredConversationId: "dm-1",
       runtime: {
-        lookupRuntimeConversationBindingRoute: ({ route, conversation }) => {
+        lookupRuntimeConversationBindingRoute: (input) => {
+          const conversation = resolveBindingConversation(input);
           seen.runtime = conversation.conversationId;
-          return { bindingRecord: null, route };
+          return { bindingRecord: null, route: input.route };
         },
-        resolveConfiguredBindingRoute: ({ route, conversation }) => {
+        resolveConfiguredBindingRoute: (input) => {
+          const conversation = resolveBindingConversation(input);
           seen.configured = conversation.conversationId;
           const serviceRoute = {
-            ...route,
+            ...input.route,
             agentId: "service",
             sessionKey: "agent:service:discord:direct:user-1",
             matchedBy: "binding.channel" as const,
@@ -105,24 +122,27 @@ describe("discord route resolution helpers", () => {
       conversationId: channelId,
       configuredConversationId: channelId,
       runtime: {
-        lookupRuntimeConversationBindingRoute: ({ route, conversation }) => ({
-          bindingRecord: {
-            bindingId: "stale-route",
-            targetSessionKey: `agent:oldagent:discord:channel:${channelId}`,
-            targetKind: "session",
-            conversation,
-            status: "active",
-            boundAt: 1,
-          },
-          boundSessionKey: `agent:oldagent:discord:channel:${channelId}`,
-          boundAgentId: "oldagent",
-          route: {
-            ...route,
-            agentId: "oldagent",
-            sessionKey: `agent:oldagent:discord:channel:${channelId}`,
-            matchedBy: "binding.channel",
-          },
-        }),
+        lookupRuntimeConversationBindingRoute: (input) => {
+          const conversation = resolveBindingConversation(input);
+          return {
+            bindingRecord: {
+              bindingId: "stale-route",
+              targetSessionKey: `agent:oldagent:discord:channel:${channelId}`,
+              targetKind: "session",
+              conversation,
+              status: "active",
+              boundAt: 1,
+            },
+            boundSessionKey: `agent:oldagent:discord:channel:${channelId}`,
+            boundAgentId: "oldagent",
+            route: {
+              ...input.route,
+              agentId: "oldagent",
+              sessionKey: `agent:oldagent:discord:channel:${channelId}`,
+              matchedBy: "binding.channel",
+            },
+          };
+        },
         resolveConfiguredBindingRoute: ({ route }) => ({
           bindingResolution: null,
           route,

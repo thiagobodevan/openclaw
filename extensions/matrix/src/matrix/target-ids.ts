@@ -32,7 +32,12 @@ export function resolveMatrixTargetIdentity(raw: string): MatrixTarget | null {
   }
   if (lowered.startsWith(ROOM_PREFIX)) {
     const id = normalized.slice(ROOM_PREFIX.length).trim();
-    return id ? { kind: "room", id } : null;
+    if (!id) {
+      return null;
+    }
+    // Older outbound metadata encoded direct users with a room prefix. Parse
+    // the qualified id itself so admission never mistakes a user for a room.
+    return isMatrixQualifiedUserId(id) ? { kind: "user", id } : { kind: "room", id };
   }
   if (lowered.startsWith(CHANNEL_PREFIX)) {
     const id = normalized.slice(CHANNEL_PREFIX.length).trim();
@@ -47,6 +52,11 @@ export function resolveMatrixTargetIdentity(raw: string): MatrixTarget | null {
 export function isMatrixQualifiedUserId(raw: string): boolean {
   const trimmed = raw.trim();
   return trimmed.startsWith("@") && trimmed.includes(":");
+}
+
+export function isMatrixQualifiedRoomTarget(raw: string): boolean {
+  const trimmed = raw.trim();
+  return /^[!#][^:\s]+:\S+$/.test(trimmed);
 }
 
 export function normalizeMatrixResolvableTarget(raw: string): string {

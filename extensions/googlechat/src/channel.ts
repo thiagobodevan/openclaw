@@ -42,6 +42,7 @@ import {
 import { collectGoogleChatMutableAllowlistWarnings } from "./doctor.js";
 import { startGoogleChatGatewayAccount } from "./gateway.js";
 import { collectRuntimeConfigAssignments, secretTargetRegistryEntries } from "./secret-contract.js";
+import { resolveGoogleChatCurrentConversationRoute } from "./session-route.js";
 
 const loadGoogleChatChannelRuntime = createLazyRuntimeNamedExport(
   () => import("./channel.runtime.js"),
@@ -91,6 +92,7 @@ export const googlechatPlugin = createChatChannelPlugin({
     messaging: {
       targetPrefixes: ["googlechat", "google-chat", "gchat"],
       normalizeTarget: normalizeGoogleChatTarget,
+      resolveCurrentConversationRoute: resolveGoogleChatCurrentConversationRoute,
       targetResolver: {
         looksLikeId: (raw, normalized) => {
           const value = normalized ?? raw.trim();

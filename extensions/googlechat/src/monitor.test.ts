@@ -1,6 +1,7 @@
 // Googlechat tests cover monitor plugin behavior.
 import { recordChannelBotPairLoopAndCheckSuppression } from "openclaw/plugin-sdk/channel-inbound";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../runtime-api.js";
 import type { ResolvedGoogleChatAccount } from "./accounts.js";
 import type { GoogleChatCoreRuntime, GoogleChatRuntimeEnv } from "./monitor-types.js";
 import { testing } from "./monitor.js";
@@ -67,6 +68,12 @@ function createInboundClassificationHarness(
     },
   } as unknown as GoogleChatCoreRuntime;
   return { buildContext, core, resolveAgentRoute, runTurn };
+}
+
+function createServiceAgentConfig(): OpenClawConfig {
+  return {
+    agents: { list: [{ id: "personal", default: true }, { id: "agent-1" }] },
+  };
 }
 
 describe("googlechat monitor bot loop protection", () => {
@@ -214,6 +221,7 @@ describe("googlechat monitor inbound space classification", () => {
 
   it.each(cases)("$name uses the expected access and route branch", async ({ space, peerKind }) => {
     const { buildContext, core, resolveAgentRoute, runTurn } = createInboundClassificationHarness();
+    const config = createServiceAgentConfig();
     const account = {
       accountId: "work",
       config: {},
@@ -240,7 +248,7 @@ describe("googlechat monitor inbound space classification", () => {
     await testing.processMessageWithPipeline({
       event,
       account,
-      config: {},
+      config,
       runtime: { error: vi.fn(), log: vi.fn() },
       core,
       mediaMaxMb: 10,
@@ -251,7 +259,7 @@ describe("googlechat monitor inbound space classification", () => {
       expect.objectContaining({ isGroup }),
     );
     expect(resolveAgentRoute).toHaveBeenCalledWith({
-      cfg: {},
+      cfg: config,
       channel: "googlechat",
       accountId: "work",
       peer: { kind: peerKind, id: "spaces/CLASSIFY" },
@@ -327,6 +335,7 @@ describe("googlechat monitor sender bot status", () => {
 
   it("forwards bot sender status to the inbound context when allowBots is true", async () => {
     const { buildContext, core } = createInboundClassificationHarness();
+    const config = createServiceAgentConfig();
     accessMocks.applyGoogleChatInboundAccessPolicy.mockResolvedValue({
       ok: true,
       commandAuthorized: undefined,
@@ -342,7 +351,7 @@ describe("googlechat monitor sender bot status", () => {
         config: { allowBots: true },
         credentialSource: "inline",
       } as ResolvedGoogleChatAccount,
-      config: {},
+      config,
       runtime: { error: vi.fn(), log: vi.fn() },
       core,
       mediaMaxMb: 10,
@@ -355,6 +364,7 @@ describe("googlechat monitor sender bot status", () => {
 
   it("omits bot sender status for human senders", async () => {
     const { buildContext, core } = createInboundClassificationHarness();
+    const config = createServiceAgentConfig();
     accessMocks.applyGoogleChatInboundAccessPolicy.mockResolvedValue({
       ok: true,
       commandAuthorized: undefined,
@@ -370,7 +380,7 @@ describe("googlechat monitor sender bot status", () => {
         config: {},
         credentialSource: "inline",
       } as ResolvedGoogleChatAccount,
-      config: {},
+      config,
       runtime: { error: vi.fn(), log: vi.fn() },
       core,
       mediaMaxMb: 10,
@@ -426,6 +436,7 @@ describe("googlechat monitor direct messages", () => {
         sender: { name: "users/alice", displayName: "Alice", type: "HUMAN" },
       },
     } satisfies GoogleChatEvent;
+    const config = createServiceAgentConfig();
 
     accessMocks.applyGoogleChatInboundAccessPolicy.mockResolvedValue({
       ok: true,
@@ -438,7 +449,7 @@ describe("googlechat monitor direct messages", () => {
     await testing.processMessageWithPipeline({
       event,
       account,
-      config: {},
+      config,
       runtime,
       core,
       mediaMaxMb: 10,
@@ -499,6 +510,7 @@ describe("googlechat monitor direct messages", () => {
         sender: { name: "users/alice", displayName: "Alice", type: "HUMAN" },
       },
     } satisfies GoogleChatEvent;
+    const config = createServiceAgentConfig();
 
     accessMocks.applyGoogleChatInboundAccessPolicy.mockResolvedValue({
       ok: true,
@@ -514,7 +526,7 @@ describe("googlechat monitor direct messages", () => {
     await testing.processMessageWithPipeline({
       event,
       account,
-      config: {},
+      config,
       runtime,
       core,
       mediaMaxMb: 10,
@@ -585,6 +597,7 @@ describe("googlechat monitor direct messages", () => {
         sender: { name: "users/alice", displayName: "Alice", type: "HUMAN" },
       },
     } satisfies GoogleChatEvent;
+    const config = createServiceAgentConfig();
 
     accessMocks.applyGoogleChatInboundAccessPolicy.mockResolvedValue({
       ok: true,
@@ -597,7 +610,7 @@ describe("googlechat monitor direct messages", () => {
     await testing.processMessageWithPipeline({
       event,
       account,
-      config: {},
+      config,
       runtime,
       core,
       mediaMaxMb: 10,

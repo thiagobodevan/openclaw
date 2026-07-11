@@ -345,6 +345,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Access control
   - H3: Direct messages
   - H3: Group chats
+  - H3: Document comments
   - H2: Group configuration examples
   - H3: Allow all groups, no @mention required
   - H3: Allow all groups, still require @mention
@@ -422,7 +423,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Visible replies
   - H2: Context visibility and allowlists
   - H2: Session keys
-  - H2: Pattern: personal DMs + public groups (single agent)
+  - H2: Pattern: personal DMs + shared groups
   - H2: Display labels
   - H2: Group policy
   - H2: Mention gating (default)
@@ -2614,6 +2615,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Cross-agent QMD memory search
   - H2: One WhatsApp number, multiple people (DM split)
   - H2: Routing rules (how messages pick an agent)
+  - H2: Conversation identity modes
   - H2: Multiple accounts / phone numbers
   - H2: Concepts
   - H2: Platform examples

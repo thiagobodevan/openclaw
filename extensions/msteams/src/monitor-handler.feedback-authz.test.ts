@@ -36,8 +36,8 @@ vi.mock("./feedback-reflection.js", async () => {
 
 const defaultResolveAgentRoute: ResolveAgentRoute = ({ peer }) => ({
   sessionKey: `msteams:${peer?.kind ?? "group"}:${peer?.id ?? "unknown"}`,
-  mainSessionKey: "agent:default:main",
-  agentId: "default",
+  mainSessionKey: "agent:main:main",
+  agentId: "main",
   accountId: "default",
   channel: "msteams",
   lastRoutePolicy: "session",
@@ -223,7 +223,7 @@ describe("msteams feedback invoke authz", () => {
           value: "positive",
           comment: "allowed feedback",
           sessionKey: "msteams:direct:owner-aad",
-          agentId: "default",
+          agentId: "main",
           conversationId: "a:personal-chat",
         });
       },
@@ -312,7 +312,7 @@ describe("msteams feedback invoke authz", () => {
           value: "positive",
           comment: "allowed dm feedback",
           sessionKey: "msteams:direct:owner-aad",
-          agentId: "default",
+          agentId: "main",
           conversationId: "a:personal-chat",
         });
       },

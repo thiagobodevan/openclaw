@@ -84,6 +84,15 @@ function createRuntimeEnv() {
   } as unknown as RuntimeEnv;
 }
 
+function createServiceConfig(): CoreConfig {
+  return {
+    agents: {
+      list: [{ id: "personal", default: true }, { id: "irc-service" }],
+    },
+    channels: { irc: {} },
+  } as CoreConfig;
+}
+
 function createAccount(overrides?: Partial<ResolvedIrcAccount>): ResolvedIrcAccount {
   return {
     accountId: "default",
@@ -141,7 +150,7 @@ describe("irc inbound behavior", () => {
     await handleIrcInbound({
       message: createMessage(),
       account: createAccount(),
-      config: { channels: { irc: {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime: createRuntimeEnv(),
       sendReply,
     });
@@ -221,7 +230,7 @@ describe("irc inbound behavior", () => {
           groupAllowFrom: [],
         },
       }),
-      config: { channels: { irc: {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime: createRuntimeEnv(),
       sendReply: vi.fn(async () => {}),
     });
@@ -258,7 +267,7 @@ describe("irc inbound behavior", () => {
           },
         },
       }),
-      config: { channels: { irc: {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime,
       sendReply: vi.fn(async () => {}),
     });
@@ -299,7 +308,7 @@ describe("irc inbound behavior", () => {
           groupAllowFrom: [],
         },
       }),
-      config: { channels: { irc: {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime,
       sendReply: vi.fn(async () => {}),
     });
@@ -335,7 +344,7 @@ describe("irc inbound behavior", () => {
           groupAllowFrom: [],
         },
       }),
-      config: { channels: { irc: {} } } as CoreConfig,
+      config: createServiceConfig(),
       runtime,
       sendReply: vi.fn(async () => {}),
     });

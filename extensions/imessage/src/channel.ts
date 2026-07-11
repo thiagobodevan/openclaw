@@ -42,6 +42,7 @@ import {
 } from "./group-policy.js";
 import { sanitizeOutboundText } from "./monitor/sanitize-outbound.js";
 import type { IMessageProbe } from "./probe.js";
+import { resolveIMessageCurrentConversationRoute } from "./session-route.js";
 import { imessageSetupAdapter } from "./setup-core.js";
 import {
   createIMessagePluginBase,
@@ -254,6 +255,7 @@ export const imessagePlugin: ChannelPlugin<ResolvedIMessageAccount, IMessageProb
         normalizeTarget: normalizeIMessageMessagingTarget,
         inferTargetChatType: ({ to }) => inferIMessageTargetChatType(to),
         resolveOutboundSessionRoute: (params) => resolveIMessageOutboundSessionRoute(params),
+        resolveCurrentConversationRoute: resolveIMessageCurrentConversationRoute,
         targetResolver: {
           looksLikeId: looksLikeIMessageExplicitTargetId,
           hint: "<handle|chat_id:ID>",
