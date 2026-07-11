@@ -1952,10 +1952,10 @@ export const fa: TranslationMap = {
   chat: {
     disconnected: "اتصال از Gateway قطع شد.",
     archivedSessionDisabled: "برای ارسال پیام، این نشست را بازیابی کنید.",
-    loadOlder: "Load older",
+    loadOlder: "بارگیری موارد قدیمی‌تر",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "این نشست روی یک گره جفت‌شده قرار دارد و فقط قابل مشاهده است.",
+      unsupportedViewOnly: "این منبع نشست خارجی فقط قابل مشاهده است.",
     },
     taskSuggestions: {
       eyebrow: "کار پیگیری پیشنهادی",

@@ -1932,10 +1932,10 @@ export const hi: TranslationMap = {
   chat: {
     disconnected: "Gateway से डिस्कनेक्ट हो गया।",
     archivedSessionDisabled: "संदेश भेजने के लिए इस सत्र को बहाल करें।",
-    loadOlder: "Load older",
+    loadOlder: "पुराने संदेश लोड करें",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "यह सत्र एक युग्मित नोड पर है और केवल देखने के लिए है।",
+      unsupportedViewOnly: "यह बाहरी सत्र स्रोत केवल देखने के लिए है।",
     },
     taskSuggestions: {
       eyebrow: "सुझाया गया अगला कार्य",

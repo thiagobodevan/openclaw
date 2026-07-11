@@ -1913,10 +1913,10 @@ export const th: TranslationMap = {
   chat: {
     disconnected: "ตัดการเชื่อมต่อจากเกตเวย์แล้ว",
     archivedSessionDisabled: "กู้คืนเซสชันนี้เพื่อส่งข้อความ",
-    loadOlder: "Load older",
+    loadOlder: "โหลดรายการก่อนหน้า",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "เซสชันนี้อยู่บนโหนดที่จับคู่และดูได้อย่างเดียว",
+      unsupportedViewOnly: "แหล่งที่มาของเซสชันภายนอกนี้ดูได้อย่างเดียว",
     },
     taskSuggestions: {
       eyebrow: "งานติดตามผลที่แนะนำ",

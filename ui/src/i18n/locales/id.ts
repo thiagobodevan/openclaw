@@ -1957,10 +1957,10 @@ export const id: TranslationMap = {
   chat: {
     disconnected: "Terputus dari gateway.",
     archivedSessionDisabled: "Pulihkan sesi ini untuk mengirim pesan.",
-    loadOlder: "Load older",
+    loadOlder: "Muat yang lebih lama",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Sesi ini berada di node yang dipasangkan dan hanya dapat dilihat.",
+      unsupportedViewOnly: "Sumber sesi eksternal ini hanya dapat dilihat.",
     },
     taskSuggestions: {
       eyebrow: "Tindak lanjut yang disarankan",

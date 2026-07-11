@@ -1964,10 +1964,10 @@ export const nl: TranslationMap = {
   chat: {
     disconnected: "Verbinding met Gateway verbroken.",
     archivedSessionDisabled: "Herstel deze sessie om berichten te verzenden.",
-    loadOlder: "Load older",
+    loadOlder: "Oudere laden",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Deze sessie bevindt zich op een gekoppeld knooppunt en is alleen-lezen.",
+      unsupportedViewOnly: "Deze externe sessiebron is alleen-lezen.",
     },
     taskSuggestions: {
       eyebrow: "Voorgestelde vervolgtaak",

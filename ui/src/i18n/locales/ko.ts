@@ -1946,10 +1946,10 @@ export const ko: TranslationMap = {
   chat: {
     disconnected: "Gateway와 연결이 끊어졌습니다.",
     archivedSessionDisabled: "메시지를 보내려면 이 세션을 복원하세요.",
-    loadOlder: "Load older",
+    loadOlder: "이전 항목 불러오기",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "이 세션은 페어링된 노드에 있으며 보기 전용입니다.",
+      unsupportedViewOnly: "이 외부 세션 소스는 보기 전용입니다.",
     },
     taskSuggestions: {
       eyebrow: "제안된 후속 작업",

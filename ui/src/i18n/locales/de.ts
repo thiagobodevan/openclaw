@@ -1976,10 +1976,11 @@ export const de: TranslationMap = {
   chat: {
     disconnected: "Verbindung zum Gateway getrennt.",
     archivedSessionDisabled: "Stellen Sie diese Sitzung wieder her, um Nachrichten zu senden.",
-    loadOlder: "Load older",
+    loadOlder: "Ältere laden",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly:
+        "Diese Sitzung befindet sich auf einem gekoppelten Knoten und ist schreibgeschützt.",
+      unsupportedViewOnly: "Diese externe Sitzungsquelle ist schreibgeschützt.",
     },
     taskSuggestions: {
       eyebrow: "Vorgeschlagene Folgeaufgabe",

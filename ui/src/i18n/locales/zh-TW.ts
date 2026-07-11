@@ -1911,10 +1911,10 @@ export const zh_TW: TranslationMap = {
   chat: {
     disconnected: "已斷開與網關的連接。",
     archivedSessionDisabled: "還原此工作階段以傳送訊息。",
-    loadOlder: "Load older",
+    loadOlder: "載入較舊內容",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "此工作階段位於已配對的節點上，僅供檢視。",
+      unsupportedViewOnly: "此外部工作階段來源僅供檢視。",
     },
     taskSuggestions: {
       eyebrow: "建議的後續任務",

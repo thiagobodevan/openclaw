@@ -1908,10 +1908,10 @@ export const zh_CN: TranslationMap = {
   chat: {
     disconnected: "已断开与网关的连接。",
     archivedSessionDisabled: "恢复此会话以发送消息。",
-    loadOlder: "Load older",
+    loadOlder: "加载更早的消息",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "此会话位于已配对的节点上，仅供查看。",
+      unsupportedViewOnly: "此外部会话来源仅供查看。",
     },
     taskSuggestions: {
       eyebrow: "建议的后续任务",

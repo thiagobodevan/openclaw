@@ -1965,10 +1965,11 @@ export const pl: TranslationMap = {
   chat: {
     disconnected: "Rozłączono z Gateway.",
     archivedSessionDisabled: "Przywróć tę sesję, aby wysyłać wiadomości.",
-    loadOlder: "Load older",
+    loadOlder: "Wczytaj starsze",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly:
+        "Ta sesja znajduje się na sparowanym węźle i jest dostępna tylko do wyświetlania.",
+      unsupportedViewOnly: "To zewnętrzne źródło sesji jest dostępne tylko do wyświetlania.",
     },
     taskSuggestions: {
       eyebrow: "Sugerowane zadanie uzupełniające",

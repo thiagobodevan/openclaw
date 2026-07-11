@@ -1945,10 +1945,10 @@ export const vi: TranslationMap = {
   chat: {
     disconnected: "Đã ngắt kết nối khỏi gateway.",
     archivedSessionDisabled: "Khôi phục phiên này để gửi tin nhắn.",
-    loadOlder: "Load older",
+    loadOlder: "Tải nội dung cũ hơn",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Phiên này nằm trên một nút đã ghép nối và chỉ có thể xem.",
+      unsupportedViewOnly: "Nguồn phiên bên ngoài này chỉ có thể xem.",
     },
     taskSuggestions: {
       eyebrow: "Tác vụ tiếp theo được đề xuất",

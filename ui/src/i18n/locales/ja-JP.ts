@@ -1963,10 +1963,10 @@ export const ja_JP: TranslationMap = {
   chat: {
     disconnected: "Gateway から切断されました。",
     archivedSessionDisabled: "メッセージを送信するには、このセッションを復元してください。",
-    loadOlder: "Load older",
+    loadOlder: "以前のメッセージを読み込む",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "このセッションはペアリング済みのノード上にあり、表示専用です。",
+      unsupportedViewOnly: "この外部セッションソースは表示専用です。",
     },
     taskSuggestions: {
       eyebrow: "提案されたフォローアップ",

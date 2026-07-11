@@ -1932,10 +1932,10 @@ export const ar: TranslationMap = {
   chat: {
     disconnected: "تم قطع الاتصال بـ Gateway.",
     archivedSessionDisabled: "استعِد هذه الجلسة لإرسال الرسائل.",
-    loadOlder: "Load older",
+    loadOlder: "تحميل الأقدم",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "هذه الجلسة موجودة على عقدة مقترنة وهي للعرض فقط.",
+      unsupportedViewOnly: "مصدر الجلسة الخارجي هذا للعرض فقط.",
     },
     taskSuggestions: {
       eyebrow: "متابعة مقترحة",

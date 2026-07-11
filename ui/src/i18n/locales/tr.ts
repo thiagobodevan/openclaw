@@ -1967,10 +1967,10 @@ export const tr: TranslationMap = {
   chat: {
     disconnected: "Gateway bağlantısı kesildi.",
     archivedSessionDisabled: "Mesaj göndermek için bu oturumu geri yükleyin.",
-    loadOlder: "Load older",
+    loadOlder: "Daha eskileri yükle",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Bu oturum eşleştirilmiş bir düğümdedir ve salt görüntülenebilir.",
+      unsupportedViewOnly: "Bu harici oturum kaynağı salt görüntülenebilir.",
     },
     taskSuggestions: {
       eyebrow: "Önerilen takip görevi",

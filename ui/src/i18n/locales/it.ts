@@ -1973,10 +1973,10 @@ export const it: TranslationMap = {
   chat: {
     disconnected: "Disconnesso dal gateway.",
     archivedSessionDisabled: "Ripristina questa sessione per inviare messaggi.",
-    loadOlder: "Load older",
+    loadOlder: "Carica precedenti",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Questa sessione si trova su un nodo associato ed è di sola lettura.",
+      unsupportedViewOnly: "Questa origine di sessione esterna è di sola lettura.",
     },
     taskSuggestions: {
       eyebrow: "Attività successiva suggerita",

@@ -1969,10 +1969,10 @@ export const ru: TranslationMap = {
   chat: {
     disconnected: "Отключено от gateway.",
     archivedSessionDisabled: "Восстановите этот сеанс, чтобы отправлять сообщения.",
-    loadOlder: "Load older",
+    loadOlder: "Загрузить предыдущие",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Этот сеанс находится на сопряжённом узле и доступен только для просмотра.",
+      unsupportedViewOnly: "Этот внешний источник сеанса доступен только для просмотра.",
     },
     taskSuggestions: {
       eyebrow: "Предлагаемая следующая задача",

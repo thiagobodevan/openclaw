@@ -1967,10 +1967,10 @@ export const es: TranslationMap = {
   chat: {
     disconnected: "Desconectado de la puerta de enlace.",
     archivedSessionDisabled: "Restaura esta sesión para enviar mensajes.",
-    loadOlder: "Load older",
+    loadOlder: "Cargar anteriores",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Esta sesión está en un nodo emparejado y es de solo lectura.",
+      unsupportedViewOnly: "Esta fuente de sesión externa es de solo lectura.",
     },
     taskSuggestions: {
       eyebrow: "Tarea de seguimiento sugerida",

@@ -1955,10 +1955,10 @@ export const uk: TranslationMap = {
   chat: {
     disconnected: "Відключено від шлюзу.",
     archivedSessionDisabled: "Відновіть цей сеанс, щоб надсилати повідомлення.",
-    loadOlder: "Load older",
+    loadOlder: "Завантажити попередні",
     catalog: {
-      remoteViewOnly: "This session is on a paired node and is view-only.",
-      unsupportedViewOnly: "This external session source is view-only.",
+      remoteViewOnly: "Цей сеанс відкрито на спареному вузлі й доступно лише для перегляду.",
+      unsupportedViewOnly: "Це зовнішнє джерело сеансу доступне лише для перегляду.",
     },
     taskSuggestions: {
       eyebrow: "Запропоноване подальше завдання",
