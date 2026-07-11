@@ -599,13 +599,16 @@ describe("crestodian tool", () => {
       inferenceRoutes: [{ kind: "codex-cli", model: "openai/gpt-5.5" }],
     });
 
-    expect(
-      resolveCrestodianProposalTransition({
-        args: { action: "setup", workspace: "/tmp/work" },
-        resultText: `needs-approval:${operationHash}\nAfter the user approves, retry with these exact tool arguments: ${JSON.stringify(capturedArgs)}\nPlan: configure Crestodian.`,
-      }),
-    ).toEqual({
+    const transition = resolveCrestodianProposalTransition({
+      args: { action: "setup", workspace: "/tmp/work" },
+      resultText: `needs-approval:${operationHash}\nAfter the user approves, retry with these exact tool arguments: ${JSON.stringify(capturedArgs)}\nPlan: configure Crestodian.`,
+    });
+
+    expect(transition).toEqual({
       proposal: expect.objectContaining({ operationHash, renderedByHost: false }),
     });
+    expect(transition?.proposal?.plan).toContain(
+      "test inference routes in this order: Codex app-server (openai/gpt-5.5)",
+    );
   });
 });

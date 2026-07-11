@@ -7,6 +7,7 @@ import type { WizardPrompter } from "../wizard/prompts.js";
 import { runCrestodianAgentTurnWithDeps } from "./agent-turn.js";
 import { classifyCrestodianApprovalText } from "./approval-intent.js";
 import { CrestodianChatEngine } from "./chat-engine.js";
+import { formatCrestodianPersistentPlan } from "./operations.js";
 
 const mocks = vi.hoisted(() => ({
   readConfigFileSnapshot: vi.fn(async () => ({
@@ -455,6 +456,36 @@ describe("CrestodianChatEngine", () => {
 
     expect(reply.text).toContain("I can take care of that.");
     expect(reply.text).toContain("outside ClawHub review and trust metadata");
+    expect(reply.text).toContain("Reply yes to approve this exact action");
+  });
+
+  it("renders captured setup routes when the agent reply omits tool details", async () => {
+    const engine = new CrestodianChatEngine({
+      runAgentTurn: async (params) => {
+        params.session.proposalRef.current = {
+          operationHash: "setup",
+          plan: formatCrestodianPersistentPlan({
+            kind: "setup",
+            workspace: "/tmp/work",
+            model: "openai/gpt-5.5",
+            inferenceRoutes: [
+              { kind: "codex-cli", model: "openai/gpt-5.5" },
+              { kind: "openai-api-key", model: "openai/gpt-5.5" },
+            ],
+          }),
+          renderedByHost: false,
+        };
+        return { text: "I prepared setup for approval." };
+      },
+      deps: { loadOverview: fakeOverviewLoader() },
+    });
+
+    const reply = await engine.handle("set it up");
+
+    expect(reply.text).toContain("I prepared setup for approval.");
+    expect(reply.text).toContain(
+      "test inference routes in this order: Codex app-server (openai/gpt-5.5) → OPENAI_API_KEY (openai/gpt-5.5)",
+    );
     expect(reply.text).toContain("Reply yes to approve this exact action");
   });
 

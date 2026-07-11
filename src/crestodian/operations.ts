@@ -723,7 +723,13 @@ function formatSetupPlanDescription(
 ): string {
   const workspace = shortenHomePath(resolveUserPath(operation.workspace ?? process.cwd()));
   const model = operation.model ? ` and default model ${operation.model}` : "";
-  return `bootstrap OpenClaw setup for workspace ${workspace}${model}`;
+  const routeOrder =
+    operation.inferenceRoutes === undefined
+      ? ""
+      : operation.inferenceRoutes.length === 0
+        ? "; no inference routes were captured"
+        : `; test inference routes in this order: ${formatSetupInferenceRouteOrder(operation.inferenceRoutes)}`;
+  return `bootstrap OpenClaw setup for workspace ${workspace}${model}${routeOrder}`;
 }
 
 async function chooseSetupModel(params: {
