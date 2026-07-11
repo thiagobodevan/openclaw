@@ -2575,12 +2575,8 @@ describe("consumeCliSessionForkInStore", () => {
         },
       };
       const sessionStore = { [sessionKey]: entry };
-      await fs.writeFile(storePath, JSON.stringify(sessionStore, null, 2), "utf8");
-      await fs.writeFile(
-        storePath,
-        JSON.stringify({ [sessionKey]: { ...entry, label: "concurrent update" } }, null, 2),
-        "utf8",
-      );
+      // Persisted state carries a concurrent rename the in-memory snapshot missed.
+      await seedSessionStore(storePath, { [sessionKey]: { ...entry, label: "concurrent update" } });
       const consumed = await consumeCliSessionForkInStore({
         provider: "claude-cli",
         sessionKey,
@@ -2594,9 +2590,7 @@ describe("consumeCliSessionForkInStore", () => {
       });
       expect(consumed?.label).toBe("concurrent update");
       expect(
-        loadSessionStore(storePath, { skipCache: true })[sessionKey]?.cliSessionBindings?.[
-          "claude-cli"
-        ],
+        loadPersistedSessionEntry(storePath, sessionKey)?.cliSessionBindings?.["claude-cli"],
       ).toEqual({ sessionId: "claude-source-session", forceReuse: true });
       await expect(
         consumeCliSessionForkInStore({
@@ -2621,7 +2615,7 @@ describe("consumeCliSessionForkInStore", () => {
         },
       };
       const sessionStore = { [sessionKey]: entry };
-      await fs.writeFile(storePath, JSON.stringify(sessionStore, null, 2), "utf8");
+      await seedSessionStore(storePath, sessionStore);
 
       const restored = await restoreCliSessionForkInStore({
         provider: "claude-cli",
@@ -2633,9 +2627,8 @@ describe("consumeCliSessionForkInStore", () => {
 
       expect(restored?.cliSessionBindings?.["claude-cli"]?.forkNextResume).toBe(true);
       expect(
-        loadSessionStore(storePath, { skipCache: true })[sessionKey]?.cliSessionBindings?.[
-          "claude-cli"
-        ]?.forkNextResume,
+        loadPersistedSessionEntry(storePath, sessionKey)?.cliSessionBindings?.["claude-cli"]
+          ?.forkNextResume,
       ).toBe(true);
     });
   });
@@ -2657,7 +2650,7 @@ describe("consumeCliSessionForkInStore", () => {
         },
       };
       const sessionStore = { [sessionKey]: entry };
-      await fs.writeFile(storePath, JSON.stringify(sessionStore, null, 2), "utf8");
+      await seedSessionStore(storePath, sessionStore);
 
       const persisted = await persistCliSessionForkSuccessorInStore({
         provider: "claude-cli",
@@ -2676,9 +2669,7 @@ describe("consumeCliSessionForkInStore", () => {
         authEpochVersion: 3,
       });
       expect(
-        loadSessionStore(storePath, { skipCache: true })[sessionKey]?.cliSessionBindings?.[
-          "claude-cli"
-        ],
+        loadPersistedSessionEntry(storePath, sessionKey)?.cliSessionBindings?.["claude-cli"],
       ).toEqual({
         sessionId: "claude-fork-session",
         forceReuse: true,
