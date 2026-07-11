@@ -630,10 +630,9 @@ export function formatCrestodianPersistentPlan(operation: CrestodianOperation): 
   if (operation.kind !== "plugin-install" || isTrustedCrestodianPluginInstallSpec(operation.spec)) {
     return plan;
   }
-  return [
-    formatNonClawHubInstallWarning({ sourceClass: "npm", spec: operation.spec }),
-    plan,
-  ].join("\n");
+  return [formatNonClawHubInstallWarning({ sourceClass: "npm", spec: operation.spec }), plan].join(
+    "\n",
+  );
 }
 
 function isTrustedCrestodianPluginInstallSpec(spec: string): boolean {
