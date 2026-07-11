@@ -84,6 +84,7 @@ describe("package-openclaw-for-docker", () => {
   it("parses package artifact output options", () => {
     expect(
       parseArgs([
+        "--allow-unreleased-changelog",
         "--output-dir",
         ".artifacts/docker",
         "--output-name=openclaw-current.tgz",
@@ -94,6 +95,7 @@ describe("package-openclaw-for-docker", () => {
         "--skip-build",
       ]),
     ).toEqual({
+      allowUnreleasedChangelog: true,
       outputDir: ".artifacts/docker",
       outputName: "openclaw-current.tgz",
       packJson: ".artifacts/docker/pack.json",
@@ -116,6 +118,10 @@ describe("package-openclaw-for-docker", () => {
   it("rejects duplicate package artifact CLI options", () => {
     const duplicateCases = [
       ["--output-dir", ["--output-dir", "one", "--output-dir=two"]],
+      [
+        "--allow-unreleased-changelog",
+        ["--allow-unreleased-changelog", "--allow-unreleased-changelog"],
+      ],
       ["--output-name", ["--output-name", "one.tgz", "--output-name=two.tgz"]],
       ["--pack-json", ["--pack-json", "one.json", "--pack-json=two.json"]],
       ["--pnpm-pack", ["--pnpm-pack", "--pnpm-pack"]],
@@ -421,6 +427,24 @@ describe("package-openclaw-for-docker", () => {
       "npm:pack --silent --ignore-scripts --pack-destination /out:/repo",
       "restore:/repo",
     ]);
+  });
+
+  it("passes the explicit Unreleased fallback through the changelog lifecycle", async () => {
+    const calls: string[] = [];
+
+    await packOpenClawPackageForDocker("/repo", "/out", {
+      allowUnreleasedChangelog: true,
+      prepareBundledAiRuntime: skipBundledAiRuntime,
+      prepareChangelog: async (cwd: string, options: { allowUnreleasedFallback?: boolean }) => {
+        calls.push(`prepare:${cwd}:${String(options.allowUnreleasedFallback)}`);
+      },
+      restoreChangelog: async (cwd: string, options: { allowUnreleasedFallback?: boolean }) => {
+        calls.push(`restore:${cwd}:${String(options.allowUnreleasedFallback)}`);
+      },
+      runCaptureImpl: async () => "openclaw-2026.5.29.tgz\n",
+    });
+
+    expect(calls).toEqual(["prepare:/repo:true", "restore:/repo:true"]);
   });
 
   it("uses pnpm pack when requested", async () => {

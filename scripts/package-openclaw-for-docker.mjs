@@ -137,6 +137,7 @@ function resolvePackedOpenClawFileName(value) {
 
 export function parseArgs(argv) {
   const options = {
+    allowUnreleasedChangelog: false,
     outputDir: "",
     outputName: "",
     packJson: "",
@@ -181,6 +182,8 @@ export function parseArgs(argv) {
         "packJson",
         readEqualsOptionValue(arg.slice("--pack-json=".length), "--pack-json"),
       );
+    } else if (arg === "--allow-unreleased-changelog") {
+      setOnce(arg, "allowUnreleasedChangelog", true);
     } else if (arg === "--pnpm-pack") {
       setOnce(arg, "pnpmPack", true);
     } else if (arg === "--skip-build") {
@@ -661,7 +664,10 @@ export async function packOpenClawPackageForDocker(sourceDir, outputDir, options
     throw new Error("packJsonPath cannot be combined with pnpmPack");
   }
   console.error("==> Packing OpenClaw package");
-  await prepareChangelog(sourceDir);
+  const changelogOptions = {
+    allowUnreleasedFallback: options.allowUnreleasedChangelog === true,
+  };
+  await prepareChangelog(sourceDir, changelogOptions);
   let packOutput;
   let cleanupBundledAiRuntime = async () => {};
   try {
@@ -689,7 +695,7 @@ export async function packOpenClawPackageForDocker(sourceDir, outputDir, options
     try {
       await cleanupBundledAiRuntime();
     } finally {
-      await restoreChangelog(sourceDir);
+      await restoreChangelog(sourceDir, changelogOptions);
     }
   }
   // pnpm reports an absolute destination path. The directory was emptied before packing,
@@ -740,6 +746,7 @@ async function main() {
   );
 
   const tarball = await packOpenClawPackageForDocker(sourceDir, outputDir, {
+    allowUnreleasedChangelog: options.allowUnreleasedChangelog,
     outputName: options.outputName,
     packJsonPath: options.packJson,
     pnpmPack: options.pnpmPack,

@@ -2164,6 +2164,7 @@ describe("ci workflow guards", () => {
     expect(smokeProfileJob.name).toBe("QA Smoke CI (${{ matrix.name }})");
     expect(smokeBuildStep.run).toContain("node scripts/build-all.mjs qaRuntime");
     expect(smokeBuildStep.run).toContain("pnpm ui:build");
+    expect(smokeBuildStep.run).toContain("--allow-unreleased-changelog");
     expect(smokeBuildStep.env.OPENCLAW_BUILD_PRIVATE_QA).toBe("1");
     expect(smokeBuildStep.run).toContain("--skip-build");
     expect(workflow.jobs["qa-smoke-ci-artifacts"]).toBeUndefined();

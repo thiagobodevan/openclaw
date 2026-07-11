@@ -21,7 +21,7 @@ const cumulativeChangelog = changelog`
 Docs: https://docs.openclaw.ai
 ## Unreleased
 ### Fixes
-- Pending note.
+- Pending beta release notes with enough detail.
 ## 2026.5.28
 ### Highlights
 - Current highlight.
@@ -48,6 +48,9 @@ describe("package-changelog", () => {
       "2026.5.28",
       "Unreleased",
     ]);
+    expect(resolvePackageChangelogVersions("2026.5.29", { allowUnreleasedFallback: true })).toEqual(
+      ["2026.5.29", "Unreleased"],
+    );
   });
 
   it("extracts only the package version stable release section", () => {
@@ -122,6 +125,21 @@ Docs: https://docs.openclaw.ai
     expect(() => extractCurrentPackageChangelog(cumulativeChangelog, "2026.5.29")).toThrow(
       "CHANGELOG.md does not contain a release section for 2026.5.29.",
     );
+  });
+
+  it("uses Unreleased for an unreleased stable-version package only when explicitly allowed", () => {
+    expect(
+      extractCurrentPackageChangelog(cumulativeChangelog, "2026.5.29", {
+        allowUnreleasedFallback: true,
+      }),
+    ).toBe(changelog`
+# Changelog
+Docs: https://docs.openclaw.ai
+
+## Unreleased
+### Fixes
+- Pending beta release notes with enough detail.
+`);
   });
 
   it("fails closed when the packaged changelog is unexpectedly large", () => {
