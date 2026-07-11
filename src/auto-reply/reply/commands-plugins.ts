@@ -8,13 +8,6 @@ import {
   parseNpmPackPrefixPath,
   resolveFileNpmSpecToLocalPath,
 } from "../../cli/plugins-command-helpers.js";
-import {
-  persistPluginInstall,
-  resolveInstallConfigMutationPreflights,
-  selectInstallMutationWriteOptions,
-} from "../../cli/plugins-install-persist.js";
-import type { ConfigSnapshotForInstallPersist } from "../../cli/plugins-install-persist.js";
-import { refreshPluginRegistryAfterConfigMutation } from "../../cli/plugins-registry-refresh.js";
 import { readConfigFileSnapshot, readConfigFileSnapshotForWrite } from "../../config/config.js";
 import { assertConfigWriteAllowedInCurrentMode } from "../../config/nix-mode-write-guard.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -26,6 +19,12 @@ import { buildClawHubPluginInstallRecordFields } from "../../plugins/clawhub-ins
 import { CLAWHUB_INSTALL_ERROR_CODE, installPluginFromClawHub } from "../../plugins/clawhub.js";
 import { parseGitPluginSpec } from "../../plugins/git-install.js";
 import {
+  persistPluginInstall,
+  resolveInstallConfigMutationPreflights,
+  selectInstallMutationWriteOptions,
+  type ConfigSnapshotForInstallPersist,
+} from "../../plugins/install-persistence.js";
+import {
   formatNonClawHubInstallWarning,
   NON_CLAWHUB_INSTALL_ACK_FLAG,
   type NonClawHubInstallSourceClass,
@@ -36,6 +35,7 @@ import {
   resolveCatalogOfficialExternalInstallPlan,
   resolveCatalogOfficialExternalNpmPackageTrust,
 } from "../../plugins/official-external-install-trust.js";
+import { refreshPluginRegistryAfterConfigMutation } from "../../plugins/registry-refresh.js";
 import type { PluginRecord } from "../../plugins/registry.js";
 import {
   buildAllPluginInspectReports,
@@ -200,10 +200,7 @@ function rejectNonClawHubChatInstall(params: {
   sourceClass: NonClawHubInstallSourceClass;
   spec: string;
 }): { ok: false; error: string } {
-  const warning = formatNonClawHubInstallWarning({
-    sourceClass: params.sourceClass,
-    spec: params.spec,
-  });
+  const warning = formatNonClawHubInstallWarning(params);
   return {
     ok: false,
     error: `${warning}\nThe /plugins chat command cannot acknowledge non-ClawHub install provenance; run the local openclaw plugins install command with ${NON_CLAWHUB_INSTALL_ACK_FLAG} from a trusted shell after reviewing the source.`,
@@ -233,10 +230,7 @@ async function installPluginFromPluginsCommand(params: {
 
   const npmPackPath = parseNpmPackPrefixPath(params.raw);
   if (npmPackPath !== null) {
-    return rejectNonClawHubChatInstall({
-      sourceClass: "npm-pack",
-      spec: params.raw,
-    });
+    return rejectNonClawHubChatInstall({ sourceClass: "npm-pack", spec: params.raw });
   }
 
   if (looksLikeLocalPluginInstallSpec(params.raw)) {
@@ -301,10 +295,7 @@ async function installPluginFromPluginsCommand(params: {
   const officialNpmTrust = resolveCatalogOfficialExternalNpmPackageTrust(npmSpec);
   const officialIdPlan = resolveCatalogOfficialExternalInstallPlan(params.raw);
   if (!officialNpmTrust && !officialIdPlan) {
-    return rejectNonClawHubChatInstall({
-      sourceClass: "npm",
-      spec: params.raw,
-    });
+    return rejectNonClawHubChatInstall({ sourceClass: "npm", spec: params.raw });
   }
   const trustedPluginId = officialNpmTrust?.pluginId ?? officialIdPlan?.pluginId;
   const trustedNpmSpec = officialIdPlan?.npmSpec ?? npmSpec;
