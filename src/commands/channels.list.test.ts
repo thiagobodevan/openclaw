@@ -378,9 +378,9 @@ describe("channels list", () => {
       installSpec: "@openclaw/discord",
       installCommand:
         "openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install",
-      doctorFixCommand: "openclaw doctor --fix",
+      doctorFixCommand: "openclaw doctor --fix --acknowledge-non-clawhub-install",
       repairHint:
-        "Install the official external plugin with: openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install, or run: openclaw doctor --fix.",
+        "Install the official external plugin with: openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install, or run: openclaw doctor --fix --acknowledge-non-clawhub-install.",
     });
     mocks.readConfigFileSnapshot.mockResolvedValue({
       ...baseConfigSnapshot,
@@ -408,7 +408,7 @@ describe("channels list", () => {
     expect(output).toContain("configured");
     expect(output).toContain("disabled");
     expect(output).toContain(
-      "run openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install or openclaw doctor --fix",
+      "run openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install or openclaw doctor --fix --acknowledge-non-clawhub-install",
     );
     expect(output).not.toContain("no configured chat channels");
   });
@@ -427,9 +427,9 @@ describe("channels list", () => {
       installSpec: "@openclaw/discord",
       installCommand:
         "openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install",
-      doctorFixCommand: "openclaw doctor --fix",
+      doctorFixCommand: "openclaw doctor --fix --acknowledge-non-clawhub-install",
       repairHint:
-        "Install the official external plugin with: openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install, or run: openclaw doctor --fix.",
+        "Install the official external plugin with: openclaw plugins install @openclaw/discord --acknowledge-non-clawhub-install, or run: openclaw doctor --fix --acknowledge-non-clawhub-install.",
     });
     mocks.readConfigFileSnapshot.mockResolvedValue({
       ...baseConfigSnapshot,

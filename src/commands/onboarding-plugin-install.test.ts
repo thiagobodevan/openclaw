@@ -8,6 +8,7 @@ import type { PluginEnableResult } from "../plugins/enable.js";
 import { resolveNpmInstallSpecsForUpdateChannel } from "../plugins/install-channel-specs.js";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import { VERSION } from "../version.js";
+import { WizardCancelledError } from "../wizard/prompts.js";
 
 function expectedNpmInstallSpec(spec: string): string {
   return resolveNpmInstallSpecsForUpdateChannel({
@@ -1539,7 +1540,7 @@ describe("ensureOnboardingPluginInstalled", () => {
   it("blocks local setup installs until non-ClawHub source acknowledgement is available", async () => {
     await withTempDir({ prefix: "openclaw-onboarding-install-local-ack-" }, async (temp) => {
       const workspaceDir = path.join(temp, "workspace");
-      const pluginDir = path.join(workspaceDir, "plugins", "demo");
+      const pluginDir = path.join(workspaceDir, "plugins", "demo; package");
       await fs.mkdir(path.join(workspaceDir, ".git"), { recursive: true });
       await fs.mkdir(pluginDir, { recursive: true });
       const log = vi.fn();
@@ -1551,7 +1552,7 @@ describe("ensureOnboardingPluginInstalled", () => {
           pluginId: "demo-plugin",
           label: "Demo Plugin",
           install: {
-            localPath: "plugins/demo",
+            localPath: "plugins/demo; package",
           },
         },
         prompter: {
@@ -1572,8 +1573,42 @@ describe("ensureOnboardingPluginInstalled", () => {
         expect.stringContaining("Installing plugin from local path"),
       );
       expect(error).toHaveBeenCalledWith(
-        expect.stringContaining("--acknowledge-non-clawhub-install"),
+        expect.stringContaining(
+          `openclaw plugins install '${await fs.realpath(pluginDir)}' --acknowledge-non-clawhub-install`,
+        ),
       );
+      expect(enablePluginInConfig).not.toHaveBeenCalled();
+      expect(recordPluginInstall).not.toHaveBeenCalled();
+    });
+  });
+
+  it("propagates cancellation from the non-ClawHub acknowledgement prompt", async () => {
+    await withTempDir({ prefix: "openclaw-onboarding-install-local-cancel-" }, async (temp) => {
+      const workspaceDir = path.join(temp, "workspace");
+      const pluginDir = path.join(workspaceDir, "plugins", "demo");
+      await fs.mkdir(path.join(workspaceDir, ".git"), { recursive: true });
+      await fs.mkdir(pluginDir, { recursive: true });
+      const cancellation = new WizardCancelledError();
+
+      await expect(
+        ensureOnboardingPluginInstalled({
+          cfg: {},
+          entry: {
+            pluginId: "demo-plugin",
+            label: "Demo Plugin",
+            install: { localPath: "plugins/demo" },
+          },
+          prompter: {
+            select: vi.fn(async () => "local"),
+            confirm: vi.fn(async () => {
+              throw cancellation;
+            }),
+          } as never,
+          runtime: { error: vi.fn(), log: vi.fn() } as never,
+          workspaceDir,
+        }),
+      ).rejects.toBe(cancellation);
+
       expect(enablePluginInConfig).not.toHaveBeenCalled();
       expect(recordPluginInstall).not.toHaveBeenCalled();
     });

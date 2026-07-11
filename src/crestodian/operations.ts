@@ -4,6 +4,7 @@ import type { ConfigSetOptions } from "../cli/config-set-input.js";
 import { looksLikeLocalInstallSpec } from "../cli/install-spec.js";
 import {
   formatNonClawHubInstallWarning,
+  NON_CLAWHUB_INSTALL_ACK_FLAG,
   type NonClawHubInstallAcknowledgementOptions,
 } from "../cli/non-clawhub-install-acknowledgement.js";
 import type { DoctorOptions } from "../commands/doctor.types.js";
@@ -543,6 +544,13 @@ function isClawHubPluginInstallSpec(spec: string): boolean {
   return spec.trim().toLowerCase().startsWith("clawhub:");
 }
 
+/** Whether this operation needs source-specific approval in addition to generic write approval. */
+export function requiresNonClawHubPluginInstallAcknowledgement(
+  operation: CrestodianOperation,
+): operation is Extract<CrestodianOperation, { kind: "plugin-install" }> {
+  return operation.kind === "plugin-install" && !isClawHubPluginInstallSpec(operation.spec);
+}
+
 function formatCreateAgentWorkspace(workspace: string | undefined): string {
   return workspace ? shortenHomePath(resolveUserPath(workspace)) : shortenHomePath(process.cwd());
 }
@@ -759,6 +767,8 @@ async function resolveTuiAgentId(params: {
 
 type ExecuteOptions = {
   approved?: boolean;
+  /** Source-specific consent collected after showing the non-ClawHub warning. */
+  acknowledgeNonClawHubInstall?: boolean;
   deps?: CrestodianCommandDeps;
   auditDetails?: Record<string, unknown>;
 };
@@ -959,6 +969,18 @@ async function executePluginInstall(
     runtime.exit(1);
     return { applied: false };
   }
+  if (
+    opts.approved &&
+    requiresNonClawHubPluginInstallAcknowledgement(operation) &&
+    opts.acknowledgeNonClawHubInstall !== true
+  ) {
+    const message = [
+      formatCrestodianPersistentPlan(operation),
+      `Non-ClawHub plugin installs need separate provenance acknowledgement; rerun with ${NON_CLAWHUB_INSTALL_ACK_FLAG}.`,
+    ].join("\n");
+    runtime.log(message);
+    return { applied: false, message };
+  }
   const result = await applyPersistentOperation({
     auditOperation: "plugin.install",
     operation,
@@ -982,7 +1004,7 @@ async function executePluginInstall(
           });
         });
       await runPluginInstall(operation.spec, createNoExitRuntime(ctx.runtime), {
-        acknowledgeNonClawHubInstall: opts.approved === true,
+        acknowledgeNonClawHubInstall: opts.acknowledgeNonClawHubInstall === true,
       });
       return { summary: `Installed plugin ${operation.spec}`, details: { spec: operation.spec } };
     },

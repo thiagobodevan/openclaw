@@ -27,6 +27,10 @@ import { defaultRuntime } from "../runtime.js";
 import { VERSION } from "../version.js";
 import { resolveClawHubRiskAcknowledgementCliOptions } from "./clawhub-risk-acknowledgement.js";
 import {
+  confirmNonClawHubInstall,
+  type NonClawHubInstallSourceClass,
+} from "./non-clawhub-install-acknowledgement.js";
+import {
   containsConfigIncludeDirective,
   resolveCombinedPluginAndHookConfigMutationPreflight,
   resolveInstallConfigMutationPreflights,
@@ -43,6 +47,23 @@ import { promptYesNo } from "./prompt.js";
 
 const DEPRECATED_DANGEROUS_FORCE_UNSAFE_UPDATE_WARNING =
   "--dangerously-force-unsafe-install is deprecated and no longer affects plugin updates because built-in install-time dangerous-code scanning has been removed. Configure security.installPolicy for operator-owned install decisions.";
+
+function pluginUpdateSourceClass(
+  source: "npm" | "archive" | "path" | "git" | "marketplace",
+): NonClawHubInstallSourceClass {
+  switch (source) {
+    case "npm":
+      return "npm";
+    case "archive":
+      return "local-archive";
+    case "path":
+      return "local-path";
+    case "git":
+      return "git";
+    case "marketplace":
+      return "marketplace";
+  }
+}
 
 function mayMutatePluginInstallRecord(
   record: PluginInstallRecord | undefined,
@@ -106,6 +127,7 @@ export async function runPluginUpdateCommand(params: {
   opts: {
     all?: boolean;
     acknowledgeClawHubRisk?: boolean;
+    acknowledgeNonClawHubInstall?: boolean;
     dryRun?: boolean;
     dangerouslyForceUnsafeInstall?: boolean;
   };
@@ -279,6 +301,14 @@ export async function runPluginUpdateCommand(params: {
             action: "updating",
             allowPrompt: !params.opts.dryRun,
           }),
+          allowNonClawHubInstall: false,
+          onNonClawHubInstall: async (request) =>
+            await confirmNonClawHubInstall({
+              acknowledged: params.opts.acknowledgeNonClawHubInstall,
+              runtime: defaultRuntime,
+              sourceClass: pluginUpdateSourceClass(request.source),
+              spec: request.spec,
+            }),
           logger,
           onIntegrityDrift: async (drift) => {
             const specLabel = drift.resolvedSpec ?? drift.spec;
@@ -303,6 +333,14 @@ export async function runPluginUpdateCommand(params: {
           hookIds: hookSelection.hookIds,
           specOverrides: hookSelection.specOverrides,
           dryRun: params.opts.dryRun,
+          allowNonClawHubInstall: false,
+          onNonClawHubInstall: async (request) =>
+            await confirmNonClawHubInstall({
+              acknowledged: params.opts.acknowledgeNonClawHubInstall,
+              runtime: defaultRuntime,
+              sourceClass: "npm",
+              spec: request.spec,
+            }),
           logger,
           onIntegrityDrift: async (drift) => {
             const specLabel = drift.resolvedSpec ?? drift.spec;

@@ -3,6 +3,7 @@ import { normalizeNullableString as normalizeId } from "@openclaw/normalization-
 import { collectConfiguredAgentHarnessRuntimes } from "../../../agents/harness-runtimes.js";
 import { listPotentialConfiguredChannelPresenceSignals } from "../../../channels/config-presence.js";
 import { normalizeChatChannelId } from "../../../channels/registry.js";
+import type { NonClawHubInstallAcknowledgementRequest } from "../../../cli/non-clawhub-install-acknowledgement.js";
 import { isChannelConfigured } from "../../../config/channel-configured.js";
 import { detectPluginAutoEnableCandidates } from "../../../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -23,10 +24,7 @@ import {
 } from "../../../plugins/web-search-install-catalog.js";
 import { VERSION } from "../../../version.js";
 import { collectConfiguredProviderPluginIds } from "./configured-provider-plugin-installs.js";
-import {
-  repairMissingPluginInstallsForIds,
-  type NonClawHubInstallAcknowledgementRequest,
-} from "./missing-configured-plugin-install.js";
+import { repairMissingPluginInstallsForIds } from "./missing-configured-plugin-install.js";
 import { asObjectRecord } from "./object.js";
 import { shouldDeferConfiguredPluginInstallRepair } from "./update-phase.js";
 

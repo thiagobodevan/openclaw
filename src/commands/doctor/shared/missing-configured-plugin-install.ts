@@ -12,6 +12,7 @@ import {
 import { listRawChannelPluginCatalogEntries } from "../../../channels/plugins/catalog.js";
 import {
   NON_CLAWHUB_INSTALL_ACK_FLAG,
+  type NonClawHubInstallAcknowledgementRequest,
   type NonClawHubInstallSourceClass,
 } from "../../../cli/non-clawhub-install-acknowledgement.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -70,7 +71,9 @@ import type { PluginMetadataSnapshot } from "../../../plugins/plugin-metadata-sn
 import { resolveProviderInstallCatalogEntries } from "../../../plugins/provider-install-catalog.js";
 import {
   isClawHubTrustSkippedOutcome,
+  isNonClawHubInstallAcknowledgementSkippedOutcome,
   updateNpmInstalledPlugins,
+  type PluginUpdateNonClawHubInstallRequest,
 } from "../../../plugins/update.js";
 import {
   resolveWebSearchInstallCatalogEntriesForEnv,
@@ -999,11 +1002,20 @@ function recordClawHubPackageName(value: string | undefined): string | undefined
 
 type InstallCandidateRepairReason = "stale-version-bound-runtime";
 
-export type NonClawHubInstallAcknowledgementRequest = {
-  pluginId: string;
-  sourceClass: NonClawHubInstallSourceClass;
-  spec: string;
-};
+function pluginUpdateSourceClass(
+  source: PluginUpdateNonClawHubInstallRequest["source"],
+): NonClawHubInstallSourceClass {
+  switch (source) {
+    case "archive":
+      return "local-archive";
+    case "path":
+      return "local-path";
+    case "git":
+    case "marketplace":
+    case "npm":
+      return source;
+  }
+}
 
 export type ConfiguredPluginInstallHealthIssue =
   | {
@@ -2061,6 +2073,9 @@ async function repairMissingPluginInstalls(params: {
   );
 
   if (missingRecordedPluginIds.length > 0) {
+    const onNonClawHubInstall = params.onNonClawHubInstall;
+    const recordsBeforeForcedRepair = nextRecords === records ? records : { ...nextRecords };
+    const forcedOriginalRecords = new Map<string, PluginInstallRecord>();
     for (const pluginId of missingRecordedPluginIds) {
       const record = nextRecords[pluginId];
       if (!record) {
@@ -2068,6 +2083,7 @@ async function repairMissingPluginInstalls(params: {
       }
       const forced = forceNpmInstallRecordRepair(record);
       if (forced !== record) {
+        forcedOriginalRecords.set(pluginId, record);
         if (nextRecords === records) {
           nextRecords = { ...records };
         }
@@ -2098,6 +2114,17 @@ async function repairMissingPluginInstalls(params: {
       },
       ...(params.acknowledgeClawHubRisk ? { acknowledgeClawHubRisk: true } : {}),
       ...(params.onClawHubRisk ? { onClawHubRisk: params.onClawHubRisk } : {}),
+      allowNonClawHubInstall: params.acknowledgeNonClawHubInstall === true,
+      ...(onNonClawHubInstall
+        ? {
+            onNonClawHubInstall: (request: PluginUpdateNonClawHubInstallRequest) =>
+              onNonClawHubInstall({
+                pluginId: request.pluginId,
+                sourceClass: pluginUpdateSourceClass(request.source),
+                spec: request.spec,
+              }),
+          }
+        : {}),
     });
     for (const outcome of updateResult.outcomes) {
       if (outcome.status === "updated" || outcome.status === "unchanged") {
@@ -2120,9 +2147,31 @@ async function repairMissingPluginInstalls(params: {
           }),
         );
         failedPluginIds.add(outcome.pluginId);
+      } else if (outcome.status === "skipped") {
+        warnings.push(outcome.message);
+        failedPluginIds.add(outcome.pluginId);
       }
     }
-    nextRecords = updateResult.config.plugins?.installs ?? nextRecords;
+    let updatedRecords = updateResult.config.plugins?.installs ?? nextRecords;
+    const acknowledgementSkippedPluginIds = updateResult.outcomes
+      .filter(isNonClawHubInstallAcknowledgementSkippedOutcome)
+      .map((outcome) => outcome.pluginId);
+    if (acknowledgementSkippedPluginIds.length > 0) {
+      updatedRecords = { ...updatedRecords };
+      for (const pluginId of acknowledgementSkippedPluginIds) {
+        const original = forcedOriginalRecords.get(pluginId);
+        if (original) {
+          updatedRecords[pluginId] = original;
+        }
+      }
+      if (
+        !updateResult.changed &&
+        updateResult.outcomes.every(isNonClawHubInstallAcknowledgementSkippedOutcome)
+      ) {
+        updatedRecords = recordsBeforeForcedRepair;
+      }
+    }
+    nextRecords = updatedRecords;
   }
 
   const missingPluginIds = new Set(

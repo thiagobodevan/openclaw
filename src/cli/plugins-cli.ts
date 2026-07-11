@@ -11,6 +11,8 @@ import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
 type PluginUpdateOptions = {
   all?: boolean;
   acknowledgeClawhubRisk?: boolean;
+  acknowledgeNonClawHubInstall?: boolean;
+  acknowledgeNonClawhubInstall?: boolean;
   dryRun?: boolean;
   dangerouslyForceUnsafeInstall?: boolean;
 };
@@ -237,6 +239,11 @@ export function registerPluginsCli(program: Command) {
       "Acknowledge ClawHub release trust warnings without prompting",
       false,
     )
+    .option(
+      "--acknowledge-non-clawhub-install",
+      "Acknowledge non-ClawHub plugin update provenance without prompting",
+      false,
+    )
     .action(async (id: string | undefined, opts: PluginUpdateOptions) => {
       const { runPluginUpdateCommand } = await import("./plugins-update-command.js");
       await runPluginUpdateCommand({
@@ -244,6 +251,7 @@ export function registerPluginsCli(program: Command) {
         opts: {
           ...opts,
           acknowledgeClawHubRisk: normalizeCommanderClawHubRiskOption(opts),
+          acknowledgeNonClawHubInstall: normalizeCommanderNonClawHubInstallOption(opts),
         },
       });
     });

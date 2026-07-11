@@ -44,6 +44,7 @@ import { loadCrestodianOverview, type CrestodianOverview } from "./overview.js";
  */
 export type CrestodianChatEngineOptions = {
   yes?: boolean;
+  acknowledgeNonClawHubInstall?: boolean;
   deps?: CrestodianCommandDeps;
   planWithAssistant?: CrestodianAssistantPlanner;
   /** Test seam for the embedded agent-loop turn runner. */
@@ -468,6 +469,7 @@ export class CrestodianChatEngine {
     try {
       result = await executeCrestodianOperation(pending, capture, {
         approved: true,
+        acknowledgeNonClawHubInstall: true,
         deps: this.commandDeps(),
       });
     } catch (error) {
@@ -516,7 +518,7 @@ export class CrestodianChatEngine {
         null,
         AGENT_TURN_DEADLINE_MS,
       );
-      if (loopReply?.text) {
+      if (loopReply && (loopReply.text || this.agentSession.proposalRef.current)) {
         // The loop owns the conversation now. A stale engine-side proposal
         // must not survive it, or a later approval could apply an operation
         // the user was no longer looking at.
@@ -568,10 +570,21 @@ export class CrestodianChatEngine {
     text: string;
     directive?: import("./agent-turn.js").CrestodianAgentTurnDirective;
   }): Promise<CrestodianChatReply> {
+    const proposal = this.agentSession.proposalRef.current;
+    const hostRenderedPlan =
+      proposal && !proposal.renderedByHost
+        ? `${proposal.plan}\n\nReply yes to approve this exact action, or no to cancel.`
+        : "";
+    if (proposal) {
+      // Approval is armable only after the host, not the model, has rendered
+      // the exact plan and any provenance warning to the user.
+      proposal.renderedByHost = true;
+    }
+    const replyText = [loopReply.text, hostRenderedPlan].filter(Boolean).join("\n\n");
     if (loopReply.directive?.kind === "channel-setup") {
       const wizardIntro = await this.startChannelSetupWizard(loopReply.directive.channel);
       return {
-        text: [loopReply.text, wizardIntro].filter(Boolean).join("\n\n"),
+        text: [replyText, wizardIntro].filter(Boolean).join("\n\n"),
         action: "none",
       };
     }
@@ -579,12 +592,12 @@ export class CrestodianChatEngine {
       const setup = await this.startModelSetup(loopReply.directive.workspace);
       return {
         ...setup,
-        text: [loopReply.text, setup.text].filter(Boolean).join("\n\n"),
+        text: [replyText, setup.text].filter(Boolean).join("\n\n"),
       };
     }
     if (loopReply.directive?.kind === "open-tui") {
       return {
-        text: loopReply.text,
+        text: replyText,
         action: "open-tui",
         handoff: loopReply.directive,
       };
@@ -593,10 +606,10 @@ export class CrestodianChatEngine {
       const handoff = await this.runOperation(loopReply.directive, undefined);
       return {
         ...handoff,
-        text: [loopReply.text, handoff.text].filter(Boolean).join("\n\n"),
+        text: [replyText, handoff.text].filter(Boolean).join("\n\n"),
       };
     }
-    return { text: loopReply.text, action: "none" };
+    return { text: replyText, action: "none" };
   }
 
   /**
@@ -676,11 +689,19 @@ export class CrestodianChatEngine {
     const capture = createCaptureRuntime();
     if (isPersistentCrestodianOperation(operation) && !this.opts.yes) {
       this.clearPendingProposals();
+      try {
+        await executeCrestodianOperation(operation, capture, {
+          approved: false,
+          deps: this.commandDeps(),
+        });
+      } catch (error) {
+        capture.error(formatOperationError(error));
+        return {
+          text: [provenance, capture.read()].filter(Boolean).join("\n\n"),
+          action: "none",
+        };
+      }
       this.pending = operation;
-      await executeCrestodianOperation(operation, capture, {
-        approved: false,
-        deps: this.commandDeps(),
-      });
       return {
         text: [provenance, capture.read(), approvalQuestion(operation)]
           .filter(Boolean)
@@ -693,6 +714,9 @@ export class CrestodianChatEngine {
     try {
       result = await executeCrestodianOperation(operation, capture, {
         approved: this.opts.yes === true || !isPersistentCrestodianOperation(operation),
+        ...(this.opts.acknowledgeNonClawHubInstall === true
+          ? { acknowledgeNonClawHubInstall: true }
+          : {}),
         deps: this.commandDeps(),
       });
     } catch (error) {

@@ -43,8 +43,8 @@ export type CrestodianAgentTurnRunner = (params: {
 
 export type CrestodianAgentSession = {
   sessionId: string;
-  /** Host-owned pending-proposal fingerprint; see crestodian-tool.ts. */
-  proposalRef: { current?: string };
+  /** Host-owned pending proposal and render state; see crestodian-tool.ts. */
+  proposalRef: import("../agents/tools/crestodian-tool.js").CrestodianToolProposalRef;
   /** Native CLI session id captured after CLI-harness turns for --resume reuse. */
   cliSessionId?: string;
 };
@@ -171,7 +171,7 @@ async function planCrestodianAgentTurn(
  */
 async function mirrorCrestodianToolStateFromEvents(params: {
   runId: string;
-  proposalRef: { current?: string };
+  proposalRef: import("../agents/tools/crestodian-tool.js").CrestodianToolProposalRef;
   directiveRef: { current?: CrestodianAgentTurnDirective };
 }): Promise<() => void> {
   const [
@@ -295,8 +295,8 @@ export async function runCrestodianAgentTurnWithDeps(
           : {}),
       })) as EmbeddedRunResult;
     }
-    const text = extractRunText(result)?.trim();
-    if (!text) {
+    const text = extractRunText(result)?.trim() ?? "";
+    if (!text && !params.session.proposalRef.current) {
       return null;
     }
     return {

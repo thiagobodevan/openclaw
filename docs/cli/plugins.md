@@ -40,7 +40,7 @@ openclaw plugins info <id>                    # alias for inspect
 openclaw plugins enable <id>
 openclaw plugins disable <id>
 openclaw plugins uninstall <id> [--dry-run] [--keep-files] [--force]
-openclaw plugins update <id-or-npm-spec> | --all [--dry-run]
+openclaw plugins update <id-or-npm-spec> | --all [--dry-run] [--acknowledge-non-clawhub-install]
 openclaw plugins registry [--refresh] [--json]
 openclaw plugins doctor
 openclaw plugins init <id> [--name <name>] [--type tool|provider] [--directory <path>]
@@ -428,11 +428,13 @@ openclaw plugins update <id-or-npm-spec>
 openclaw plugins update --all
 openclaw plugins update <id-or-npm-spec> --dry-run
 openclaw plugins update @openclaw/voice-call
+openclaw plugins update @acme/demo --acknowledge-non-clawhub-install
 openclaw plugins update openclaw-codex-app-server --acknowledge-clawhub-risk
 openclaw plugins update openclaw-codex-app-server --dangerously-force-unsafe-install
 ```
 
 Updates apply to tracked plugin installs in the managed plugin index and tracked hook-pack installs in `hooks.internal.installs`.
+Live updates from npm, Git, and marketplace sources show their provenance and require interactive confirmation. For reviewed automation, pass `--acknowledge-non-clawhub-install`; dry runs do not require acknowledgement because they do not replace installed package contents.
 
 <AccordionGroup>
   <Accordion title="Resolving plugin id vs npm spec">

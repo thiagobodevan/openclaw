@@ -107,6 +107,7 @@ export const CrestodianSetupActivateParamsSchema = Type.Object(
     /** Manual step only: the pasted API key or token; masked by clients, never echoed. */
     apiKey: Type.Optional(Type.String()),
     workspace: Type.Optional(Type.String()),
+    acknowledgeNonClawHubInstall: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

@@ -6,6 +6,10 @@
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
+import {
+  formatNonClawHubInstallWarning,
+  type NonClawHubInstallAcknowledgementRequest,
+} from "../cli/non-clawhub-install-acknowledgement.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import { enablePluginInConfig } from "../plugins/enable.js";
@@ -55,14 +59,23 @@ export type RuntimePluginRepairParams = {
   model?: string;
   agentId?: string;
   env?: NodeJS.ProcessEnv;
+  acknowledgeNonClawHubInstall?: boolean;
+  onNonClawHubInstall?: (
+    request: NonClawHubInstallAcknowledgementRequest,
+  ) => boolean | Promise<boolean>;
+};
+
+export type RuntimePluginRepairResult = {
+  required: boolean;
+  changes: string[];
+  warnings: string[];
+  failed: boolean;
 };
 
 /** Convenience helpers bound to one runtime plugin descriptor. */
 export type RuntimePluginModelSelectionHelpers = {
   ensure: (params: RuntimePluginEnsureParams) => Promise<RuntimePluginInstallResult>;
-  repair: (
-    params: RuntimePluginRepairParams,
-  ) => Promise<{ required: boolean; changes: string[]; warnings: string[] }>;
+  repair: (params: RuntimePluginRepairParams) => Promise<RuntimePluginRepairResult>;
 };
 
 function isInstalledRecordPresentOnDisk(
@@ -105,11 +118,19 @@ async function ensureRuntimePluginForModelSelection(params: {
   if (isInstalledRecordPresentOnDisk(existingRecords[params.descriptor.pluginId], process.env)) {
     // A recorded install with package.json on disk can be repaired/enabled
     // without re-downloading the plugin during setup.
+    const onNonClawHubInstall = ({ sourceClass, spec }: NonClawHubInstallAcknowledgementRequest) =>
+      params.prompter.confirm({
+        message: `${formatNonClawHubInstallWarning({ sourceClass, spec })}\nRepair this non-ClawHub runtime plugin source?`,
+        initialValue: false,
+      });
     const repair = await repairRuntimePluginInstallForModelSelection({
       cfg: params.cfg,
       model: params.model,
       agentId: params.agentId,
       env: process.env,
+      ...(params.acknowledgeNonClawHubInstall
+        ? { acknowledgeNonClawHubInstall: true }
+        : { onNonClawHubInstall }),
       descriptor: params.descriptor,
       shouldEnsure: params.shouldEnsure,
     });
@@ -118,6 +139,15 @@ async function ensureRuntimePluginForModelSelection(params: {
     }
     for (const warning of repair.warnings) {
       params.runtime.log?.(`${params.descriptor.warningLabel} update warning: ${warning}`);
+    }
+    if (repair.failed) {
+      return {
+        cfg: params.cfg,
+        required: true,
+        installed: false,
+        status: "failed",
+        reason: repair.warnings.join("; ") || "runtime plugin repair failed",
+      };
     }
     const enableResult = enablePluginInConfig(params.cfg, params.descriptor.pluginId);
     return {
@@ -164,9 +194,13 @@ async function repairRuntimePluginInstallForModelSelection(params: {
   model?: string;
   agentId?: string;
   env?: NodeJS.ProcessEnv;
+  acknowledgeNonClawHubInstall?: boolean;
+  onNonClawHubInstall?: (
+    request: NonClawHubInstallAcknowledgementRequest,
+  ) => boolean | Promise<boolean>;
   descriptor: RuntimePluginInstallDescriptor;
   shouldEnsure: RuntimePluginSelection;
-}): Promise<{ required: boolean; changes: string[]; warnings: string[] }> {
+}): Promise<RuntimePluginRepairResult> {
   if (
     !params.shouldEnsure({
       cfg: params.cfg,
@@ -174,7 +208,7 @@ async function repairRuntimePluginInstallForModelSelection(params: {
       agentId: params.agentId,
     })
   ) {
-    return { required: false, changes: [], warnings: [] };
+    return { required: false, changes: [], warnings: [], failed: false };
   }
   const { repairMissingPluginInstallsForIds } =
     await import("./doctor/shared/missing-configured-plugin-install.js");
@@ -182,11 +216,14 @@ async function repairRuntimePluginInstallForModelSelection(params: {
     cfg: params.cfg,
     pluginIds: [params.descriptor.pluginId],
     ...(params.env !== undefined ? { env: params.env } : {}),
+    ...(params.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
+    ...(params.onNonClawHubInstall ? { onNonClawHubInstall: params.onNonClawHubInstall } : {}),
   });
   return {
     required: true,
     changes: result.changes,
     warnings: [...result.warnings, ...(result.notices ?? [])],
+    failed: result.failedPluginIds?.includes(params.descriptor.pluginId) === true,
   };
 }
 

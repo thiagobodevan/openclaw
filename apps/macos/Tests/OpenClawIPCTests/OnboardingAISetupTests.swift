@@ -1,5 +1,6 @@
 import Foundation
 import OpenClawKit
+import OpenClawProtocol
 import Testing
 @testable import OpenClaw
 
@@ -73,11 +74,28 @@ struct OnboardingAISetupTests {
         #expect(OnboardingAISetupModel.activationReconciliationMode(after: timeout) == .polling)
     }
 
+    @Test func `legacy activation retry matches only the old strict schema rejection`() {
+        let oldGatewayError = GatewayResponseError(
+            method: "crestodian.setup.activate",
+            code: "INVALID_REQUEST",
+            message: "invalid crestodian.setup.activate params: at root: unexpected property 'acknowledgeNonClawHubInstall'",
+            details: nil)
+        let unrelatedError = GatewayResponseError(
+            method: "crestodian.setup.activate",
+            code: "INVALID_REQUEST",
+            message: "invalid crestodian.setup.activate params: at /kind: must be string",
+            details: nil)
+
+        #expect(OnboardingAISetupModel.activationNeedsLegacyAcknowledgementRetry(after: oldGatewayError))
+        #expect(!OnboardingAISetupModel.activationNeedsLegacyAcknowledgementRetry(after: unrelatedError))
+    }
+
     @Test func `gateway change clears route-bound setup state`() {
         let model = OnboardingAISetupModel()
         model.manualProviderID = "openai"
         model.manualKey = "temporary-key"
         model.showManualEntry = true
+        model.userSelect(kind: "codex-cli")
 
         model.resetForGatewayChange()
 
@@ -87,5 +105,61 @@ struct OnboardingAISetupTests {
         #expect(model.manualProviderID.isEmpty)
         #expect(model.manualKey.isEmpty)
         #expect(!model.showManualEntry)
+        #expect(model.pendingNonClawHubCandidateKind == nil)
+    }
+
+    @Test func `codex selection requires explicit non clawhub confirmation`() {
+        let model = OnboardingAISetupModel()
+
+        model.userSelect(kind: "codex-cli")
+
+        #expect(model.pendingNonClawHubCandidateKind == "codex-cli")
+        #expect(model.phase == .idle)
+
+        model.cancelNonClawHubActivation()
+
+        #expect(model.pendingNonClawHubCandidateKind == nil)
+    }
+
+    @Test func `untried codex remains available after an automatic candidate fails`() {
+        let candidates = [
+            OnboardingAISetupModel.Candidate(
+                kind: "codex-cli",
+                label: "Codex CLI",
+                detail: "Signed in",
+                modelRef: "openai/gpt-5.5",
+                recommended: false,
+                credentials: true),
+            OnboardingAISetupModel.Candidate(
+                kind: "claude-cli",
+                label: "Claude Code",
+                detail: "Signed in",
+                modelRef: "anthropic/claude-sonnet-4-5",
+                recommended: true,
+                credentials: true),
+        ]
+
+        #expect(OnboardingAISetupModel.hasUntriedConsentGatedCodex(
+            candidates: candidates,
+            statuses: [
+                "claude-cli": .failed(.init(summary: "Failed", detail: nil)),
+                "codex-cli": .untried,
+            ]))
+        #expect(!OnboardingAISetupModel.hasUntriedConsentGatedCodex(
+            candidates: candidates,
+            statuses: [
+                "claude-cli": .failed(.init(summary: "Failed", detail: nil)),
+                "codex-cli": .failed(.init(summary: "Failed", detail: nil)),
+            ]))
+    }
+
+    @Test func `optional setup acknowledgement preserves the existing initializer`() {
+        let params = CrestodianSetupActivateParams(
+            kind: AnyCodable("claude-cli"),
+            authchoice: nil,
+            apikey: nil,
+            workspace: nil)
+
+        #expect(params.acknowledgenonclawhubinstall == nil)
     }
 }

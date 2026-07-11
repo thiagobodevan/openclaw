@@ -52,6 +52,7 @@ openclaw crestodian --message "models"
 openclaw crestodian --message "validate config"
 openclaw crestodian --message "setup workspace ~/Projects/work model openai/gpt-5.5" --yes
 openclaw crestodian --message "set default model openai/gpt-5.5" --yes
+openclaw crestodian --message "plugin install npm:@example/plugin" --yes --acknowledge-non-clawhub-install
 openclaw onboard --modern
 ```
 
@@ -98,7 +99,7 @@ Read-only operations run immediately: show overview, list agents, list installed
 
 Starting guided channel setup (`connect telegram`) or model-provider setup (`configure model provider`) also runs immediately. Each wizard collects explicit answers and owns the resulting writes.
 
-Persistent, require conversational approval (or `--yes` for a direct command): write config, `config set`, `config set-ref`, setup/onboarding bootstrap, change the default model, start/stop/restart the Gateway, create agents, install or uninstall plugins, run doctor repairs that rewrite config or state.
+Persistent operations require conversational approval (or `--yes` for a direct command): write config, `config set`, `config set-ref`, setup/onboarding bootstrap, change the default model, start/stop/restart the Gateway, create agents, install or uninstall plugins, run doctor repairs that rewrite config or state. A direct non-ClawHub plugin install also requires `--acknowledge-non-clawhub-install`; generic `--yes` does not acknowledge executable code provenance.
 
 Approval is given in your own words: unambiguous replies ("yes", "sure", "go ahead", "not now") resolve from a closed deterministic list, and anything else is judged by a separate host-run model call that sees only your message and the pending proposal — never by the conversation model itself, which cannot self-approve. Ambiguous replies keep the proposal pending and the conversation asks again. When no model is usable, only the closed deterministic list applies.
 
@@ -152,7 +153,7 @@ When no model is configured, setup picks the first usable backend in this order 
 
 If none are available, setup still writes the workspace and Gateway configuration, then asks whether to configure a model provider. Accepting opens the normal onboarding provider/auth and default-model steps. Declining leaves Crestodian in deterministic mode; exact setup and repair commands still work, but the normal agent cannot answer until a provider and default model are configured. Run `configure model provider` later to reopen the provider flow.
 
-The macOS app drives the same ladder through the `crestodian.setup.detect` and `crestodian.setup.activate` gateway methods: detect lists every reusable backend it finds, activate live-tests one candidate (a real "reply with OK" completion) and only persists the model, workspace, and gateway defaults after the test passes. A failing candidate never changes config; the app automatically walks down the ladder and finally offers a manual key/token step populated from the Gateway's active text-inference provider plugins. The selected provider owns its starter model and config, and the credential is verified the same way before it is saved.
+The macOS app drives the same ladder through the `crestodian.setup.detect` and `crestodian.setup.activate` gateway methods: detect lists every reusable backend it finds, activate live-tests one candidate (a real "reply with OK" completion) and only persists the model, workspace, and gateway defaults after the test passes. A failing candidate never changes config; the app automatically walks down the ladder and finally offers a manual key/token step populated from the Gateway's active text-inference provider plugins. Codex remains a manual choice until the app shows the non-ClawHub npm-source warning and the user approves installing its runtime plugin. The selected provider owns its starter model and config, and the credential is verified the same way before it is saved.
 
 ## AI conversation
 

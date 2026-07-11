@@ -79,6 +79,7 @@ final class OnboardingAISetupModel {
     private(set) var detectError: Failure?
     /// Set once every detected candidate failed; opens the manual key form.
     private(set) var exhaustedAutoCandidates = false
+    private(set) var pendingNonClawHubCandidateKind: String?
 
     var manualProviderID = ""
     var manualKey: String = ""
@@ -156,6 +157,7 @@ final class OnboardingAISetupModel {
         self.connectedLatencyMs = nil
         self.detectError = nil
         self.exhaustedAutoCandidates = false
+        self.pendingNonClawHubCandidateKind = nil
         self.manualProviderID = ""
         self.manualKey = ""
         self.manualError = nil
@@ -261,27 +263,63 @@ final class OnboardingAISetupModel {
         return .polling
     }
 
+    static func activationNeedsLegacyAcknowledgementRetry(after error: Error) -> Bool {
+        guard let response = error as? GatewayResponseError,
+              response.method == "crestodian.setup.activate",
+              response.code == "INVALID_REQUEST"
+        else { return false }
+        return response.message.contains("unexpected property 'acknowledgeNonClawHubInstall'")
+    }
+
     /// Candidates the automatic ladder may try: skip definitively logged-out
-    /// installs and anything already attempted.
+    /// installs, Codex until its npm source is approved, and anything already attempted.
     private func autoCandidateAfter(kind: String?) -> Candidate? {
-        let startIndex: Int = if let kind, let index = self.candidates.firstIndex(where: { $0.kind == kind }) {
-            index + 1
-        } else {
-            0
+        Self.candidates(after: kind, in: self.candidates).first { candidate in
+            candidate.credentials != false &&
+                candidate.kind != "codex-cli" &&
+                self.statuses[candidate.kind] == .untried
         }
-        guard startIndex <= self.candidates.count else { return nil }
-        return self.candidates[startIndex...].first { candidate in
-            candidate.credentials != false && self.statuses[candidate.kind] == .untried
+    }
+
+    private static func candidates(after kind: String?, in candidates: [Candidate]) -> ArraySlice<Candidate> {
+        guard let kind, let index = candidates.firstIndex(where: { $0.kind == kind }) else {
+            return candidates[...]
+        }
+        return candidates[(index + 1)...]
+    }
+
+    static func hasUntriedConsentGatedCodex(
+        candidates: [Candidate],
+        statuses: [String: CandidateStatus]) -> Bool
+    {
+        candidates.contains { candidate in
+            candidate.kind == "codex-cli" &&
+                candidate.credentials != false &&
+                statuses[candidate.kind] == .untried
         }
     }
 
     func userSelect(kind: String) {
         guard !self.isBusy else { return }
         guard self.statuses[kind] != .connected else { return }
+        if kind == "codex-cli" {
+            self.pendingNonClawHubCandidateKind = kind
+            return
+        }
         Task { await self.activate(kind: kind) }
     }
 
-    func activate(kind: String) async {
+    func cancelNonClawHubActivation() {
+        self.pendingNonClawHubCandidateKind = nil
+    }
+
+    func confirmNonClawHubActivation() {
+        guard let kind = self.pendingNonClawHubCandidateKind else { return }
+        self.pendingNonClawHubCandidateKind = nil
+        Task { await self.activate(kind: kind, acknowledgeNonClawHubInstall: true) }
+    }
+
+    func activate(kind: String, acknowledgeNonClawHubInstall: Bool = false) async {
         let token = self.attemptToken
         let clock = ContinuousClock()
         let requestTimeoutMs = Self.activationRequestTimeoutMs(for: kind)
@@ -291,11 +329,29 @@ final class OnboardingAISetupModel {
         self.phase = .testing
         self.statuses[kind] = .testing
         do {
-            let data = try await GatewayConnection.shared.request(
-                method: "crestodian.setup.activate",
-                params: ["kind": AnyCodable(kind)],
-                timeoutMs: requestTimeoutMs,
-                retryTransportFailures: false)
+            var params = ["kind": AnyCodable(kind)]
+            if acknowledgeNonClawHubInstall {
+                params["acknowledgeNonClawHubInstall"] = AnyCodable(true)
+            }
+            let data: Data
+            do {
+                data = try await GatewayConnection.shared.request(
+                    method: "crestodian.setup.activate",
+                    params: params,
+                    timeoutMs: requestTimeoutMs,
+                    retryTransportFailures: false)
+            } catch {
+                guard acknowledgeNonClawHubInstall,
+                      Self.activationNeedsLegacyAcknowledgementRetry(after: error)
+                else { throw error }
+                // Protocol v4 predates this optional field. Consent is already collected
+                // locally, so retry only the strict old-schema rejection with its wire shape.
+                data = try await GatewayConnection.shared.request(
+                    method: "crestodian.setup.activate",
+                    params: ["kind": AnyCodable(kind)],
+                    timeoutMs: requestTimeoutMs,
+                    retryTransportFailures: false)
+            }
             guard token == self.attemptToken else { return }
             let result = try JSONDecoder().decode(ActivateResult.self, from: data)
             if result.ok {
@@ -435,6 +491,17 @@ final class OnboardingAISetupModel {
             await self.activate(kind: next.kind)
             return
         }
+        if Self.hasUntriedConsentGatedCodex(
+            candidates: self.candidates,
+            statuses: self.statuses)
+        {
+            // Codex is still viable, but its npm source requires a user selection and consent.
+            // Keep the ladder ready so the UI does not report that every option failed.
+            self.phase = .ready
+            self.exhaustedAutoCandidates = false
+            self.showManualEntry = true
+            return
+        }
         self.phase = .ready
         self.exhaustedAutoCandidates = true
         self.showManualEntry = true
@@ -517,6 +584,28 @@ struct OnboardingAISetupView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .sheet(isPresented: self.$showCrestodianChat) {
             self.crestodianSheet
+        }
+        .alert(
+            "Install the Codex runtime plugin?",
+            isPresented: Binding(
+                get: { self.model.pendingNonClawHubCandidateKind != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        self.model.cancelNonClawHubActivation()
+                    }
+                }))
+        {
+            Button("Cancel", role: .cancel) {
+                self.model.cancelNonClawHubActivation()
+            }
+            Button("Install and connect") {
+                self.model.confirmNonClawHubActivation()
+            }
+        } message: {
+            Text(
+                "Codex requires installing @openclaw/codex from the npm registry. " +
+                    "This source is outside ClawHub review and trust metadata. Continue only " +
+                    "if you trust the publisher, package contents, and install source.")
         }
     }
 

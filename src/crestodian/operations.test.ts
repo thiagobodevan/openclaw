@@ -704,11 +704,25 @@ describe("parseCrestodianOperation", () => {
     });
     expect(runPluginInstall).not.toHaveBeenCalled();
 
+    const genericApproval = await executeCrestodianOperation(
+      { kind: "plugin-install", spec: "npm:@openclaw/demo" },
+      runtime,
+      {
+        approved: true,
+        deps: { runPluginInstall },
+      },
+    );
+
+    expect(genericApproval.applied).toBe(false);
+    expect(genericApproval.message).toContain("--acknowledge-non-clawhub-install");
+    expect(runPluginInstall).not.toHaveBeenCalled();
+
     const result = await executeCrestodianOperation(
       { kind: "plugin-install", spec: "npm:@openclaw/demo" },
       runtime,
       {
         approved: true,
+        acknowledgeNonClawHubInstall: true,
         deps: { runPluginInstall },
       },
     );
@@ -735,6 +749,7 @@ describe("parseCrestodianOperation", () => {
       runtime,
       {
         approved: true,
+        acknowledgeNonClawHubInstall: true,
         deps: { runPluginInstall },
       },
     );

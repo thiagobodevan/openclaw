@@ -58,15 +58,17 @@ export async function runDoctorRepairSequence(params: {
   changeNotes: string[];
   warningNotes: string[];
   authProfilesRepaired: boolean;
+  failedConfiguredPluginInstallIds: string[];
 }> {
   let state = params.state;
   const changeNotes: string[] = [];
   const warningNotes: string[] = [];
   const env = params.env ?? process.env;
   const sanitizeLines = (lines: string[]) => lines.map((line) => sanitizeForLog(line)).join("\n");
-  const confirmNonClawHubRepairInstall = params.prompter
+  const prompter = params.prompter;
+  const confirmNonClawHubRepairInstall = prompter
     ? async (request: { sourceClass: NonClawHubInstallSourceClass; spec: string }) =>
-        await params.prompter!.confirmRuntimeRepair({
+        await prompter.confirmRuntimeRepair({
           message: `${formatNonClawHubInstallWarning(request)}\nInstall this non-ClawHub plugin source during doctor repair?`,
           initialValue: false,
           requiresInteractiveConfirmation: true,
@@ -266,5 +268,11 @@ export async function runDoctorRepairSequence(params: {
     warningNotes.push(sanitizeLines(activeToolSchemaWarnings));
   }
 
-  return { state, changeNotes, warningNotes, authProfilesRepaired };
+  return {
+    state,
+    changeNotes,
+    warningNotes,
+    authProfilesRepaired,
+    failedConfiguredPluginInstallIds: failedPluginIds,
+  };
 }

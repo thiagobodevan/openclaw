@@ -15,6 +15,7 @@ import {
 } from "../cli/non-clawhub-install-acknowledgement.js";
 import { resolveBundledInstallPlanForCatalogEntry } from "../cli/plugin-install-plan.js";
 import { invalidatePluginRuntimeDiscoveryAfterConfigMutation } from "../cli/plugins-registry-refresh.js";
+import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import { assertConfigWriteAllowedInCurrentMode } from "../config/nix-mode-write-guard.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { parseClawHubPluginSpec } from "../infra/clawhub-spec.js";
@@ -58,7 +59,7 @@ import type { RuntimeEnv } from "../runtime.js";
 import { withTimeout } from "../utils/with-timeout.js";
 import { VERSION } from "../version.js";
 import { t } from "../wizard/i18n/index.js";
-import type { WizardPrompter } from "../wizard/prompts.js";
+import { WizardCancelledError, type WizardPrompter } from "../wizard/prompts.js";
 
 type InstallChoice = "clawhub" | "npm" | "local" | "skip";
 type InstallPluginFromClawHubResult = Awaited<
@@ -731,11 +732,15 @@ async function acknowledgeOnboardingNonClawHubSource(params: {
       initialValue: false,
     });
   } catch (error) {
+    if (error instanceof WizardCancelledError) {
+      throw error;
+    }
     params.runtime.error?.(error instanceof Error ? error.message : String(error));
   }
   if (!acknowledged) {
+    const installCommand = `openclaw plugins install ${quoteCliArg(params.installCommandSpec)} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
     params.runtime.error?.(
-      `Install cancelled; install the plugin with ${sanitizeTerminalText(`openclaw plugins install ${params.installCommandSpec} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`)} after reviewing the source, then rerun setup.`,
+      `Install cancelled; install the plugin with ${sanitizeTerminalText(installCommand)} after reviewing the source, then rerun setup.`,
     );
     return false;
   }

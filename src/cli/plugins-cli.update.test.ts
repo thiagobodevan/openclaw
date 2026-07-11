@@ -171,6 +171,70 @@ describe("plugins cli update", () => {
     expect(helpText).toContain("Deprecated no-op");
     expect(helpText).toContain("security.installPolicy");
     expect(helpText).toContain("may still block");
+    expect(helpText).toContain("--acknowledge-non-clawhub-install");
+  });
+
+  it("fails closed on a non-interactive non-ClawHub plugin update", async () => {
+    const cfg = createTrackedPluginConfig({
+      pluginId: "demo",
+      spec: "@acme/demo@1.0.0",
+    });
+    primeUpdateConfigSnapshot({ config: cfg });
+    setInstalledPluginIndexInstallRecords(cfg.plugins?.installs ?? {});
+    setTty(false);
+    updateNpmInstalledPlugins.mockImplementation(async (params) => {
+      expect(params.allowNonClawHubInstall).toBe(false);
+      await expect(
+        params.onNonClawHubInstall?.({
+          pluginId: "demo",
+          source: "npm",
+          spec: "@acme/demo@1.0.0",
+        }),
+      ).resolves.toBe(false);
+      return {
+        config: params.config,
+        changed: false,
+        outcomes: [
+          {
+            pluginId: "demo",
+            status: "skipped",
+            code: "non_clawhub_install_acknowledgement_required",
+            message: "Skipped non-ClawHub update for demo.",
+          },
+        ],
+      };
+    });
+
+    await expect(runPluginsCommand(["plugins", "update", "demo"])).rejects.toThrow("__exit__:1");
+
+    expect(runtimeErrors.join("\n")).toContain("WARNING - Installing plugin from npm registry");
+    expect(runtimeErrors.join("\n")).toContain("--acknowledge-non-clawhub-install");
+  });
+
+  it("forwards explicit non-ClawHub acknowledgement to plugin updates", async () => {
+    const cfg = createTrackedPluginConfig({
+      pluginId: "demo",
+      spec: "@acme/demo@1.0.0",
+    });
+    primeUpdateConfigSnapshot({ config: cfg });
+    setInstalledPluginIndexInstallRecords(cfg.plugins?.installs ?? {});
+    setTty(false);
+    updateNpmInstalledPlugins.mockImplementation(async (params) => {
+      expect(params.allowNonClawHubInstall).toBe(false);
+      await expect(
+        params.onNonClawHubInstall?.({
+          pluginId: "demo",
+          source: "npm",
+          spec: "@acme/demo@1.0.0",
+        }),
+      ).resolves.toBe(true);
+      return { config: params.config, changed: false, outcomes: [] };
+    });
+
+    await runPluginsCommand(["plugins", "update", "demo", "--acknowledge-non-clawhub-install"]);
+
+    expect(runtimeErrors).toEqual([]);
+    expect(runtimeLogs.join("\n")).toContain("WARNING - Installing plugin from npm registry");
   });
 
   it("refuses plugin updates in Nix mode before package-manager work", async () => {

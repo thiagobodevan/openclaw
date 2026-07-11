@@ -1,4 +1,5 @@
 // Guided onboarding: detect AI access, live-test it, then persist only a working route.
+import { formatNonClawHubInstallWarning } from "../cli/non-clawhub-install-acknowledgement.js";
 import type {
   CrestodianSetupApplyParams,
   CrestodianSetupApplyResult,
@@ -106,6 +107,7 @@ async function tryCandidate(params: {
   runtime: RuntimeEnv;
   prompter: WizardPrompter;
   activate: ActivateSetupInference;
+  acknowledgeNonClawHubInstall?: boolean;
 }): Promise<CandidateAttempt> {
   const progress = params.prompter.progress(
     t("wizard.guided.testingCandidate", {
@@ -119,6 +121,9 @@ async function tryCandidate(params: {
       workspace: params.workspace,
       surface: "cli",
       runtime: params.runtime,
+      ...(params.acknowledgeNonClawHubInstall === true
+        ? { acknowledgeNonClawHubInstall: true }
+        : {}),
     }),
   );
   progress.stop(result.ok ? t("wizard.guided.testPassed") : t("wizard.guided.testFailed"));
@@ -214,12 +219,27 @@ async function runManualStage(params: {
       if (!candidate) {
         continue;
       }
+      let acknowledgeNonClawHubInstall = params.opts.acknowledgeNonClawHubInstall === true;
+      if (candidate.kind === "codex-cli" && !acknowledgeNonClawHubInstall) {
+        const { CODEX_RUNTIME_PLUGIN_NPM_SPEC } = await import("./codex-runtime-plugin-install.js");
+        acknowledgeNonClawHubInstall = await params.prompter.confirm({
+          message: `${formatNonClawHubInstallWarning({
+            sourceClass: "npm",
+            spec: CODEX_RUNTIME_PLUGIN_NPM_SPEC,
+          })}\nInstall this runtime plugin and test Codex now?`,
+          initialValue: false,
+        });
+        if (!acknowledgeNonClawHubInstall) {
+          continue;
+        }
+      }
       const attempt = await tryCandidate({
         candidate,
         workspace: params.workspace,
         runtime: params.runtime,
         prompter: params.prompter,
         activate: params.activate,
+        ...(acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
       });
       if (attempt.kind === "success") {
         return { kind: "complete", lines: activationLines(attempt.result) };
@@ -333,10 +353,23 @@ async function runGuidedOnboardingFlow(
   const autoAttemptedKinds = new Set<SetupInferenceCandidate["kind"]>();
   let result: GuidedSetupResult | undefined;
   // Logged-out CLIs stay visible as manual choices, but auto-testing them would
-  // only produce predictable auth failures and slow the fallback ladder.
-  for (const candidate of detection.candidates.filter((item) => item.credentials !== false)) {
+  // only produce predictable auth failures and slow the fallback ladder. Codex
+  // joins the automatic ladder only when the caller explicitly acknowledged
+  // its non-ClawHub runtime plugin source.
+  for (const candidate of detection.candidates.filter(
+    (item) =>
+      item.credentials !== false &&
+      (item.kind !== "codex-cli" || opts.acknowledgeNonClawHubInstall === true),
+  )) {
     autoAttemptedKinds.add(candidate.kind);
-    const attempt = await tryCandidate({ candidate, workspace, runtime, prompter, activate });
+    const attempt = await tryCandidate({
+      candidate,
+      workspace,
+      runtime,
+      prompter,
+      activate,
+      ...(candidate.kind === "codex-cli" ? { acknowledgeNonClawHubInstall: true } : {}),
+    });
     if (attempt.kind === "success") {
       result = { kind: "complete", lines: activationLines(attempt.result) };
       break;

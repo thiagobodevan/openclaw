@@ -1,5 +1,6 @@
 // Hook update helpers refresh installed hook records and config references.
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED_CODE } from "../infra/install-acknowledgement-codes.js";
 import { buildNpmResolutionFields } from "../infra/install-source-utils.js";
 import {
   expectedIntegrityForUpdate,
@@ -26,6 +27,7 @@ export type HookPackUpdateOutcome = {
   hookId: string;
   status: HookPackUpdateStatus;
   message: string;
+  code?: typeof NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED_CODE;
   currentVersion?: string;
   nextVersion?: string;
 };
@@ -43,6 +45,12 @@ export type HookPackUpdateIntegrityDriftParams = HookNpmIntegrityDriftParams & {
   resolvedSpec?: string;
   resolvedVersion?: string;
   dryRun: boolean;
+};
+
+export type HookPackUpdateNonClawHubInstallRequest = {
+  hookId: string;
+  source: "npm";
+  spec: string;
 };
 
 function createHookPackUpdateIntegrityDriftHandler(params: {
@@ -79,6 +87,11 @@ export async function updateNpmInstalledHookPacks(params: {
   hookIds?: string[];
   dryRun?: boolean;
   specOverrides?: Record<string, string>;
+  /** Set false when the caller requires explicit approval before an npm installer runs. */
+  allowNonClawHubInstall?: boolean;
+  onNonClawHubInstall?: (
+    request: HookPackUpdateNonClawHubInstallRequest,
+  ) => boolean | Promise<boolean>;
   onIntegrityDrift?: (params: HookPackUpdateIntegrityDriftParams) => boolean | Promise<boolean>;
 }): Promise<HookPackUpdateSummary> {
   const logger = params.logger ?? {};
@@ -119,6 +132,26 @@ export async function updateNpmInstalledHookPacks(params: {
         hookId,
         status: "skipped",
         message: `Skipping hook pack "${hookId}" (missing npm spec).`,
+      });
+      continue;
+    }
+
+    const approvedNonClawHubInstall =
+      params.dryRun ||
+      params.allowNonClawHubInstall === true ||
+      (params.onNonClawHubInstall
+        ? await params.onNonClawHubInstall({
+            hookId,
+            source: "npm",
+            spec: effectiveSpec,
+          })
+        : params.allowNonClawHubInstall !== false);
+    if (!approvedNonClawHubInstall) {
+      outcomes.push({
+        hookId,
+        status: "skipped",
+        code: NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED_CODE,
+        message: `Skipped non-ClawHub update for hook pack "${hookId}" from ${effectiveSpec}; explicit install acknowledgement is required.`,
       });
       continue;
     }

@@ -55,9 +55,9 @@ vi.mock("../plugins/official-external-plugin-repair-hints.js", () => ({
           installSpec: "@openclaw/feishu",
           installCommand:
             "openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install",
-          doctorFixCommand: "openclaw doctor --fix",
+          doctorFixCommand: "openclaw doctor --fix --acknowledge-non-clawhub-install",
           repairHint:
-            "Install the official external plugin with: openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install, or run: openclaw doctor --fix.",
+            "Install the official external plugin with: openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install, or run: openclaw doctor --fix --acknowledge-non-clawhub-install.",
         }
       : null,
 }));
@@ -331,7 +331,7 @@ describe("channelsStatusCommand SecretRef fallback flow", () => {
     const joined = logs.join("\n");
     expect(joined).toContain("Missing official external plugins:");
     expect(joined).toContain(
-      "Feishu: Install the official external plugin with: openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install, or run: openclaw doctor --fix.",
+      "Feishu: Install the official external plugin with: openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install, or run: openclaw doctor --fix --acknowledge-non-clawhub-install.",
     );
   });
 

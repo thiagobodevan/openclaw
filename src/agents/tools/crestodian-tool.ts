@@ -7,7 +7,9 @@
 import { Type } from "typebox";
 import {
   executeCrestodianOperation,
+  formatCrestodianPersistentPlan,
   isPersistentCrestodianOperation,
+  requiresNonClawHubPluginInstallAcknowledgement,
   type CrestodianOperation,
 } from "../../crestodian/operations.js";
 import type { RuntimeEnv } from "../../runtime.js";
@@ -26,10 +28,10 @@ export type CrestodianToolOptions = {
   approvalArmed?: boolean;
   /**
    * Approval is scoped to one exact operation: a denied mutating call records
-   * its canonical hash here (host-owned, survives turns), and an armed turn
-   * may execute only a call matching that hash. Cleared after use.
+   * its canonical plan here (host-owned, survives turns), and an armed turn
+   * may execute only after the host rendered that plan. Cleared after use.
    */
-  proposalRef?: { current?: string };
+  proposalRef?: CrestodianToolProposalRef;
   /**
    * Host handoff channel for actions the tool cannot perform itself
    * (interactive channel-setup wizard, opening the agent TUI). The engine
@@ -37,6 +39,15 @@ export type CrestodianToolOptions = {
    */
   directiveRef?: { current?: CrestodianToolDirective };
 };
+
+export type CrestodianToolProposal = {
+  operationHash: string;
+  plan: string;
+  /** Set only by the hosting chat after it has rendered `plan` to the user. */
+  renderedByHost: boolean;
+};
+
+export type CrestodianToolProposalRef = { current?: CrestodianToolProposal };
 
 /** Interactive handoffs the hosting chat engine executes after the turn. */
 export type CrestodianToolDirective =
@@ -48,6 +59,14 @@ export type CrestodianToolDirective =
 /** Canonical operation fingerprint used to bind "yes" to one exact mutation. */
 export function hashCrestodianOperation(operation: CrestodianOperation): string {
   return JSON.stringify(operation, Object.keys(operation).toSorted());
+}
+
+function createCrestodianToolProposal(operation: CrestodianOperation): CrestodianToolProposal {
+  return {
+    operationHash: hashCrestodianOperation(operation),
+    plan: formatCrestodianPersistentPlan(operation),
+    renderedByHost: false,
+  };
 }
 
 /** Result markers shared with out-of-process hosts (CLI MCP runs). */
@@ -106,7 +125,7 @@ function directiveForOperation(operation: CrestodianOperation): CrestodianToolDi
 export function resolveCrestodianProposalTransition(params: {
   args: Record<string, unknown>;
   resultText: string;
-}): { proposal: string | undefined } | null {
+}): { proposal: CrestodianToolProposal | undefined } | null {
   let operation: CrestodianOperation;
   try {
     operation = operationForAction(params.args);
@@ -120,7 +139,7 @@ export function resolveCrestodianProposalTransition(params: {
     return { proposal: undefined };
   }
   if (params.resultText.startsWith(CRESTODIAN_NEEDS_APPROVAL_PREFIX)) {
-    return { proposal: hashCrestodianOperation(operation) };
+    return { proposal: createCrestodianToolProposal(operation) };
   }
   // Executed or errored mutation: an armed approval is single-use either way.
   return { proposal: undefined };
@@ -374,15 +393,17 @@ export function createCrestodianTool(options: CrestodianToolOptions): AnyAgentTo
         );
       }
       const persistent = isPersistentCrestodianOperation(operation);
+      const proposedOperation = persistent ? options.proposalRef?.current : undefined;
       if (persistent) {
         const operationHash = hashCrestodianOperation(operation);
         const armedForThisOperation =
           params.approved === true &&
           options.approvalArmed === true &&
-          options.proposalRef?.current === operationHash;
+          proposedOperation?.operationHash === operationHash &&
+          proposedOperation.renderedByHost;
         if (!armedForThisOperation) {
-          // Three gates must hold: the model asserts consent, the host saw an
-          // explicit user approval in the current turn, and the approved call
+          // Four gates must hold: the model asserts consent, the host showed
+          // the plan, the user explicitly approved, and the approved call
           // matches the operation registered BEFORE that approval. A generic
           // "yes" must never authorize a different mutation, and an armed turn
           // must never mint a new executable proposal for itself — otherwise
@@ -397,10 +418,10 @@ export function createCrestodianTool(options: CrestodianToolOptions): AnyAgentTo
             );
           }
           if (options.proposalRef) {
-            options.proposalRef.current = operationHash;
+            options.proposalRef.current = createCrestodianToolProposal(operation);
           }
           return textResult(
-            `${CRESTODIAN_NEEDS_APPROVAL_PREFIX} this action changes state. The proposal is registered; describe this exact change and ask the user to reply yes (their approval unlocks THIS action only — then retry the identical call with approved=true).`,
+            `${CRESTODIAN_NEEDS_APPROVAL_PREFIX} ${formatCrestodianPersistentPlan(operation)} The proposal is registered; show this plan and every warning verbatim, then ask the user to reply yes (their approval unlocks THIS action only — then retry the identical call with approved=true).`,
             { needsApproval: true },
           );
         }
@@ -414,6 +435,10 @@ export function createCrestodianTool(options: CrestodianToolOptions): AnyAgentTo
       try {
         const result = await executeCrestodianOperation(operation, capture, {
           approved: persistent,
+          ...(requiresNonClawHubPluginInstallAcknowledgement(operation) &&
+          proposedOperation?.renderedByHost
+            ? { acknowledgeNonClawHubInstall: true }
+            : {}),
           deps: { setupSurface: options.surface },
           auditDetails: { via: "crestodian-agent-tool" },
         });

@@ -30,6 +30,8 @@ type CrestodianInteractiveRunner = (
 export type RunCrestodianOptions = {
   message?: string;
   yes?: boolean;
+  /** Explicit acknowledgement for plugin sources outside ClawHub review. */
+  acknowledgeNonClawHubInstall?: boolean;
   json?: boolean;
   interactive?: boolean;
   /** "onboarding" swaps the greeting for the first-run setup proposal. */
@@ -69,6 +71,7 @@ async function runOneShot(
   const operation = await resolveCrestodianOperation(input, runtime, opts);
   await executeCrestodianOperation(operation, runtime, {
     approved: opts.yes === true || !isPersistentCrestodianOperation(operation),
+    ...(opts.acknowledgeNonClawHubInstall === true ? { acknowledgeNonClawHubInstall: true } : {}),
     deps: crestodianCommandDepsFromOptions(opts),
   });
 }

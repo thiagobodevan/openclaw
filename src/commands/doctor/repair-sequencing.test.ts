@@ -393,6 +393,58 @@ describe("doctor repair sequencing", () => {
     expect(peerLinkCall?.env).toBe(process.env);
   });
 
+  it("uses an explicit interactive decision for non-ClawHub repair installs", async () => {
+    const confirmRuntimeRepair = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const prompter = { confirmRuntimeRepair } as never;
+
+    await runDoctorRepairSequence({
+      state: {
+        cfg: {} as OpenClawConfig,
+        candidate: {} as OpenClawConfig,
+        pendingChanges: false,
+        fixHints: [],
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+      prompter,
+    });
+
+    const repairCall = mocks.repairMissingConfiguredPluginInstalls.mock.calls[0]?.[0];
+    const onNonClawHubInstall = repairCall?.onNonClawHubInstall;
+    expect(onNonClawHubInstall).toEqual(expect.any(Function));
+    const request = {
+      pluginId: "matrix",
+      sourceClass: "npm" as const,
+      spec: "@openclaw/matrix",
+    };
+    await expect(onNonClawHubInstall?.(request)).resolves.toBe(true);
+    await expect(onNonClawHubInstall?.(request)).resolves.toBe(false);
+    expect(confirmRuntimeRepair).toHaveBeenNthCalledWith(1, {
+      message:
+        "WARNING - Installing plugin from npm registry: @openclaw/matrix\n" +
+        "This source is outside ClawHub review and trust metadata. Only continue if you trust the publisher, package contents, and install source.\n" +
+        "Install this non-ClawHub plugin source during doctor repair?",
+      initialValue: false,
+      requiresInteractiveConfirmation: true,
+    });
+  });
+
+  it("forwards explicit non-ClawHub repair acknowledgement", async () => {
+    await runDoctorRepairSequence({
+      state: {
+        cfg: {} as OpenClawConfig,
+        candidate: {} as OpenClawConfig,
+        pendingChanges: false,
+        fixHints: [],
+      },
+      doctorFixCommand: "openclaw doctor --fix",
+      acknowledgeNonClawHubInstall: true,
+    });
+
+    expect(mocks.repairMissingConfiguredPluginInstalls).toHaveBeenCalledWith(
+      expect.objectContaining({ acknowledgeNonClawHubInstall: true }),
+    );
+  });
+
   it("repairs stale OAuth shadows before importing and removing auth JSON", async () => {
     const events: string[] = [];
     mocks.maybeRepairLegacyOAuthSidecarProfiles.mockImplementationOnce(async () => {
@@ -1017,6 +1069,7 @@ describe("doctor repair sequencing", () => {
     expect(result.warningNotes).toStrictEqual([
       'Failed to install missing configured plugin "brave" from @openclaw/brave-plugin: package install failed',
     ]);
+    expect(result.failedConfiguredPluginInstallIds).toEqual(["brave"]);
   });
 
   it("preserves configured channels when their install repair fails", async () => {

@@ -65,6 +65,8 @@ const mocks = vi.hoisted(() => ({
   callGateway: vi.fn(),
   resolvePluginSetupProvider: vi.fn(),
   resolvePluginSetupRegistry: vi.fn(),
+  repairCodexRuntimePluginInstallForModelSelection: vi.fn(),
+  repairCopilotRuntimePluginInstallForModelSelection: vi.fn(),
 }));
 
 vi.mock("../../agents/auth-profiles/profiles.js", () => ({
@@ -169,6 +171,16 @@ vi.mock("../../infra/remote-env.js", () => ({
 
 vi.mock("../../gateway/call.js", () => ({
   callGateway: mocks.callGateway,
+}));
+
+vi.mock("../codex-runtime-plugin-install.js", () => ({
+  repairCodexRuntimePluginInstallForModelSelection:
+    mocks.repairCodexRuntimePluginInstallForModelSelection,
+}));
+
+vi.mock("../copilot-runtime-plugin-install.js", () => ({
+  repairCopilotRuntimePluginInstallForModelSelection:
+    mocks.repairCopilotRuntimePluginInstallForModelSelection,
 }));
 
 vi.mock("../../plugins/provider-oauth-flow.js", () => ({
@@ -386,15 +398,24 @@ describe("modelsAuthLoginCommand", () => {
       autoEnableProbes: [],
       diagnostics: [],
     });
+    mocks.repairCodexRuntimePluginInstallForModelSelection.mockResolvedValue({
+      warnings: [],
+      failed: false,
+    });
+    mocks.repairCopilotRuntimePluginInstallForModelSelection.mockResolvedValue({
+      warnings: [],
+      failed: false,
+    });
     mocks.loadValidConfigOrThrow.mockImplementation(async () => currentConfig);
     mocks.updateConfig.mockImplementation(
-      async (mutator: (cfg: OpenClawConfig) => OpenClawConfig) => {
-        lastUpdatedConfig = mutator(currentConfig);
+      async (mutator: (cfg: OpenClawConfig) => OpenClawConfig | Promise<OpenClawConfig>) => {
+        lastUpdatedConfig = await mutator(currentConfig);
         currentConfig = lastUpdatedConfig;
         return lastUpdatedConfig;
       },
     );
     mocks.createClackPrompter.mockReturnValue({
+      confirm: vi.fn(async () => true),
       note: vi.fn(async () => {}),
       select: vi.fn(),
     });
@@ -1195,6 +1216,33 @@ describe("modelsAuthLoginCommand", () => {
       "openai/gpt-5.5": {},
     });
     expect(runtime.log).toHaveBeenCalledWith("Default model set to openai/gpt-5.5");
+  });
+
+  it("keeps the prior default when runtime plugin repair is refused", async () => {
+    const runtime = createRuntime();
+    currentConfig = {
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-opus-4-6" },
+          models: { "anthropic/claude-opus-4-6": {} },
+        },
+      },
+    };
+    mocks.repairCodexRuntimePluginInstallForModelSelection.mockResolvedValue({
+      warnings: ["Non-ClawHub acknowledgement required."],
+      failed: true,
+    });
+
+    await expect(
+      modelsAuthLoginCommand({ provider: "openai", setDefault: true }, runtime),
+    ).rejects.toThrow("Authentication was saved successfully");
+
+    expect(lastUpdatedConfig?.agents?.defaults?.model).toEqual({
+      primary: "anthropic/claude-opus-4-6",
+    });
+    expect(mocks.upsertAuthProfileWithLock).toHaveBeenCalled();
+    expect(runtime.error).toHaveBeenCalledWith("Non-ClawHub acknowledgement required.");
+    expect(runtime.log).not.toHaveBeenCalledWith("Default model set to openai/gpt-5.5");
   });
 
   it("survives lockout clearing failure without blocking login", async () => {

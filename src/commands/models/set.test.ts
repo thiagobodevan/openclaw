@@ -45,8 +45,14 @@ describe("modelsSetCommand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.replaceConfigFile.mockResolvedValue(undefined);
-    mocks.repairCodexRuntimePluginInstallForModelSelection.mockResolvedValue({ warnings: [] });
-    mocks.repairCopilotRuntimePluginInstallForModelSelection.mockResolvedValue({ warnings: [] });
+    mocks.repairCodexRuntimePluginInstallForModelSelection.mockResolvedValue({
+      warnings: [],
+      failed: false,
+    });
+    mocks.repairCopilotRuntimePluginInstallForModelSelection.mockResolvedValue({
+      warnings: [],
+      failed: false,
+    });
   });
 
   afterEach(() => {
@@ -92,15 +98,78 @@ describe("modelsSetCommand", () => {
       "anthropic/claude-sonnet-4-6": {},
     });
     expect(replaceParams?.nextConfig.agents?.defaults?.models).not.toHaveProperty("openai/sonnet");
-    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith({
-      cfg: replaceParams?.nextConfig,
-      model: "anthropic/claude-sonnet-4-6",
-    });
-    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith({
-      cfg: replaceParams?.nextConfig,
-      model: "anthropic/claude-sonnet-4-6",
-    });
+    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: replaceParams?.nextConfig,
+        model: "anthropic/claude-sonnet-4-6",
+      }),
+    );
+    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: replaceParams?.nextConfig,
+        model: "anthropic/claude-sonnet-4-6",
+      }),
+    );
     expect(runtime.log).toHaveBeenCalledWith("Default model: anthropic/claude-sonnet-4-6");
+  });
+
+  it("does not write an unusable default when runtime plugin repair is refused", async () => {
+    const config = {
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4-6" },
+          models: { "anthropic/claude-sonnet-4-6": {} },
+        },
+      },
+    } as unknown as OpenClawConfig;
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      valid: true,
+      hash: "config-hash",
+      sourceConfig: config,
+      runtimeConfig: config,
+      config,
+    });
+    mocks.repairCodexRuntimePluginInstallForModelSelection.mockResolvedValue({
+      warnings: ["Non-ClawHub acknowledgement required."],
+      failed: true,
+    });
+    const runtime = makeRuntime();
+
+    await expect(modelsSetCommand("openai/gpt-5.5", runtime)).rejects.toThrow(
+      "Default model was not changed",
+    );
+
+    expect(mocks.replaceConfigFile).not.toHaveBeenCalled();
+    expect(runtime.error).toHaveBeenCalledWith("Non-ClawHub acknowledgement required.");
+    expect(mocks.logConfigUpdated).not.toHaveBeenCalled();
+  });
+
+  it("forwards explicit non-ClawHub acknowledgement for noninteractive runtime repair", async () => {
+    const config = {
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4-6" },
+        },
+      },
+    } as unknown as OpenClawConfig;
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      valid: true,
+      hash: "config-hash",
+      sourceConfig: config,
+      runtimeConfig: config,
+      config,
+    });
+
+    await modelsSetCommand("openai/gpt-5.5", makeRuntime(), {
+      acknowledgeNonClawHubInstall: true,
+    });
+
+    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ acknowledgeNonClawHubInstall: true }),
+    );
+    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ acknowledgeNonClawHubInstall: true }),
+    );
   });
 
   it("keeps authored aliases ahead of runtime-only aliases", async () => {
@@ -142,14 +211,18 @@ describe("modelsSetCommand", () => {
     expect(replaceParams?.nextConfig.agents?.defaults?.models).toEqual({
       "openai/gpt-5.5": { alias: "sonnet" },
     });
-    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith({
-      cfg: replaceParams?.nextConfig,
-      model: "openai/gpt-5.5",
-    });
-    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith({
-      cfg: replaceParams?.nextConfig,
-      model: "openai/gpt-5.5",
-    });
+    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: replaceParams?.nextConfig,
+        model: "openai/gpt-5.5",
+      }),
+    );
+    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: replaceParams?.nextConfig,
+        model: "openai/gpt-5.5",
+      }),
+    );
     expect(runtime.log).toHaveBeenCalledWith("Default model: openai/gpt-5.5");
   });
 
@@ -182,14 +255,18 @@ describe("modelsSetCommand", () => {
     expect(replaceParams?.nextConfig.agents?.defaults?.models).toEqual({
       "zai/glm-4.7": {},
     });
-    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith({
-      cfg: replaceParams?.nextConfig,
-      model: "zai/glm-4.7",
-    });
-    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith({
-      cfg: replaceParams?.nextConfig,
-      model: "zai/glm-4.7",
-    });
+    expect(mocks.repairCodexRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: replaceParams?.nextConfig,
+        model: "zai/glm-4.7",
+      }),
+    );
+    expect(mocks.repairCopilotRuntimePluginInstallForModelSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg: replaceParams?.nextConfig,
+        model: "zai/glm-4.7",
+      }),
+    );
     expect(runtime.log).toHaveBeenCalledWith("Default model: zai/glm-4.7");
   });
 });

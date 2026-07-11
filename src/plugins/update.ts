@@ -6,6 +6,7 @@ import type { PluginInstallRecord } from "../config/types.plugins.js";
 import type { ClawHubTrustErrorCode } from "../infra/clawhub-install-trust.js";
 import { parseClawHubPluginSpec } from "../infra/clawhub-spec.js";
 import { satisfiesPluginApiRange } from "../infra/clawhub.js";
+import { NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED_CODE } from "../infra/install-acknowledgement-codes.js";
 import { unscopedPackageName } from "../infra/install-safe-path.js";
 import type { NpmSpecResolution } from "../infra/install-source-utils.js";
 import { createNpmMetadataEnv, resolveNpmSpecMetadata } from "../infra/install-source-utils.js";
@@ -82,6 +83,14 @@ export type PluginUpdateLogger = {
 /** Outcome status for one plugin update attempt. */
 export type PluginUpdateStatus = "updated" | "unchanged" | "skipped" | "error";
 
+export const PLUGIN_UPDATE_SKIP_CODE = {
+  NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED: NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED_CODE,
+} as const;
+
+type PluginUpdateSkipCode =
+  | ClawHubTrustErrorCode
+  | (typeof PLUGIN_UPDATE_SKIP_CODE)[keyof typeof PLUGIN_UPDATE_SKIP_CODE];
+
 type PluginUpdateChannelFallback = {
   requestedSpec: string;
   usedSpec: string;
@@ -103,7 +112,7 @@ type BasePluginUpdateOutcome = {
 export type PluginUpdateOutcome =
   | (BasePluginUpdateOutcome & {
       status: "skipped";
-      code?: ClawHubTrustErrorCode;
+      code?: PluginUpdateSkipCode;
     })
   | (BasePluginUpdateOutcome & {
       status: Exclude<PluginUpdateStatus, "skipped">;
@@ -124,6 +133,12 @@ export type PluginUpdateIntegrityDriftParams = {
   resolvedSpec?: string;
   resolvedVersion?: string;
   dryRun: boolean;
+};
+
+export type PluginUpdateNonClawHubInstallRequest = {
+  pluginId: string;
+  source: Exclude<PluginInstallRecord["source"], "clawhub">;
+  spec: string;
 };
 
 export type PluginChannelSyncSummary = {
@@ -211,6 +226,28 @@ function formatClawHubInstallFailure(params: {
   return `Failed to ${params.phase} ${params.pluginId}: ${params.error} (ClawHub ${params.spec}).`;
 }
 
+function formatNonClawHubInstallAcknowledgementRequired(params: {
+  pluginId: string;
+  spec: string;
+}): string {
+  return `Skipped non-ClawHub install for "${params.pluginId}" from ${params.spec}; rerun with --acknowledge-non-clawhub-install after reviewing and trusting the source.`;
+}
+
+function describeNonClawHubInstallSource(
+  record: PluginInstallRecord,
+  effectiveSpec: string | undefined,
+): string {
+  if (record.source === "marketplace") {
+    const marketplacePlugin = record.marketplacePlugin?.trim();
+    const marketplaceSource = record.marketplaceSource?.trim();
+    if (marketplacePlugin && marketplaceSource) {
+      return `${marketplacePlugin} from ${marketplaceSource}`;
+    }
+    return marketplaceSource ?? marketplacePlugin ?? effectiveSpec ?? "marketplace";
+  }
+  return effectiveSpec ?? record.spec ?? record.gitUrl ?? record.sourcePath ?? record.source;
+}
+
 function isClawHubRiskAcknowledgementRequired(result: { ok: false; code?: string }): boolean {
   return result.code === CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_RISK_ACKNOWLEDGEMENT_REQUIRED;
 }
@@ -278,6 +315,16 @@ export function isClawHubTrustSkippedOutcome(outcome: { status: string; code?: s
     (outcome.code === CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_RISK_ACKNOWLEDGEMENT_REQUIRED ||
       outcome.code === CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_DOWNLOAD_BLOCKED ||
       outcome.code === CLAWHUB_INSTALL_ERROR_CODE.CLAWHUB_SECURITY_UNAVAILABLE)
+  );
+}
+
+export function isNonClawHubInstallAcknowledgementSkippedOutcome(outcome: {
+  status: string;
+  code?: string;
+}): boolean {
+  return (
+    outcome.status === "skipped" &&
+    outcome.code === PLUGIN_UPDATE_SKIP_CODE.NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED
   );
 }
 
@@ -1401,6 +1448,11 @@ export async function updateNpmInstalledPlugins(params: {
   onIntegrityDrift?: (params: PluginUpdateIntegrityDriftParams) => boolean | Promise<boolean>;
   acknowledgeClawHubRisk?: boolean;
   onClawHubRisk?: (request: ClawHubRiskAcknowledgementRequest) => boolean | Promise<boolean>;
+  /** Set false when the caller requires explicit approval before any non-ClawHub installer runs. */
+  allowNonClawHubInstall?: boolean;
+  onNonClawHubInstall?: (
+    request: PluginUpdateNonClawHubInstallRequest,
+  ) => boolean | Promise<boolean>;
 }): Promise<PluginUpdateSummary> {
   const logger = params.logger ?? {};
   const installs = params.config.plugins?.installs ?? {};
@@ -1422,6 +1474,17 @@ export async function updateNpmInstalledPlugins(params: {
   const clawHubRiskAcknowledgementOptions = {
     ...(params.acknowledgeClawHubRisk ? { acknowledgeClawHubRisk: true } : {}),
     ...(!params.dryRun && params.onClawHubRisk ? { onClawHubRisk: params.onClawHubRisk } : {}),
+  };
+  const approveNonClawHubInstall = async (
+    request: PluginUpdateNonClawHubInstallRequest,
+  ): Promise<boolean> => {
+    if (params.allowNonClawHubInstall === true) {
+      return true;
+    }
+    if (params.onNonClawHubInstall) {
+      return await params.onNonClawHubInstall(request);
+    }
+    return params.allowNonClawHubInstall !== false;
   };
 
   const recordFailure = (
@@ -2072,6 +2135,28 @@ export async function updateNpmInstalledPlugins(params: {
       continue;
     }
 
+    const nonClawHubInstallSpec = describeNonClawHubInstallSource(record, effectiveSpec);
+    if (
+      record.source !== "clawhub" &&
+      !(await approveNonClawHubInstall({
+        pluginId,
+        source: record.source,
+        spec: nonClawHubInstallSpec,
+      }))
+    ) {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        code: PLUGIN_UPDATE_SKIP_CODE.NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED,
+        ...(currentVersion ? { currentVersion } : {}),
+        message: formatNonClawHubInstallAcknowledgementRequired({
+          pluginId,
+          spec: nonClawHubInstallSpec,
+        }),
+      });
+      continue;
+    }
+
     let result:
       | Awaited<ReturnType<typeof installPluginFromNpmSpec>>
       | Awaited<ReturnType<typeof installPluginFromClawHub>>
@@ -2224,6 +2309,25 @@ export async function updateNpmInstalledPlugins(params: {
         npmSpec: officialNpmFallbackInstallSpec,
       })
     ) {
+      if (
+        !(await approveNonClawHubInstall({
+          pluginId,
+          source: "npm",
+          spec: officialNpmFallbackInstallSpec,
+        }))
+      ) {
+        outcomes.push({
+          pluginId,
+          status: "skipped",
+          code: PLUGIN_UPDATE_SKIP_CODE.NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED,
+          ...(currentVersion ? { currentVersion } : {}),
+          message: formatNonClawHubInstallAcknowledgementRequired({
+            pluginId,
+            spec: officialNpmFallbackInstallSpec,
+          }),
+        });
+        continue;
+      }
       logger.warn?.(
         `Plugin "${pluginId}" could not download official ClawHub artifact for ${activeClawHubInstallSpec ?? `clawhub:${record.clawhubPackage!}`}; using npm ${officialNpmFallbackInstallSpec} instead. Core update can still complete.`,
       );
@@ -2427,6 +2531,8 @@ export async function syncPluginsForUpdateChannel(params: {
   externalizedBundledPluginBridges?: readonly ExternalizedBundledPluginBridge[];
   acknowledgeClawHubRisk?: boolean;
   onClawHubRisk?: (request: ClawHubRiskAcknowledgementRequest) => boolean | Promise<boolean>;
+  /** Set false when the caller requires explicit approval before an external npm install. */
+  allowNonClawHubInstall?: boolean;
 }): Promise<PluginChannelSyncResult> {
   const env = params.env ?? process.env;
   const logger = params.logger ?? {};
@@ -2577,6 +2683,15 @@ export async function syncPluginsForUpdateChannel(params: {
           logger,
         });
         if (!result.ok && npmSpec && shouldFallbackClawHubBridgeToNpm({ result, npmSpec })) {
+          if (params.allowNonClawHubInstall === false) {
+            const message = formatNonClawHubInstallAcknowledgementRequired({
+              pluginId: targetPluginId,
+              spec: effectiveNpmSpec ?? npmSpec,
+            });
+            summary.errors.push(message);
+            logger.error?.(message);
+            continue;
+          }
           const warning = `ClawHub ${clawhubSpec} unavailable for ${targetPluginId}; falling back to npm ${effectiveNpmSpec}.`;
           summary.warnings.push(warning);
           logger.warn?.(warning);
@@ -2592,6 +2707,15 @@ export async function syncPluginsForUpdateChannel(params: {
           });
         }
       } else {
+        if (params.allowNonClawHubInstall === false) {
+          const message = formatNonClawHubInstallAcknowledgementRequired({
+            pluginId: targetPluginId,
+            spec: effectiveNpmSpec ?? installSpec,
+          });
+          summary.errors.push(message);
+          logger.error?.(message);
+          continue;
+        }
         result = await installPluginFromNpmSpec({
           spec: effectiveNpmSpec,
           config: params.config,

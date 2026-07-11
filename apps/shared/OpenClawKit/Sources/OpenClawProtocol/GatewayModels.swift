@@ -3830,17 +3830,20 @@ public struct CrestodianSetupActivateParams: Codable, Sendable {
     public let authchoice: String?
     public let apikey: String?
     public let workspace: String?
+    public let acknowledgenonclawhubinstall: Bool?
 
     public init(
         kind: AnyCodable,
         authchoice: String?,
         apikey: String?,
-        workspace: String?)
+        workspace: String?,
+        acknowledgenonclawhubinstall: Bool? = nil)
     {
         self.kind = kind
         self.authchoice = authchoice
         self.apikey = apikey
         self.workspace = workspace
+        self.acknowledgenonclawhubinstall = acknowledgenonclawhubinstall
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -3848,6 +3851,7 @@ public struct CrestodianSetupActivateParams: Codable, Sendable {
         case authchoice = "authChoice"
         case apikey = "apiKey"
         case workspace
+        case acknowledgenonclawhubinstall = "acknowledgeNonClawHubInstall"
     }
 }
 

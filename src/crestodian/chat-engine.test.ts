@@ -154,11 +154,21 @@ describe("CrestodianChatEngine", () => {
   });
 
   it("voids an agent-loop proposal on decline and lets the AI acknowledge", async () => {
-    let observedProposalOnSecondTurn: string | undefined = "sentinel";
+    let observedProposalOnSecondTurn: unknown = "sentinel";
     const runAgentTurn = vi.fn(
-      async (params: { session: { proposalRef: { current?: string } } }) => {
+      async (params: {
+        session: {
+          proposalRef: {
+            current?: { operationHash: string; plan: string; renderedByHost: boolean };
+          };
+        };
+      }) => {
         if (runAgentTurn.mock.calls.length === 1) {
-          params.session.proposalRef.current = "registered-operation";
+          params.session.proposalRef.current = {
+            operationHash: "registered-operation",
+            plan: "Change the model.",
+            renderedByHost: false,
+          };
           return { text: "I can change that after your approval." };
         }
         observedProposalOnSecondTurn = params.session.proposalRef.current;
@@ -395,10 +405,18 @@ describe("CrestodianChatEngine", () => {
     const runAgentTurn = vi.fn(
       async (params: {
         approvalArmed: boolean;
-        session: { proposalRef: { current?: string } };
+        session: {
+          proposalRef: {
+            current?: { operationHash: string; plan: string; renderedByHost: boolean };
+          };
+        };
       }) => {
         armedFlags.push(params.approvalArmed);
-        params.session.proposalRef.current = "op-hash";
+        params.session.proposalRef.current = {
+          operationHash: "op-hash",
+          plan: "Set the default model.",
+          renderedByHost: false,
+        };
         return { text: "ok" };
       },
     );
@@ -413,6 +431,29 @@ describe("CrestodianChatEngine", () => {
     await engine.handle("that sounds great, please");
 
     expect(armedFlags).toEqual([false, true]);
+  });
+
+  it("renders an agent-loop provenance warning from host-owned proposal state", async () => {
+    const engine = new CrestodianChatEngine({
+      runAgentTurn: async (params) => {
+        params.session.proposalRef.current = {
+          operationHash: "plugin-install",
+          plan: [
+            "Install plugin from npm:@example/plugin.",
+            "WARNING - Installing a plugin outside ClawHub review and trust metadata.",
+          ].join("\n"),
+          renderedByHost: false,
+        };
+        return { text: "I can take care of that." };
+      },
+      deps: { loadOverview: fakeOverviewLoader() },
+    });
+
+    const reply = await engine.handle("install npm:@example/plugin");
+
+    expect(reply.text).toContain("I can take care of that.");
+    expect(reply.text).toContain("outside ClawHub review and trust metadata");
+    expect(reply.text).toContain("Reply yes to approve this exact action");
   });
 
   it("clears a stale host proposal once the agent loop owns the conversation", async () => {
@@ -644,6 +685,23 @@ describe("CrestodianChatEngine", () => {
 
     expect(reply.text).toContain("deterministic mode");
     expect(reply.text).toContain("connect telegram");
+  });
+
+  it("returns deterministic plugin install validation errors without arming approval", async () => {
+    const engine = new CrestodianChatEngine({
+      runAgentTurn: async () => null,
+      planWithAssistant: async () => null,
+      deps: { loadOverview: fakeOverviewLoader() },
+    });
+
+    const reply = await engine.handle("plugin install git:https://github.com/acme/demo.git");
+
+    expect(reply.text).toContain(
+      "Crestodian plugin install accepts npm or ClawHub package specs only.",
+    );
+    expect(reply.text).not.toContain("Apply this operation");
+    expect(reply.action).toBe("none");
+    expect(engine.hasPendingProposal()).toBe(false);
   });
 });
 

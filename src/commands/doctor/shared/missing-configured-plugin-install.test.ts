@@ -3243,6 +3243,139 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     expectRecordFields(updateConfig.plugins, { installs: records });
   });
 
+  it("requires per-source approval before persisted-record non-ClawHub repair", async () => {
+    const records = {
+      demo: {
+        source: "npm",
+        spec: "@openclaw/plugin-demo@1.0.0",
+        resolvedSpec: "@openclaw/plugin-demo@1.0.0",
+        resolvedVersion: "1.0.0",
+        installPath: "/missing/demo",
+      },
+    };
+    const onNonClawHubInstall = vi.fn(async () => false);
+    mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue(records);
+    mocks.updateNpmInstalledPlugins.mockImplementationOnce(
+      async (params: {
+        allowNonClawHubInstall?: boolean;
+        onNonClawHubInstall?: (request: {
+          pluginId: string;
+          source: "npm";
+          spec: string;
+        }) => boolean | Promise<boolean>;
+        config: Record<string, unknown>;
+      }) => {
+        expect(params.allowNonClawHubInstall).toBe(false);
+        await expect(
+          params.onNonClawHubInstall?.({
+            pluginId: "demo",
+            source: "npm",
+            spec: "@openclaw/plugin-demo@1.0.0",
+          }),
+        ).resolves.toBe(false);
+        return {
+          changed: false,
+          config: params.config,
+          outcomes: [
+            {
+              pluginId: "demo",
+              status: "skipped",
+              code: "non_clawhub_install_acknowledgement_required",
+              message: "Non-ClawHub acknowledgement required.",
+            },
+          ],
+        };
+      },
+    );
+
+    const { repairMissingConfiguredPluginInstalls } =
+      await import("./missing-configured-plugin-install.js");
+    const result = await repairMissingConfiguredPluginInstalls({
+      cfg: {
+        plugins: {
+          entries: {
+            demo: { enabled: true },
+          },
+        },
+      },
+      env: {},
+      onNonClawHubInstall,
+    });
+
+    expect(onNonClawHubInstall).toHaveBeenCalledWith({
+      pluginId: "demo",
+      sourceClass: "npm",
+      spec: "@openclaw/plugin-demo@1.0.0",
+    });
+    expect(result.failedPluginIds).toEqual(["demo"]);
+    expect(result.warnings).toContain("Non-ClawHub acknowledgement required.");
+    expect(mocks.writePersistedInstalledPluginIndexInstallRecords).not.toHaveBeenCalled();
+    expect(result.records.demo).toEqual(records.demo);
+  });
+
+  it("preserves declined repair metadata while removing another stale bundled record", async () => {
+    const records = {
+      demo: {
+        source: "npm",
+        spec: "@openclaw/plugin-demo@1.0.0",
+        resolvedSpec: "@openclaw/plugin-demo@1.0.0",
+        resolvedVersion: "1.0.0",
+        installPath: "/missing/demo",
+      },
+      "google-meet": {
+        source: "npm",
+        spec: "@openclaw/google-meet",
+        resolvedName: "@openclaw/google-meet",
+        installPath: "/missing/google-meet",
+      },
+    };
+    mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue(records);
+    mocks.loadInstalledPluginIndex.mockReturnValue({
+      plugins: [
+        {
+          pluginId: "google-meet",
+          origin: "bundled",
+          packageName: "@openclaw/google-meet",
+        },
+      ],
+      diagnostics: [],
+      installRecords: {},
+    });
+    mocks.updateNpmInstalledPlugins.mockImplementationOnce(
+      async (params: { config: { plugins?: { installs?: Record<string, unknown> } } }) => ({
+        changed: false,
+        config: params.config,
+        outcomes: [
+          {
+            pluginId: "demo",
+            status: "skipped",
+            code: "non_clawhub_install_acknowledgement_required",
+            message: "Non-ClawHub acknowledgement required.",
+          },
+        ],
+      }),
+    );
+
+    const { repairMissingConfiguredPluginInstalls } =
+      await import("./missing-configured-plugin-install.js");
+    const result = await repairMissingConfiguredPluginInstalls({
+      cfg: {
+        plugins: {
+          entries: {
+            demo: { enabled: true },
+          },
+        },
+      },
+      env: {},
+    });
+
+    expect(result.records).toEqual({ demo: records.demo });
+    expect(mocks.writePersistedInstalledPluginIndexInstallRecords).toHaveBeenCalledWith(
+      { demo: records.demo },
+      { env: {} },
+    );
+  });
+
   it("keeps non-ClawHub updater warnings as persisted-record repair warnings", async () => {
     const records = {
       demo: {

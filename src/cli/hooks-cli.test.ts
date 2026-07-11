@@ -11,9 +11,14 @@ import {
 import { createEmptyInstallChecks } from "./requirements-test-fixtures.js";
 
 const runPluginInstallCommandMock = vi.hoisted(() => vi.fn());
+const runPluginUpdateCommandMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./plugins-install-command.js", () => ({
   runPluginInstallCommand: runPluginInstallCommandMock,
+}));
+
+vi.mock("./plugins-update-command.js", () => ({
+  runPluginUpdateCommand: runPluginUpdateCommandMock,
 }));
 
 const report: HookStatusReport = {
@@ -46,6 +51,7 @@ const report: HookStatusReport = {
 
 beforeEach(() => {
   runPluginInstallCommandMock.mockReset();
+  runPluginUpdateCommandMock.mockReset();
 });
 
 function createPluginManagedHookReport(): HookStatusReport {
@@ -141,6 +147,24 @@ describe("hooks cli formatting", () => {
         acknowledgeNonClawHubInstall: true,
       }),
       invalidateRuntimeCache: false,
+    });
+  });
+
+  it("forwards non-ClawHub acknowledgement through deprecated update alias", async () => {
+    runPluginUpdateCommandMock.mockResolvedValueOnce(undefined);
+    const program = new Command().exitOverride();
+    registerHooksCli(program);
+
+    await program.parseAsync(
+      ["hooks", "update", "demo-hooks", "--acknowledge-non-clawhub-install"],
+      { from: "user" },
+    );
+
+    expect(runPluginUpdateCommandMock).toHaveBeenCalledWith({
+      id: "demo-hooks",
+      opts: expect.objectContaining({
+        acknowledgeNonClawHubInstall: true,
+      }),
     });
   });
 });

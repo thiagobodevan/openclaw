@@ -34,6 +34,7 @@ type RunTui = typeof defaultRunTui;
 
 export type CrestodianTuiOptions = {
   yes?: boolean;
+  acknowledgeNonClawHubInstall?: boolean;
   deps?: CrestodianCommandDeps;
   planWithAssistant?: CrestodianAssistantPlanner;
   runTui?: RunTui;
@@ -81,6 +82,7 @@ function createEmbeddedModelSetupRuntime(runtime: RuntimeEnv): RuntimeEnv {
 function createChatEngine(opts: CrestodianTuiOptions): CrestodianChatEngine {
   return new CrestodianChatEngine({
     yes: opts.yes,
+    acknowledgeNonClawHubInstall: opts.acknowledgeNonClawHubInstall,
     deps: opts.deps,
     planWithAssistant: opts.planWithAssistant,
     surface: "cli",

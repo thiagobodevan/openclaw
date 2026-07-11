@@ -906,11 +906,12 @@ describe("doctor health contributions", () => {
       touchedConfig: true,
     });
     const contribution = requireDoctorContribution("doctor:release-configured-plugin-installs");
+    const prompter = buildDoctorPrompter(true);
     const ctx = {
       cfg: {},
       configResult: { cfg: {}, sourceLastTouchedVersion: "2026.4.29" },
       sourceConfigValid: true,
-      prompter: buildDoctorPrompter(true),
+      prompter,
       env: {},
     } as unknown as Parameters<(typeof contribution)["run"]>[0];
 
@@ -923,11 +924,61 @@ describe("doctor health contributions", () => {
       onNonClawHubInstall: expect.any(Function),
       touchedVersion: "2026.4.29",
     });
+    const repairCall = mocks.maybeRunConfiguredPluginInstallReleaseStep.mock.calls[0]?.[0];
+    await expect(
+      repairCall?.onNonClawHubInstall?.({
+        pluginId: "matrix",
+        sourceClass: "npm",
+        spec: "@openclaw/matrix",
+      }),
+    ).resolves.toBe(true);
+    expect(prompter.confirmRuntimeRepair).toHaveBeenCalledWith({
+      message:
+        "WARNING - Installing plugin from npm registry: @openclaw/matrix\n" +
+        "This source is outside ClawHub review and trust metadata. Only continue if you trust the publisher, package contents, and install source.\n" +
+        "Install this non-ClawHub plugin source during doctor repair?",
+      initialValue: false,
+      requiresInteractiveConfirmation: true,
+    });
     expect(mocks.note).toHaveBeenCalledWith(
       "Installed configured plugin matrix.",
       "Doctor changes",
     );
     expect(ctx.cfg.meta?.lastTouchedVersion).toBe("2026.5.2-test");
+  });
+
+  it("does not repeat consent for configured plugin installs declined earlier in doctor", async () => {
+    mocks.maybeRunConfiguredPluginInstallReleaseStep.mockResolvedValue({
+      changes: [],
+      warnings: ['Skipped missing configured plugin "matrix".'],
+      touchedConfig: false,
+    });
+    const contribution = requireDoctorContribution("doctor:release-configured-plugin-installs");
+    const prompter = buildDoctorPrompter(true);
+    const ctx = {
+      cfg: {},
+      configResult: {
+        cfg: {},
+        sourceLastTouchedVersion: "2026.4.29",
+        failedConfiguredPluginInstallIds: ["matrix"],
+      },
+      sourceConfigValid: true,
+      prompter,
+      options: {},
+      env: {},
+    } as unknown as Parameters<(typeof contribution)["run"]>[0];
+
+    await contribution.run(ctx);
+
+    const repairCall = mocks.maybeRunConfiguredPluginInstallReleaseStep.mock.calls[0]?.[0];
+    await expect(
+      repairCall?.onNonClawHubInstall?.({
+        pluginId: "matrix",
+        sourceClass: "npm",
+        spec: "@openclaw/matrix",
+      }),
+    ).resolves.toBe(false);
+    expect(prompter.confirmRuntimeRepair).not.toHaveBeenCalled();
   });
 
   it("keeps legacy parent writable release repairs old-parent-readable", async () => {

@@ -17,6 +17,12 @@ export type NonClawHubInstallAcknowledgementOptions = {
   acknowledgeNonClawHubInstall?: boolean;
 };
 
+export type NonClawHubInstallAcknowledgementRequest = {
+  pluginId: string;
+  sourceClass: NonClawHubInstallSourceClass;
+  spec: string;
+};
+
 const sourceClassLabels: Record<NonClawHubInstallSourceClass, string> = {
   git: "Git repository",
   "local-archive": "local archive",

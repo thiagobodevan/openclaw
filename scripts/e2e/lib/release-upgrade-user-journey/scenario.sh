@@ -142,6 +142,7 @@ node scripts/e2e/lib/release-scenarios/write-cli-plugin.mjs \
   "Release Upgrade Plugin" \
   release-upgrade \
   "release-upgrade-plugin:pong"
+# This command runs against the published baseline, which predates candidate-only flags.
 openclaw plugins install "$plugin_dir" >"$PLUGIN_INSTALL_LOG" 2>&1
 openclaw release-upgrade ping >"$PLUGIN_CLI_BEFORE_LOG" 2>&1
 node scripts/e2e/lib/release-scenarios/assertions.mjs assert-file-contains "$PLUGIN_CLI_BEFORE_LOG" "release-upgrade-plugin:pong"
@@ -166,7 +167,7 @@ node scripts/e2e/lib/release-scenarios/assertions.mjs assert-file-contains "$PLU
 
 clickclack_plugin_dir="$(mktemp -d "$scenario_tmp/clickclack-plugin.XXXXXX")"
 node scripts/e2e/lib/release-user-journey/write-clickclack-plugin.mjs "$clickclack_plugin_dir"
-openclaw plugins install "$clickclack_plugin_dir" >"$CLICKCLACK_PLUGIN_INSTALL_LOG" 2>&1
+openclaw plugins install "$clickclack_plugin_dir" --acknowledge-non-clawhub-install >"$CLICKCLACK_PLUGIN_INSTALL_LOG" 2>&1
 
 openclaw channels status --json >"$STATUS_JSON" 2>"$STATUS_ERR"
 node scripts/e2e/lib/release-user-journey/assertions.mjs assert-channel-status clickclack "$STATUS_JSON"

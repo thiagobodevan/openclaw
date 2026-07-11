@@ -4,7 +4,7 @@ import { createRuntimePluginModelSelectionHelpers } from "./runtime-plugin-insta
 
 export const CODEX_RUNTIME_PLUGIN_ID = "codex";
 const CODEX_RUNTIME_PLUGIN_LABEL = "Codex";
-const CODEX_RUNTIME_PLUGIN_NPM_SPEC = "@openclaw/codex";
+export const CODEX_RUNTIME_PLUGIN_NPM_SPEC = "@openclaw/codex";
 const CODEX_RUNTIME_PLUGIN_DESCRIPTOR = {
   pluginId: CODEX_RUNTIME_PLUGIN_ID,
   label: CODEX_RUNTIME_PLUGIN_LABEL,

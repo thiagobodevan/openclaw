@@ -37,6 +37,10 @@ import { normalizeProviderId } from "../../agents/model-selection-normalize.js";
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
 import { formatCliCommand } from "../../cli/command-format.js";
+import {
+  formatNonClawHubInstallWarning,
+  type NonClawHubInstallAcknowledgementRequest,
+} from "../../cli/non-clawhub-install-acknowledgement.js";
 import { parseDurationMs } from "../../cli/parse-duration.js";
 import { logConfigUpdated } from "../../config/logging.js";
 import { normalizeAgentModelRefForConfig } from "../../config/model-input.js";
@@ -449,6 +453,7 @@ async function persistProviderAuthResult(params: {
   const shouldUpdateConfig = Boolean(
     params.result.configPatch || (params.setDefault && defaultModel),
   );
+  let defaultRepairFailure: string | undefined;
 
   for (const profile of profiles) {
     const configuredSelection = resolveConfiguredAuthSelectionForProvider(
@@ -473,7 +478,7 @@ async function persistProviderAuthResult(params: {
   // the provider explicitly returns a config patch or the user opts into a
   // default-model write.
   if (shouldUpdateConfig) {
-    const updated = await updateConfig((cfg) => {
+    const updated = await updateConfig(async (cfg) => {
       const priorAgentsDefaultsModel = cfg.agents?.defaults?.model;
       let next = cfg;
       if (params.result.configPatch) {
@@ -487,11 +492,39 @@ async function persistProviderAuthResult(params: {
         setDefault: params.setDefault,
       });
       if (params.setDefault && defaultModel) {
-        next = applyDefaultModel(next, defaultModel);
+        const candidate = applyDefaultModel(next, defaultModel);
+        const onNonClawHubInstall = ({
+          sourceClass,
+          spec,
+        }: NonClawHubInstallAcknowledgementRequest) =>
+          params.prompter.confirm({
+            message: `${formatNonClawHubInstallWarning({ sourceClass, spec })}\nInstall this non-ClawHub runtime plugin source?`,
+            initialValue: false,
+          });
+        const repaired = await repairCodexRuntimePluginInstallForModelSelection({
+          cfg: candidate,
+          model: defaultModel,
+          onNonClawHubInstall,
+        });
+        const copilotRepaired = await repairCopilotRuntimePluginInstallForModelSelection({
+          cfg: candidate,
+          model: defaultModel,
+          onNonClawHubInstall,
+        });
+        for (const warning of [...repaired.warnings, ...copilotRepaired.warnings]) {
+          params.runtime.error?.(warning);
+        }
+        if (repaired.failed || copilotRepaired.failed) {
+          defaultRepairFailure =
+            `Default model was not changed because the required runtime plugin was not installed for ${defaultModel}. ` +
+            "Authentication was saved successfully.";
+          return next;
+        }
+        next = candidate;
       }
       return next;
     });
-    if (defaultModel) {
+    if (defaultModel && !params.setDefault) {
       const repaired = await repairCodexRuntimePluginInstallForModelSelection({
         cfg: updated,
         model: defaultModel,
@@ -513,6 +546,9 @@ async function persistProviderAuthResult(params: {
     params.runtime.log(
       `Auth profile: ${profile.profileId} (${profile.credential.provider}/${credentialMode(profile.credential)})`,
     );
+  }
+  if (defaultRepairFailure) {
+    throw new Error(defaultRepairFailure);
   }
   if (defaultModel) {
     params.runtime.log(

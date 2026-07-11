@@ -70,7 +70,10 @@ export type UpdateConfigContext = {
 
 /** Reads source config, applies a mutator, and writes only the source-form config. */
 export async function updateConfig(
-  mutator: (cfg: OpenClawConfig, context: UpdateConfigContext) => OpenClawConfig,
+  mutator: (
+    cfg: OpenClawConfig,
+    context: UpdateConfigContext,
+  ) => OpenClawConfig | Promise<OpenClawConfig>,
 ): Promise<OpenClawConfig> {
   const snapshot = await readConfigFileSnapshot();
   if (!snapshot.valid) {
@@ -81,7 +84,7 @@ export async function updateConfig(
   const runtimeConfig = structuredClone(snapshot.runtimeConfig ?? snapshot.config);
   // Mutate source config so SecretRefs and unresolved placeholders do not get
   // overwritten by runtime-resolved secret values.
-  const next = mutator(sourceConfig, { runtimeConfig });
+  const next = await mutator(sourceConfig, { runtimeConfig });
   await replaceConfigFile({
     nextConfig: next,
     baseHash: snapshot.hash,

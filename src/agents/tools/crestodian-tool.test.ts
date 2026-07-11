@@ -6,6 +6,7 @@ import {
   resolveCrestodianDirectiveTransition,
   resolveCrestodianProposalTransition,
   type CrestodianToolDirective,
+  type CrestodianToolProposalRef,
 } from "./crestodian-tool.js";
 
 const mocks = vi.hoisted(() => ({
@@ -46,6 +47,13 @@ function toolText(result: unknown): string {
     .join("\n");
 }
 
+function markProposalRenderedByHost(proposalRef: CrestodianToolProposalRef): void {
+  if (!proposalRef.current) {
+    throw new Error("expected a registered proposal");
+  }
+  proposalRef.current.renderedByHost = true;
+}
+
 describe("crestodian tool", () => {
   it("runs read actions immediately", async () => {
     const tool = createCrestodianTool({ surface: "cli" });
@@ -66,7 +74,7 @@ describe("crestodian tool", () => {
   });
 
   it("refuses mutating actions without the approved assertion", async () => {
-    const proposalRef: { current?: string } = {};
+    const proposalRef: CrestodianToolProposalRef = {};
     const tool = createCrestodianTool({ surface: "cli", approvalArmed: true, proposalRef });
     const result = await tool.execute("t2", {
       action: "config_set",
@@ -100,7 +108,7 @@ describe("crestodian tool", () => {
         return { applied: true };
       },
     );
-    const proposalRef: { current?: string } = {};
+    const proposalRef: CrestodianToolProposalRef = {};
     // Phase 1: unarmed proposal is denied and records the exact operation.
     const proposingTool = createCrestodianTool({ surface: "gateway", proposalRef });
     const denied = await proposingTool.execute("t3a", {
@@ -111,6 +119,7 @@ describe("crestodian tool", () => {
     expect(toolText(denied)).toContain("needs-approval");
     expect(proposalRef.current).toBeDefined();
     expect(mocks.executeCrestodianOperation).not.toHaveBeenCalled();
+    markProposalRenderedByHost(proposalRef);
 
     // Phase 2: the user's yes arms the turn; the identical call executes.
     const armedTool = createCrestodianTool({
@@ -137,8 +146,42 @@ describe("crestodian tool", () => {
     expect(proposalRef.current).toBeUndefined();
   });
 
+  it("shows provenance and carries exact approval for non-ClawHub plugin installs", async () => {
+    const proposalRef: CrestodianToolProposalRef = {};
+    const proposingTool = createCrestodianTool({ surface: "cli", proposalRef });
+
+    const proposal = await proposingTool.execute("t3-plugin-proposal", {
+      action: "plugin_install",
+      spec: "npm:@example/plugin",
+    });
+
+    expect(toolText(proposal)).toContain("outside ClawHub review and trust metadata");
+    expect(toolText(proposal)).toContain("npm:@example/plugin");
+    markProposalRenderedByHost(proposalRef);
+
+    const armedTool = createCrestodianTool({
+      surface: "cli",
+      approvalArmed: true,
+      proposalRef,
+    });
+    await armedTool.execute("t3-plugin-apply", {
+      action: "plugin_install",
+      spec: "npm:@example/plugin",
+      approved: true,
+    });
+
+    expect(mocks.executeCrestodianOperation).toHaveBeenCalledWith(
+      { kind: "plugin-install", spec: "npm:@example/plugin" },
+      expect.anything(),
+      expect.objectContaining({
+        approved: true,
+        acknowledgeNonClawHubInstall: true,
+      }),
+    );
+  });
+
   it("refuses an armed call that differs from the proposed operation", async () => {
-    const proposalRef: { current?: string } = {};
+    const proposalRef: CrestodianToolProposalRef = {};
     const proposingTool = createCrestodianTool({ surface: "cli", proposalRef });
     await proposingTool.execute("t3c", {
       action: "set_default_model",
@@ -182,13 +225,14 @@ describe("crestodian tool", () => {
       sourceConfig: {},
       issues: [{ path: "gateway.port", message: "Expected number" }],
     } as never);
-    const proposalRef: { current?: string } = {};
+    const proposalRef: CrestodianToolProposalRef = {};
     await createCrestodianTool({ surface: "cli", proposalRef }).execute("t4a", {
       action: "config_set",
       path: "gateway.port",
       value: "banana",
       approved: true,
     });
+    markProposalRenderedByHost(proposalRef);
     const tool = createCrestodianTool({ surface: "cli", approvalArmed: true, proposalRef });
     const result = await tool.execute("t4", {
       action: "config_set",
@@ -208,13 +252,14 @@ describe("crestodian tool", () => {
         return { applied: true };
       },
     );
-    const proposalRef: { current?: string } = {};
+    const proposalRef: CrestodianToolProposalRef = {};
     await createCrestodianTool({ surface: "cli", proposalRef }).execute("t6a", {
       action: "create_agent",
       agentId: "work",
       workspace: "/tmp/work",
       approved: true,
     });
+    markProposalRenderedByHost(proposalRef);
     const tool = createCrestodianTool({ surface: "cli", approvalArmed: true, proposalRef });
     await tool.execute("t6", {
       action: "create_agent",
@@ -316,7 +361,9 @@ describe("crestodian tool", () => {
         args,
         resultText: "needs-approval: this action changes state.",
       }),
-    ).toEqual({ proposal: hash });
+    ).toEqual({
+      proposal: expect.objectContaining({ operationHash: hash, renderedByHost: false }),
+    });
     // A voided approval clears it.
     expect(
       resolveCrestodianProposalTransition({

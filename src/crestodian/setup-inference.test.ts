@@ -768,6 +768,7 @@ describe("activateSetupInference", () => {
     const result = await activateSetupInference({
       kind: "codex-cli",
       workspace: "/tmp/openclaw-workspace",
+      acknowledgeNonClawHubInstall: true,
       surface: "gateway",
       runtime,
       deps: {
@@ -791,6 +792,7 @@ describe("activateSetupInference", () => {
     expect(ensureCodex).toHaveBeenCalledOnce();
     expect(ensureCodex).toHaveBeenCalledWith(
       expect.objectContaining({
+        acknowledgeNonClawHubInstall: true,
         cfg: expect.objectContaining({
           agents: {
             defaults: { model: { primary: "openai/gpt-5.4" } },

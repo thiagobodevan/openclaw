@@ -10,6 +10,11 @@ type MissingPluginInstallRepairCall = {
   pluginIds: string[];
   env?: NodeJS.ProcessEnv;
   acknowledgeNonClawHubInstall?: boolean;
+  onNonClawHubInstall?: (request: {
+    pluginId: string;
+    sourceClass: "npm";
+    spec: string;
+  }) => boolean | Promise<boolean>;
 };
 
 function readOnlyMissingPluginInstallRepairCall(): MissingPluginInstallRepairCall {
@@ -66,6 +71,45 @@ describe("Codex runtime plugin install repair", () => {
       required: true,
       changes: ['Repaired missing configured plugin "codex".'],
       warnings: [reviewNotice],
+      failed: false,
+    });
+  });
+
+  it("forwards explicit non-ClawHub acknowledgement to runtime plugin repair", async () => {
+    const { repairCodexRuntimePluginInstallForModelSelection } =
+      await import("./codex-runtime-plugin-install.js");
+
+    await repairCodexRuntimePluginInstallForModelSelection({
+      cfg: {},
+      model: "openai/gpt-5.5",
+      acknowledgeNonClawHubInstall: true,
+    });
+
+    expect(readOnlyMissingPluginInstallRepairCall().acknowledgeNonClawHubInstall).toBe(true);
+  });
+
+  it("reports a refused runtime plugin repair as failed", async () => {
+    mocks.repairMissingPluginInstallsForIds.mockResolvedValue({
+      changes: [],
+      warnings: ["Non-ClawHub acknowledgement required."],
+      failedPluginIds: ["codex"],
+    });
+    const onNonClawHubInstall = vi.fn(async () => false);
+    const { repairCodexRuntimePluginInstallForModelSelection } =
+      await import("./codex-runtime-plugin-install.js");
+
+    const result = await repairCodexRuntimePluginInstallForModelSelection({
+      cfg: {},
+      model: "openai/gpt-5.5",
+      onNonClawHubInstall,
+    });
+
+    expect(readOnlyMissingPluginInstallRepairCall().onNonClawHubInstall).toBe(onNonClawHubInstall);
+    expect(result).toEqual({
+      required: true,
+      changes: [],
+      warnings: ["Non-ClawHub acknowledgement required."],
+      failed: true,
     });
   });
 
@@ -106,13 +150,24 @@ describe("Codex runtime plugin install repair", () => {
         entries: { codex: { enabled: false } },
       },
     };
+    const confirm = vi.fn(async () => true);
+    mocks.repairMissingPluginInstallsForIds.mockImplementationOnce(
+      async (params: MissingPluginInstallRepairCall) => {
+        await params.onNonClawHubInstall?.({
+          pluginId: "codex",
+          sourceClass: "npm",
+          spec: "@openclaw/codex",
+        });
+        return { changes: [], warnings: [] };
+      },
+    );
     const { ensureCodexRuntimePluginForModelSelection } =
       await import("./codex-runtime-plugin-install.js");
 
     const result = await ensureCodexRuntimePluginForModelSelection({
       cfg,
       model: "openai/gpt-5.5",
-      prompter: {} as never,
+      prompter: { confirm } as never,
       runtime: {} as never,
     });
 
@@ -122,6 +177,12 @@ describe("Codex runtime plugin install repair", () => {
       status: "installed",
       cfg: { plugins: { entries: { codex: { enabled: true } } } },
     });
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("@openclaw/codex"),
+        initialValue: false,
+      }),
+    );
   });
 
   it("sees an agent-scoped Codex runtime pin behind a custom OpenAI route", async () => {

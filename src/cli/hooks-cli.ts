@@ -43,7 +43,8 @@ export type HooksCheckOptions = {
   json?: boolean;
 };
 
-type HooksUpdateOptions = {
+type HooksUpdateOptions = NonClawHubInstallAcknowledgementOptions & {
+  acknowledgeNonClawhubInstall?: boolean;
   all?: boolean;
   dryRun?: boolean;
 };
@@ -601,11 +602,22 @@ export function registerHooksCli(program: Command): void {
     .argument("[id]", "Hook pack id (omit with --all)")
     .option("--all", "Update all tracked hooks", false)
     .option("--dry-run", "Show what would change without writing", false)
+    .option(
+      "--acknowledge-non-clawhub-install",
+      "Acknowledge non-ClawHub hook pack update provenance without prompting",
+      false,
+    )
     .action(async (id: string | undefined, opts: HooksUpdateOptions) => {
       defaultRuntime.log(
         theme.warn("`openclaw hooks update` is deprecated; use `openclaw plugins update`."),
       );
-      await runPluginUpdateCommand({ id, opts });
+      await runPluginUpdateCommand({
+        id,
+        opts: {
+          ...opts,
+          acknowledgeNonClawHubInstall: normalizeHooksNonClawHubInstallOption(opts),
+        },
+      });
     });
 
   hooks.action(async () =>
