@@ -84,7 +84,7 @@ async function waitForPreviousFence(
     };
     const onAbort = () =>
       settle(() => reject(new Error(options.abortMessage ?? "Codex native config fence aborted")));
-    previous.then(() => settle(resolve));
+    void previous.then(() => settle(resolve));
     if (options.signal) {
       options.signal.addEventListener("abort", onAbort, { once: true });
     }

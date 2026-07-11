@@ -499,13 +499,9 @@ describe("shared Codex app-server client", () => {
         expect(fenceKey).toBeTypeOf("string");
 
         const abortController = new AbortController();
-        const request = client.request(
-          "thread/start",
-          {},
-          {
-            ...(mode === "abort" ? { signal: abortController.signal } : { timeoutMs: 250 }),
-          },
-        );
+        const requestOptions =
+          mode === "abort" ? { signal: abortController.signal } : { timeoutMs: 250 };
+        const request = client.request("thread/start", {}, requestOptions);
         await vi.waitFor(() => {
           const messages = harness.writes.map((line) => JSON.parse(line) as { method?: string });
           expect(messages.some((message) => message.method === "thread/start")).toBe(true);
@@ -601,8 +597,8 @@ describe("shared Codex app-server client", () => {
     let finishAuth: () => void = () => undefined;
     mocks.applyCodexAppServerAuthProfile.mockImplementationOnce(
       async () =>
-        await new Promise<void>((resolve) => {
-          finishAuth = resolve;
+        await new Promise<undefined>((resolve) => {
+          finishAuth = () => resolve(undefined);
         }),
     );
 

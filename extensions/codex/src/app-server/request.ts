@@ -132,7 +132,7 @@ export async function requestCodexAppServerJson<T = JsonValue | undefined>(param
     );
   } catch (error) {
     if (isPastDeadline()) {
-      throw new Error(timeoutMessage);
+      throw new Error(timeoutMessage, { cause: error });
     }
     throw error;
   } finally {

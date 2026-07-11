@@ -25,6 +25,7 @@ vi.mock("./auth-bridge.js", () => ({
   bridgeCodexAppServerStartOptions: mocks.authBridge.startOptions,
   resolveCodexAppServerFallbackApiKeyCacheKey: mocks.authBridge.fallbackApiKeyCacheKey,
   resolveCodexAppServerAuthProfileIdForAgent: mocks.authBridge.authProfileId,
+  resolveCodexAppServerHomeDir: (agentDir: string) => `${agentDir}/codex-home`,
 }));
 
 vi.mock("./managed-binary.js", () => ({

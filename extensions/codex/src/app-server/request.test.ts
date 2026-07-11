@@ -236,11 +236,12 @@ describe("requestCodexAppServerJson sandbox guard", () => {
   it("abandons a pending acquisition without issuing a request after the deadline", async () => {
     vi.useFakeTimers();
     const request = vi.fn(async () => ({ ok: true }));
-    const client = { request };
-    let resolveAcquire: ((client: typeof client) => void) | undefined;
+    type TestClient = { request: typeof request };
+    const client: TestClient = { request };
+    let resolveAcquire: ((client: TestClient) => void) | undefined;
     sharedClientMocks.getSharedCodexAppServerClient.mockImplementationOnce(
       () =>
-        new Promise<typeof client>((resolve) => {
+        new Promise<TestClient>((resolve) => {
           resolveAcquire = resolve;
         }),
     );
