@@ -1,10 +1,6 @@
 // Doctor health contribution helpers collect health checks from plugin manifests.
 import fs from "node:fs";
 import nodePath from "node:path";
-import {
-  formatNonClawHubInstallWarning,
-  type NonClawHubInstallAcknowledgementRequest,
-} from "../cli/non-clawhub-install-acknowledgement.js";
 import type { probeGatewayMemoryStatus } from "../commands/doctor-gateway-health.js";
 import type { DoctorOptions, DoctorPrompter } from "../commands/doctor-prompter.js";
 import {
@@ -33,7 +29,6 @@ type DoctorConfigResult = {
   sourceLastTouchedVersion?: string;
   skipPluginValidationOnWrite?: boolean;
   preservedLegacyRootKeys?: readonly string[];
-  failedConfiguredPluginInstallIds?: readonly string[];
 };
 
 export type DoctorHealthFlowContext = {
@@ -603,27 +598,10 @@ async function runReleaseConfiguredPluginInstallsHealth(
     await import("../commands/doctor/shared/release-configured-plugin-installs.js");
   const { note } = await loadNoteModule();
   const { VERSION } = await import("../version.js");
-  const failedConfiguredPluginInstallIds = new Set(
-    ctx.configResult.failedConfiguredPluginInstallIds,
-  );
-  const confirmNonClawHubRepairInstall = async (
-    request: NonClawHubInstallAcknowledgementRequest,
-  ) => {
-    if (failedConfiguredPluginInstallIds.has(request.pluginId)) {
-      return false;
-    }
-    return await ctx.prompter.confirmRuntimeRepair({
-      message: `${formatNonClawHubInstallWarning(request)}\nInstall this non-ClawHub plugin source during doctor repair?`,
-      initialValue: false,
-      requiresInteractiveConfirmation: true,
-    });
-  };
   const result = await maybeRunConfiguredPluginInstallReleaseStep({
     cfg: ctx.cfg,
     env: ctx.env ?? process.env,
     touchedVersion: ctx.configResult.sourceLastTouchedVersion ?? ctx.cfg.meta?.lastTouchedVersion,
-    acknowledgeNonClawHubInstall: ctx.options?.acknowledgeNonClawHubInstall === true,
-    onNonClawHubInstall: confirmNonClawHubRepairInstall,
   });
   if (result.postInstallDoctorResult) {
     ctx.postInstallDoctorResult = result.postInstallDoctorResult;

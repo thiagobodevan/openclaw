@@ -211,9 +211,7 @@ describe("noteMemorySearchHealth", () => {
     expect(note).toHaveBeenCalledTimes(1);
     const message = firstNoteMessage();
     expect(message).toContain('Memory search provider is set to "local"');
-    expect(message).toContain(
-      "openclaw plugins install @openclaw/llama-cpp-provider --acknowledge-non-clawhub-install",
-    );
+    expect(message).toContain("openclaw plugins install @openclaw/llama-cpp-provider");
   });
 
   it("supports silent structured collection through an injected note sink", async () => {

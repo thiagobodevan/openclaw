@@ -150,8 +150,8 @@ beforeEach(() => {
     pluginId,
   }));
   mocks.fetchClawHubPromotion.mockResolvedValue(makePromotion());
-  mocks.repairCodex.mockResolvedValue({ warnings: [], failed: false });
-  mocks.repairCopilot.mockResolvedValue({ warnings: [], failed: false });
+  mocks.repairCodex.mockResolvedValue({ warnings: [] });
+  mocks.repairCopilot.mockResolvedValue({ warnings: [] });
 });
 
 afterEach(() => {
@@ -183,48 +183,15 @@ describe("promosClaimCommand", () => {
 
   it("sets the suggested model as default with --set-default", async () => {
     const runtime = makeRuntime();
-    await promosClaimCommand(
-      "spring-models",
-      { setDefault: true, acknowledgeNonClawHubInstall: true },
-      runtime,
-    );
+    await promosClaimCommand("spring-models", { setDefault: true }, runtime);
 
     const next = mocks.replaceConfigFile.mock.calls[0]?.[0]?.nextConfig;
     expect(next.agents.defaults.model.primary).toBe("openrouter/example/model-alpha");
     // Default changes must run the same runtime plugin repair as `models set`.
     expect(mocks.repairCodex).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "openrouter/example/model-alpha",
-        acknowledgeNonClawHubInstall: true,
-      }),
+      expect.objectContaining({ model: "openrouter/example/model-alpha" }),
     );
-    expect(mocks.repairCopilot).toHaveBeenCalledWith(
-      expect.objectContaining({ acknowledgeNonClawHubInstall: true }),
-    );
-  });
-
-  it("registers promo models without changing the default when runtime repair is refused", async () => {
-    mocks.repairCodex.mockResolvedValue({
-      warnings: ["Non-ClawHub acknowledgement required."],
-      failed: true,
-    });
-    const runtime = makeRuntime();
-
-    await promosClaimCommand(
-      "spring-models",
-      { setDefault: true, acknowledgeNonClawHubInstall: true },
-      runtime,
-    );
-
-    const next = mocks.replaceConfigFile.mock.calls[0]?.[0]?.nextConfig;
-    expect(next.agents.defaults.models["openrouter/example/model-alpha"]).toEqual({
-      alias: "model-alpha",
-    });
-    expect(next.agents.defaults.model).toBeUndefined();
-    expect(runtime.error).toHaveBeenCalledWith("Non-ClawHub acknowledgement required.");
-    expect(runtime.log).not.toHaveBeenCalledWith(
-      "  Default model set to openrouter/example/model-alpha.",
-    );
+    expect(mocks.repairCopilot).toHaveBeenCalled();
   });
 
   it("skips aliases outside the models-aliases contract but still registers the model", async () => {
@@ -461,17 +428,10 @@ describe("promosClaimCommand", () => {
     mocks.hasAvailableAuthForProvider.mockResolvedValue(true);
     mocks.applyAuthChoiceLoadedPluginProvider.mockResolvedValue({ config: {} });
 
-    await promosClaimCommand(
-      "spring-models",
-      { acknowledgeNonClawHubInstall: true },
-      makeRuntime(),
-    );
+    await promosClaimCommand("spring-models", {}, makeRuntime());
 
     expect(mocks.applyAuthChoiceLoadedPluginProvider).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authChoice: "openrouter-api-key",
-        opts: { acknowledgeNonClawHubInstall: true },
-      }),
+      expect.objectContaining({ authChoice: "openrouter-api-key" }),
     );
   });
 

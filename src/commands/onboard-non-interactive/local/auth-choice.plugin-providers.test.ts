@@ -201,7 +201,7 @@ describe("applyNonInteractivePluginProviderChoice", () => {
     const result = await applyNonInteractivePluginProviderChoice({
       nextConfig: { agents: { defaults: {} } } as OpenClawConfig,
       authChoice: "groq-api-key",
-      opts: { groqApiKey: "groq-key", acknowledgeNonClawHubInstall: true } as never,
+      opts: { groqApiKey: "groq-key" } as never,
       runtime: runtime as never,
       baseConfig: { agents: { defaults: {} } } as OpenClawConfig,
       resolveApiKey: vi.fn(),
@@ -227,7 +227,6 @@ describe("applyNonInteractivePluginProviderChoice", () => {
           trustedSourceLinkedOfficialInstall: true,
         },
         promptInstall: false,
-        acknowledgeNonClawHubInstall: true,
       }),
     );
     expect(resolvePluginProviders).toHaveBeenCalledTimes(2);
@@ -406,7 +405,7 @@ describe("applyNonInteractivePluginProviderChoice", () => {
     const result = await applyNonInteractivePluginProviderChoice({
       nextConfig: { agents: { defaults: {} } } as OpenClawConfig,
       authChoice: "openai-api-key",
-      opts: { acknowledgeNonClawHubInstall: true } as never,
+      opts: {} as never,
       runtime: runtime as never,
       baseConfig: { agents: { defaults: {} } } as OpenClawConfig,
       resolveApiKey: vi.fn(),
@@ -418,7 +417,6 @@ describe("applyNonInteractivePluginProviderChoice", () => {
     expect(ensureInput.cfg).toBe(selectedConfig);
     expect(ensureInput.model).toBe("openai/gpt-5.5");
     expect(ensureInput.runtime).toBe(runtime);
-    expect(ensureInput.acknowledgeNonClawHubInstall).toBe(true);
     expectWorkspaceDir(ensureInput.workspaceDir);
     expect(result).toBe(installedConfig);
     expect(offerPostInstallMigrations).toHaveBeenCalledOnce();
@@ -426,40 +424,6 @@ describe("applyNonInteractivePluginProviderChoice", () => {
     expect(migrationInput.config).toBe(installedConfig);
     expect(migrationInput.installedPluginIds).toEqual(["codex"]);
     expect(migrationInput.nonInteractive).toBe(true);
-  });
-
-  it("fails non-interactive setup when required Codex runtime install is not acknowledged", async () => {
-    const runtime = createRuntime();
-    const selectedConfig = {
-      agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
-    } as OpenClawConfig;
-    const runNonInteractive = vi.fn(async () => selectedConfig);
-    ensureCodexRuntimePluginForModelSelection.mockResolvedValue({
-      cfg: selectedConfig,
-      required: true,
-      installed: false,
-      status: "failed",
-    });
-    resolvePluginProviders.mockReturnValue([{ id: "openai", pluginId: "openai" }] as never);
-    resolveProviderPluginChoice.mockReturnValue({
-      provider: { id: "openai", pluginId: "openai", label: "OpenAI" },
-      method: { runNonInteractive },
-    });
-
-    const result = await applyNonInteractivePluginProviderChoice({
-      nextConfig: { agents: { defaults: {} } } as OpenClawConfig,
-      authChoice: "openai-api-key",
-      opts: {} as never,
-      runtime: runtime as never,
-      baseConfig: { agents: { defaults: {} } } as OpenClawConfig,
-      resolveApiKey: vi.fn(),
-      toApiKeyCredential: vi.fn(),
-    });
-
-    expect(result).toBeNull();
-    expect(runtime.exit).toHaveBeenCalledWith(1);
-    expect(ensureCopilotRuntimePluginForModelSelection).not.toHaveBeenCalled();
-    expect(offerPostInstallMigrations).not.toHaveBeenCalled();
   });
 
   it("ensures Copilot after a non-interactive GitHub Copilot choice opts into the runtime", async () => {
@@ -494,7 +458,7 @@ describe("applyNonInteractivePluginProviderChoice", () => {
     const result = await applyNonInteractivePluginProviderChoice({
       nextConfig: { agents: { defaults: {} } } as OpenClawConfig,
       authChoice: "github-copilot",
-      opts: { acknowledgeNonClawHubInstall: true } as never,
+      opts: {} as never,
       runtime: runtime as never,
       baseConfig: { agents: { defaults: {} } } as OpenClawConfig,
       resolveApiKey: vi.fn(),
@@ -505,48 +469,8 @@ describe("applyNonInteractivePluginProviderChoice", () => {
     expect(ensureInput.cfg).toBe(selectedConfig);
     expect(ensureInput.model).toBe("github-copilot/gpt-5.5");
     expect(ensureInput.runtime).toBe(runtime);
-    expect(ensureInput.acknowledgeNonClawHubInstall).toBe(true);
     expectWorkspaceDir(ensureInput.workspaceDir);
     expect(result).toBe(installedConfig);
-  });
-
-  it("fails non-interactive setup when required Copilot runtime install is not acknowledged", async () => {
-    const runtime = createRuntime();
-    const selectedConfig = {
-      agents: { defaults: { model: { primary: "github-copilot/gpt-5.5" } } },
-      models: {
-        providers: {
-          "github-copilot": { agentRuntime: { id: "copilot" } },
-        },
-      },
-    } as unknown as OpenClawConfig;
-    const runNonInteractive = vi.fn(async () => selectedConfig);
-    ensureCopilotRuntimePluginForModelSelection.mockResolvedValue({
-      cfg: selectedConfig,
-      required: true,
-      installed: false,
-      status: "failed",
-    });
-    resolvePluginProviders.mockReturnValue([
-      { id: "github-copilot", pluginId: "github-copilot" },
-    ] as never);
-    resolveProviderPluginChoice.mockReturnValue({
-      provider: { id: "github-copilot", pluginId: "github-copilot", label: "GitHub Copilot" },
-      method: { runNonInteractive },
-    });
-
-    const result = await applyNonInteractivePluginProviderChoice({
-      nextConfig: { agents: { defaults: {} } } as OpenClawConfig,
-      authChoice: "github-copilot",
-      opts: {} as never,
-      runtime: runtime as never,
-      baseConfig: { agents: { defaults: {} } } as OpenClawConfig,
-      resolveApiKey: vi.fn(),
-      toApiKeyCredential: vi.fn(),
-    });
-
-    expect(result).toBeNull();
-    expect(runtime.exit).toHaveBeenCalledWith(1);
   });
 
   it("does not offer post-install migration when Codex is not required for the selected model", async () => {

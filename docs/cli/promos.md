@@ -23,7 +23,7 @@ Related:
 ```bash
 openclaw promos list
 openclaw promos claim <slug>
-openclaw promos claim <slug> --api-key <key> --acknowledge-non-clawhub-install --set-default
+openclaw promos claim <slug> --api-key <key> --set-default
 ```
 
 ## `openclaw promos list`
@@ -47,9 +47,7 @@ Claims a live promotion:
    prompts, matching the `openclaw onboard` non-interactive flags; to keep the
    key off the command line, export the provider's environment variable
    instead (for example `OPENROUTER_API_KEY`) — existing env credentials are
-   detected automatically and no flag is needed. If the provider plugin is not
-   installed and its source is outside ClawHub review, pass
-   `--acknowledge-non-clawhub-install` after reviewing and trusting that source.
+   detected automatically and no flag is needed.
 4. Registers the promotion's models with their aliases. Existing aliases are
    never overwritten.
 5. Offers to set the promotion's suggested model as your default —

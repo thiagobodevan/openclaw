@@ -543,7 +543,7 @@ const setupWizard: ChannelSetupWizard = {
 **In-repo plugins:** place under the bundled plugin workspace tree; they are automatically discovered during build.
 
 <Info>
-For npm-sourced installs, the plugin install command installs the package into a per-plugin project under `~/.openclaw/npm/projects` with lifecycle scripts disabled (`--ignore-scripts`). Keep plugin dependency trees pure JS/TS and avoid packages that require `postinstall` builds.
+For npm-sourced installs, `openclaw plugins install` installs the package into a per-plugin project under `~/.openclaw/npm/projects` with lifecycle scripts disabled (`--ignore-scripts`). Keep plugin dependency trees pure JS/TS and avoid packages that require `postinstall` builds.
 </Info>
 
 <Note>

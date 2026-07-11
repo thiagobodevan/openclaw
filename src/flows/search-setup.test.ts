@@ -161,7 +161,6 @@ vi.mock("../commands/onboarding-plugin-install.js", () => ({
 }));
 
 function latestPluginInstallRequest(): {
-  acknowledgeNonClawHubInstall?: boolean;
   autoConfirmSingleSource?: boolean;
   entry?: {
     install?: { npmSpec?: string };
@@ -173,7 +172,6 @@ function latestPluginInstallRequest(): {
   const [request] = ensureOnboardingPluginInstalled.mock.calls.at(-1) as unknown as [
     {
       autoConfirmSingleSource?: boolean;
-      acknowledgeNonClawHubInstall?: boolean;
       entry?: {
         install?: { npmSpec?: string };
         label?: string;
@@ -526,9 +524,7 @@ describe("runSearchSetupFlow", () => {
       text: text as never,
     });
 
-    const next = await runSearchSetupFlow({}, createNonExitingRuntime(), prompter, {
-      acknowledgeNonClawHubInstall: true,
-    });
+    const next = await runSearchSetupFlow({}, createNonExitingRuntime(), prompter);
 
     expect(ensureOnboardingPluginInstalled).toHaveBeenCalledTimes(1);
     const installRequest = latestPluginInstallRequest();
@@ -537,7 +533,6 @@ describe("runSearchSetupFlow", () => {
     expect(installRequest.entry?.trustedSourceLinkedOfficialInstall).toBe(true);
     expect(installRequest.entry?.install?.npmSpec).toBe("@openclaw/brave-plugin");
     expect(installRequest.autoConfirmSingleSource).toBe(true);
-    expect(installRequest.acknowledgeNonClawHubInstall).toBe(true);
     expect(next.tools?.web?.search?.provider).toBe("brave");
     expect(next.tools?.web?.search?.enabled).toBe(true);
     const braveConfig = next.plugins?.entries?.brave?.config as

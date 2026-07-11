@@ -202,11 +202,9 @@ describe("runGuidedOnboarding", () => {
   });
 
   it("falls through after an auth failure and surfaces both outcomes", async () => {
-    const confirm = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
     const prompter = createWizardPrompter({
       text: vi.fn(async () => "/tmp/work"),
-      select: vi.fn(async () => "candidate:codex-cli") as unknown as WizardPrompter["select"],
-      confirm,
+      confirm: vi.fn(async () => false),
     });
     const activate = vi
       .fn()
@@ -230,82 +228,10 @@ describe("runGuidedOnboarding", () => {
     await runGuidedOnboarding({ acceptRisk: true }, makeRuntime(), deps);
 
     expect(activate).toHaveBeenCalledTimes(2);
-    expect(activate).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        kind: "codex-cli",
-        acknowledgeNonClawHubInstall: true,
-      }),
-    );
     const notes = JSON.stringify((prompter.note as ReturnType<typeof vi.fn>).mock.calls);
     expect(notes).toContain("Claude Code");
     expect(notes).toContain("Authentication failed");
     expect(notes).toContain("Gateway: running");
-    expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: expect.stringContaining("outside ClawHub review and trust metadata"),
-        initialValue: false,
-      }),
-    );
-  });
-
-  it("does not treat manual Codex selection as provenance consent", async () => {
-    const select = vi
-      .fn()
-      .mockResolvedValueOnce("candidate:codex-cli")
-      .mockResolvedValueOnce("action:skip") as unknown as WizardPrompter["select"];
-    const prompter = createWizardPrompter({
-      text: vi.fn(async () => "/tmp/work"),
-      select,
-      confirm: vi.fn(async () => false),
-    });
-    const applySetup = vi.fn<NonNullable<GuidedOnboardingDeps["applySetup"]>>(async () => ({
-      configPath: "/tmp/config",
-      lines: ["Workspace"],
-    }));
-    const deps = setupDeps({
-      prompter,
-      detect: vi.fn(async () => detection({ candidates: [candidate("codex-cli", "Codex")] })),
-      applySetup,
-    });
-
-    await runGuidedOnboarding({ acceptRisk: true }, makeRuntime(), deps);
-
-    expect(deps.activate).not.toHaveBeenCalled();
-    expect(applySetup).toHaveBeenCalledOnce();
-  });
-
-  it("auto-tests Codex only when its plugin source was pre-acknowledged", async () => {
-    const select = vi.fn(async () => "unexpected") as unknown as WizardPrompter["select"];
-    const prompter = createWizardPrompter({
-      text: vi.fn(async () => "/tmp/work"),
-      select,
-      confirm: vi.fn(async () => false),
-    });
-    const deps = setupDeps({
-      prompter,
-      detect: vi.fn(async () => detection({ candidates: [candidate("codex-cli", "Codex")] })),
-      activate: vi.fn(async () => ({
-        ok: true as const,
-        modelRef: "openai/gpt-5.5",
-        latencyMs: 900,
-        lines: ["Gateway: running"],
-      })),
-    });
-
-    await runGuidedOnboarding(
-      { acceptRisk: true, acknowledgeNonClawHubInstall: true },
-      makeRuntime(),
-      deps,
-    );
-
-    expect(deps.activate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "codex-cli",
-        acknowledgeNonClawHubInstall: true,
-      }),
-    );
-    expect(select).not.toHaveBeenCalled();
   });
 
   it("offers an auto-attempted transient failure for manual retry", async () => {

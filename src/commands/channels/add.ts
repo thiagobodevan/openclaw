@@ -49,16 +49,9 @@ function loadOnboardChannels(): Promise<OnboardChannelsModule> {
 export type ChannelsAddOptions = {
   channel?: string;
   account?: string;
-  acknowledgeNonClawHubInstall?: boolean;
-  acknowledgeNonClawhubInstall?: boolean;
 } & Record<string, unknown>;
 
-const CHANNEL_ADD_CONTROL_OPTION_KEYS = new Set([
-  "channel",
-  "account",
-  "acknowledgeNonClawHubInstall",
-  "acknowledgeNonClawhubInstall",
-]);
+const CHANNEL_ADD_CONTROL_OPTION_KEYS = new Set(["channel", "account"]);
 const NEXTCLOUD_TALK_CLI_ALIASES = new Set(["nextcloud-talk", "nc-talk", "nc"]);
 
 async function resolveCatalogChannelEntry(raw: string, cfg: OpenClawConfig | null) {
@@ -222,8 +215,6 @@ async function channelsAddCommandImpl(
       onResolvedPlugin: (channel, plugin) => {
         resolvedPlugins.set(channel, plugin);
       },
-      acknowledgeNonClawHubInstall:
-        opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true,
     });
     if (selection.length === 0) {
       await prompter.outro("No channel changes made.");
@@ -398,8 +389,6 @@ async function channelsAddCommandImpl(
         runtime,
         workspaceDir,
         promptInstall: false,
-        acknowledgeNonClawHubInstall:
-          opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true,
       });
       nextConfig = result.cfg;
       if (!result.installed) {

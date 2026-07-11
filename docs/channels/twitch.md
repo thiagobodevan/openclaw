@@ -15,7 +15,7 @@ Twitch ships as an official plugin; it is not part of the core install.
 <Tabs>
   <Tab title="npm registry">
     ```bash
-    openclaw plugins install npm:@openclaw/twitch --acknowledge-non-clawhub-install
+    openclaw plugins install @openclaw/twitch
     ```
   </Tab>
   <Tab title="Local checkout">

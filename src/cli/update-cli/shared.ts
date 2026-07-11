@@ -36,7 +36,6 @@ export type UpdateCommandOptions = {
   timeout?: string;
   yes?: boolean;
   acknowledgeClawHubRisk?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
 };
 
 export type UpdateStatusOptions = {
@@ -51,12 +50,10 @@ export type UpdateFinalizeOptions = {
   yes?: boolean;
   restart?: boolean;
   acknowledgeClawHubRisk?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
 };
 
 export type UpdateWizardOptions = {
   timeout?: string;
-  acknowledgeNonClawHubInstall?: boolean;
 };
 
 const INVALID_TIMEOUT_ERROR = "--timeout must be a positive integer (seconds)";

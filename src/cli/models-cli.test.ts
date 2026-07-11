@@ -235,19 +235,6 @@ describe("models cli", () => {
     expectCommandOptions(modelsAuthListCommand, { agent: "poe", json: true });
   });
 
-  it("forwards non-ClawHub acknowledgement to models set", async () => {
-    await runModelsCommand([
-      "models",
-      "set",
-      "openai/gpt-5.5",
-      "--acknowledge-non-clawhub-install",
-    ]);
-
-    expect(modelsSetCommand).toHaveBeenCalledWith("openai/gpt-5.5", expect.anything(), {
-      acknowledgeNonClawHubInstall: true,
-    });
-  });
-
   it.each([
     {
       label: "set",

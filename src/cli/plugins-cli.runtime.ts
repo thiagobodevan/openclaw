@@ -18,10 +18,7 @@ import { tracePluginLifecyclePhaseAsync } from "../plugins/plugin-lifecycle-trac
 import { defaultRuntime } from "../runtime.js";
 import { shortenHomeInString } from "../utils.js";
 import { formatMissingPluginMessage } from "./error-format.js";
-import {
-  NON_CLAWHUB_INSTALL_ACK_FLAG,
-  type NonClawHubInstallAcknowledgementOptions,
-} from "./non-clawhub-install-acknowledgement.js";
+import type { NonClawHubInstallAcknowledgementOptions } from "./non-clawhub-install-acknowledgement.js";
 import type {
   PluginMarketplaceEntriesOptions,
   PluginMarketplaceListOptions,
@@ -110,20 +107,6 @@ function formatConfiguredRuntimePluginInstallSpec(params: {
   return npmSpec ?? clawhubSpec ?? params.pluginId;
 }
 
-function formatConfiguredRuntimePluginInstallCommand(installSpec: string): string {
-  const command = `openclaw plugins install ${installSpec}`;
-  return installSpec.trim().toLowerCase().startsWith("clawhub:")
-    ? command
-    : `${command} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
-}
-
-function formatConfiguredRuntimePluginDoctorFixCommand(installSpec: string): string {
-  const command = "openclaw doctor --fix";
-  return installSpec.trim().toLowerCase().startsWith("clawhub:")
-    ? command
-    : `${command} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
-}
-
 function pluginIdListIncludes(list: readonly string[] | undefined, pluginId: string): boolean {
   return Array.isArray(list) && list.some((entry) => entry.trim() === pluginId);
 }
@@ -197,10 +180,8 @@ function collectConfiguredRuntimePluginWarnings(params: {
       ];
     }
     const installSpec = formatConfiguredRuntimePluginInstallSpec(candidate);
-    const installCommand = formatConfiguredRuntimePluginInstallCommand(installSpec);
-    const doctorFixCommand = formatConfiguredRuntimePluginDoctorFixCommand(installSpec);
     return [
-      `- Configured runtime "${runtimeId}" requires the ${candidate.label} plugin, but no enabled "${runtimeId}" plugin was found. Run "${doctorFixCommand}" to install ${installSpec}, or install it manually with "${installCommand}".`,
+      `- Configured runtime "${runtimeId}" requires the ${candidate.label} plugin, but no enabled "${runtimeId}" plugin was found. Run "openclaw doctor --fix" to install ${installSpec}, or install it manually with "openclaw plugins install ${installSpec}".`,
     ];
   });
 }

@@ -85,7 +85,7 @@ openclaw models set <model-or-alias>
 openclaw models set-image <model-or-alias>
 ```
 
-`set` writes `agents.defaults.model.primary`; `set-image` writes `agents.defaults.imageModel.primary`. Both accept `provider/model` or a configured alias. `set` also repairs Codex/Copilot runtime plugin installs when the newly selected model needs one; `set-image` does not. Automation can pass `--acknowledge-non-clawhub-install` to `models set` after reviewing those runtime plugin sources. Neither command accepts `--agent`; they always write agent defaults.
+`set` writes `agents.defaults.model.primary`; `set-image` writes `agents.defaults.imageModel.primary`. Both accept `provider/model` or a configured alias. `set` also repairs Codex/Copilot runtime plugin installs when the newly selected model needs one; `set-image` does not. Neither command accepts `--agent`; they always write agent defaults.
 
 ### Scan
 

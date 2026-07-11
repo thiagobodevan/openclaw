@@ -149,6 +149,102 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
+  it("allows npm packages matched by the official catalog", async () => {
+    const policyConfig: OpenClawConfig = {
+      commands: { text: true, plugins: true },
+      plugins: { enabled: true },
+      security: {
+        installPolicy: {
+          enabled: true,
+          exec: {
+            source: "exec",
+            command: process.execPath,
+            args: ["-e", "process.exit(1)"],
+            allowInsecurePath: true,
+          },
+        },
+      },
+    };
+    installPluginFromNpmSpecMock.mockResolvedValue({
+      ok: true,
+      pluginId: "brave",
+      targetDir: "/tmp/brave",
+      version: "1.0.0",
+      extensions: ["index.js"],
+      npmResolution: {
+        name: "@openclaw/brave-plugin",
+        version: "1.0.0",
+        resolvedSpec: "@openclaw/brave-plugin@1.0.0",
+      },
+    });
+    persistPluginInstallMock.mockResolvedValue({});
+
+    await withTempHome("openclaw-command-plugins-home-", async (home) => {
+      await fs.writeFile(
+        path.join(home, ".openclaw", "openclaw.json"),
+        `${JSON.stringify(policyConfig, null, 2)}\n`,
+      );
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams(
+        "/plugins install npm:@openclaw/brave-plugin",
+        workspaceDir,
+        { cfg: policyConfig },
+      );
+
+      const result = await handlePluginsCommand(params, true);
+
+      expect(result?.reply?.text).toContain('Installed plugin "brave"');
+      expectObjectFields(mockFirstObjectArg(installPluginFromNpmSpecMock), {
+        spec: "@openclaw/brave-plugin",
+        config: policyConfig,
+        expectedPluginId: "brave",
+        trustedSourceLinkedOfficialInstall: true,
+      });
+      expectPersistedInstall("brave", {
+        source: "npm",
+        spec: "@openclaw/brave-plugin",
+        installPath: "/tmp/brave",
+        version: "1.0.0",
+      });
+    });
+  });
+
+  it("allows plugin ids matched by the official catalog", async () => {
+    installPluginFromNpmSpecMock.mockResolvedValue({
+      ok: true,
+      pluginId: "brave",
+      targetDir: "/tmp/brave",
+      version: "1.0.0",
+      extensions: ["index.js"],
+      npmResolution: {
+        name: "@openclaw/brave-plugin",
+        version: "1.0.0",
+        resolvedSpec: "@openclaw/brave-plugin@1.0.0",
+      },
+    });
+    persistPluginInstallMock.mockResolvedValue({});
+
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams("/plugins install brave", workspaceDir);
+
+      const result = await handlePluginsCommand(params, true);
+
+      expect(result?.reply?.text).toContain('Installed plugin "brave"');
+      expectObjectFields(mockFirstObjectArg(installPluginFromNpmSpecMock), {
+        spec: "@openclaw/brave-plugin",
+        expectedPluginId: "brave",
+        trustedSourceLinkedOfficialInstall: true,
+      });
+      expectPersistedInstall("brave", {
+        source: "npm",
+        spec: "@openclaw/brave-plugin",
+        installPath: "/tmp/brave",
+        version: "1.0.0",
+      });
+    });
+  });
+
   it("rejects npm-pack chat installs before package installer side effects", async () => {
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
@@ -553,7 +649,21 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
-  it("rejects catalog npm package chat installs with alternate selectors", async () => {
+  it("allows catalog npm package chat installs with alternate selectors", async () => {
+    installPluginFromNpmSpecMock.mockResolvedValue({
+      ok: true,
+      pluginId: "wecom-openclaw-plugin",
+      targetDir: "/tmp/wecom-openclaw-plugin",
+      version: "2026.5.7",
+      extensions: ["index.js"],
+      npmResolution: {
+        name: "@wecom/wecom-openclaw-plugin",
+        version: "2026.5.7",
+        resolvedSpec: "@wecom/wecom-openclaw-plugin@2026.5.7",
+      },
+    });
+    persistPluginInstallMock.mockResolvedValue({});
+
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();
       const params = buildPluginsParams(
@@ -564,10 +674,21 @@ describe("handleCommands /plugins install", () => {
       if (result === null) {
         throw new Error("expected plugin install result");
       }
-      expectNonClawHubChatInstallRejected(
-        result,
-        "Installing plugin from npm registry: @wecom/wecom-openclaw-plugin@latest",
-      );
+      expect(result.reply?.text).toContain('Installed plugin "wecom-openclaw-plugin"');
+      expectObjectFields(mockFirstObjectArg(installPluginFromNpmSpecMock), {
+        spec: "@wecom/wecom-openclaw-plugin@latest",
+        expectedPluginId: "wecom-openclaw-plugin",
+        expectedIntegrity: undefined,
+        trustedSourceLinkedOfficialInstall: true,
+      });
+      expectPersistedInstall("wecom-openclaw-plugin", {
+        source: "npm",
+        spec: "@wecom/wecom-openclaw-plugin@latest",
+        installPath: "/tmp/wecom-openclaw-plugin",
+        version: "2026.5.7",
+        resolvedName: "@wecom/wecom-openclaw-plugin",
+        resolvedVersion: "2026.5.7",
+      });
     });
   });
 });

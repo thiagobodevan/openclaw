@@ -10,7 +10,7 @@ Nextcloud Talk is a downloadable channel plugin (`@openclaw/nextcloud-talk`) tha
 ## Install
 
 ```bash
-openclaw plugins install npm:@openclaw/nextcloud-talk --acknowledge-non-clawhub-install
+openclaw plugins install @openclaw/nextcloud-talk
 ```
 
 Use the bare package spec to follow the current official release tag. Pin an exact version only when you need a reproducible install.

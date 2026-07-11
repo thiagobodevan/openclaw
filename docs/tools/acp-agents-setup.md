@@ -139,7 +139,7 @@ Packaged installs use the official `@openclaw/acpx` runtime plugin for ACP.
 Install and enable it before using ACP harness sessions:
 
 ```bash
-openclaw plugins install npm:@openclaw/acpx --acknowledge-non-clawhub-install
+openclaw plugins install @openclaw/acpx
 openclaw config set plugins.entries.acpx.enabled true
 ```
 
@@ -155,7 +155,7 @@ If you disabled `acpx`, denied it via `plugins.allow` / `plugins.deny`, or want
 to switch back to the packaged plugin, use the explicit package path:
 
 ```bash
-openclaw plugins install npm:@openclaw/acpx --acknowledge-non-clawhub-install
+openclaw plugins install @openclaw/acpx
 openclaw config set plugins.entries.acpx.enabled true
 ```
 

@@ -8,7 +8,6 @@ import type { PluginEnableResult } from "../plugins/enable.js";
 import { resolveNpmInstallSpecsForUpdateChannel } from "../plugins/install-channel-specs.js";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import { VERSION } from "../version.js";
-import { WizardCancelledError } from "../wizard/prompts.js";
 
 function expectedNpmInstallSpec(spec: string): string {
   return resolveNpmInstallSpecsForUpdateChannel({
@@ -295,7 +294,6 @@ describe("ensureOnboardingPluginInstalled", () => {
           progress,
         } as never,
         runtime: { error: vi.fn() } as never,
-        acknowledgeNonClawHubInstall: true,
       });
 
       expect(progress).toHaveBeenCalledWith("正在安装 Demo Plugin 插件...");
@@ -399,7 +397,6 @@ describe("ensureOnboardingPluginInstalled", () => {
       } as never,
       runtime: { log: vi.fn() } as never,
       workspaceDir: "/tmp/workspace",
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(select).not.toHaveBeenCalled();
@@ -473,7 +470,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         progress: vi.fn(() => ({ update: vi.fn(), stop: vi.fn() })),
       } as never,
       runtime: { log: vi.fn() } as never,
-      acknowledgeNonClawHubInstall: true,
     });
 
     const [npmCall] = readFirstMockCall(installPluginFromNpmSpec, "installPluginFromNpmSpec") as [
@@ -483,72 +479,6 @@ describe("ensureOnboardingPluginInstalled", () => {
     expect(npmCall.spec).toBe("@openclaw/codex@2026.5.8");
     expect(npmCall.expectedPluginId).toBe("codex");
   });
-
-  it.each([
-    {
-      label: "npm",
-      override: "npm:@openclaw/codex@2026.5.8",
-      expectNoInstallerSideEffects: () => expect(installPluginFromNpmSpec).not.toHaveBeenCalled(),
-    },
-    {
-      label: "npm-pack",
-      override: "npm-pack:/tmp/codex.tgz",
-      expectNoInstallerSideEffects: () =>
-        expect(installPluginFromNpmPackArchive).not.toHaveBeenCalled(),
-    },
-  ])(
-    "blocks $label install overrides until non-ClawHub source acknowledgement",
-    async (scenario) => {
-      process.env.OPENCLAW_ALLOW_PLUGIN_INSTALL_OVERRIDES = "1";
-      process.env.OPENCLAW_PLUGIN_INSTALL_OVERRIDES = JSON.stringify({
-        codex: scenario.override,
-      });
-      const confirm = vi.fn(async () => false);
-      const progress = vi.fn(() => ({ update: vi.fn(), stop: vi.fn() }));
-      const log = vi.fn();
-      const error = vi.fn();
-
-      const result = await ensureOnboardingPluginInstalled({
-        cfg: {},
-        entry: {
-          pluginId: "codex",
-          label: "Codex",
-          install: {
-            npmSpec: "@openclaw/codex",
-          },
-          trustedSourceLinkedOfficialInstall: true,
-        },
-        prompter: {
-          confirm,
-          select: vi.fn(async () => "npm"),
-          note: vi.fn(),
-          progress,
-        } as never,
-        runtime: { error, log } as never,
-      });
-
-      expect(result).toEqual({
-        cfg: {},
-        installed: false,
-        pluginId: "codex",
-        status: "failed",
-      });
-      expect(log).toHaveBeenCalledWith(expect.stringContaining("Using plugin install override"));
-      expect(log).toHaveBeenCalledWith(
-        expect.stringContaining("outside ClawHub review and trust metadata"),
-      );
-      expect(confirm).toHaveBeenCalledWith({
-        message: "Install this non-ClawHub plugin source?",
-        initialValue: false,
-      });
-      expect(error).toHaveBeenCalledWith(
-        expect.stringContaining("--acknowledge-non-clawhub-install"),
-      );
-      scenario.expectNoInstallerSideEffects();
-      expect(progress).not.toHaveBeenCalled();
-      expect(recordPluginInstall).not.toHaveBeenCalled();
-    },
-  );
 
   it("installs and records ClawHub provider plugins with source facts", async () => {
     const cfg: OpenClawConfig = {
@@ -608,7 +538,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         progress: vi.fn(() => ({ update, stop })),
       } as never,
       runtime: {} as never,
-      acknowledgeNonClawHubInstall: true,
     });
 
     const [clawHubCall] = readFirstMockCall(
@@ -764,7 +693,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         progress: vi.fn(() => ({ update, stop })),
       } as never,
       runtime: {} as never,
-      acknowledgeNonClawHubInstall: true,
     });
 
     const [npmCall] = readFirstMockCall(installPluginFromNpmSpec, "installPluginFromNpmSpec") as [
@@ -839,7 +767,6 @@ describe("ensureOnboardingPluginInstalled", () => {
       } as never,
       runtime: {} as never,
       promptInstall: false,
-      acknowledgeNonClawHubInstall: true,
     });
 
     const [npmCall] = readFirstMockCall(installPluginFromNpmSpec, "installPluginFromNpmSpec") as [
@@ -883,7 +810,6 @@ describe("ensureOnboardingPluginInstalled", () => {
       } as never,
       runtime: {} as never,
       promptInstall: false,
-      acknowledgeNonClawHubInstall: true,
     });
 
     const [, recordUpdate] = readFirstMockCall(recordPluginInstall, "recordPluginInstall") as [
@@ -926,7 +852,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         progress: vi.fn(() => ({ update, stop })),
       } as never,
       runtime: { log } as never,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(update).toHaveBeenCalledWith("Retrying");
@@ -959,7 +884,6 @@ describe("ensureOnboardingPluginInstalled", () => {
       runtime: {
         error: vi.fn(),
       } as never,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(result).toEqual({
@@ -1013,44 +937,6 @@ describe("ensureOnboardingPluginInstalled", () => {
       { value: "skip", label: "Skip for now" },
     ]);
     expect(captured?.initialValue).toBe("npm");
-    expect(installPluginFromNpmSpec).not.toHaveBeenCalled();
-  });
-
-  it("blocks automatic npm installs until non-ClawHub source acknowledgement is available", async () => {
-    const log = vi.fn();
-    const error = vi.fn();
-
-    const result = await ensureOnboardingPluginInstalled({
-      cfg: {},
-      entry: {
-        pluginId: "demo-plugin",
-        label: "Demo Plugin",
-        install: {
-          npmSpec: "@demo/plugin@1.2.3",
-        },
-      },
-      prompter: {
-        confirm: vi.fn(async () => {
-          throw new Error("non-interactive setup cannot prompt");
-        }),
-      } as never,
-      runtime: { error, log } as never,
-      promptInstall: false,
-    });
-
-    expect(result).toEqual({
-      cfg: {},
-      installed: false,
-      pluginId: "demo-plugin",
-      status: "failed",
-    });
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("outside ClawHub review and trust metadata"),
-    );
-    expect(error).toHaveBeenCalledWith("non-interactive setup cannot prompt");
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("--acknowledge-non-clawhub-install"),
-    );
     expect(installPluginFromNpmSpec).not.toHaveBeenCalled();
   });
 
@@ -1355,7 +1241,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         } as never,
         runtime: {} as never,
         workspaceDir,
-        acknowledgeNonClawHubInstall: true,
       });
 
       const realPluginDir = await fs.realpath(pluginDir);
@@ -1406,7 +1291,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         } as never,
         runtime: { error } as never,
         workspaceDir,
-        acknowledgeNonClawHubInstall: true,
       });
 
       expect(result).toEqual({
@@ -1464,7 +1348,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         } as never,
         runtime: {} as never,
         workspaceDir,
-        acknowledgeNonClawHubInstall: true,
       });
 
       const realPluginDir = await fs.realpath(pluginDir);
@@ -1502,7 +1385,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         } as never,
         runtime: {} as never,
         workspaceDir,
-        acknowledgeNonClawHubInstall: true,
       });
 
       const realPluginDir = await fs.realpath(pluginDir);
@@ -1534,83 +1416,6 @@ describe("ensureOnboardingPluginInstalled", () => {
           spec: "@demo/plugin@1.2.3",
         },
       });
-    });
-  });
-
-  it("blocks local setup installs until non-ClawHub source acknowledgement is available", async () => {
-    await withTempDir({ prefix: "openclaw-onboarding-install-local-ack-" }, async (temp) => {
-      const workspaceDir = path.join(temp, "workspace");
-      const pluginDir = path.join(workspaceDir, "plugins", "demo; package");
-      await fs.mkdir(path.join(workspaceDir, ".git"), { recursive: true });
-      await fs.mkdir(pluginDir, { recursive: true });
-      const log = vi.fn();
-      const error = vi.fn();
-
-      const result = await ensureOnboardingPluginInstalled({
-        cfg: {},
-        entry: {
-          pluginId: "demo-plugin",
-          label: "Demo Plugin",
-          install: {
-            localPath: "plugins/demo; package",
-          },
-        },
-        prompter: {
-          select: vi.fn(async () => "local"),
-          confirm: vi.fn(async () => false),
-        } as never,
-        runtime: { error, log } as never,
-        workspaceDir,
-      });
-
-      expect(result).toEqual({
-        cfg: {},
-        installed: false,
-        pluginId: "demo-plugin",
-        status: "failed",
-      });
-      expect(log).toHaveBeenCalledWith(
-        expect.stringContaining("Installing plugin from local path"),
-      );
-      expect(error).toHaveBeenCalledWith(
-        expect.stringContaining(
-          `openclaw plugins install '${await fs.realpath(pluginDir)}' --acknowledge-non-clawhub-install`,
-        ),
-      );
-      expect(enablePluginInConfig).not.toHaveBeenCalled();
-      expect(recordPluginInstall).not.toHaveBeenCalled();
-    });
-  });
-
-  it("propagates cancellation from the non-ClawHub acknowledgement prompt", async () => {
-    await withTempDir({ prefix: "openclaw-onboarding-install-local-cancel-" }, async (temp) => {
-      const workspaceDir = path.join(temp, "workspace");
-      const pluginDir = path.join(workspaceDir, "plugins", "demo");
-      await fs.mkdir(path.join(workspaceDir, ".git"), { recursive: true });
-      await fs.mkdir(pluginDir, { recursive: true });
-      const cancellation = new WizardCancelledError();
-
-      await expect(
-        ensureOnboardingPluginInstalled({
-          cfg: {},
-          entry: {
-            pluginId: "demo-plugin",
-            label: "Demo Plugin",
-            install: { localPath: "plugins/demo" },
-          },
-          prompter: {
-            select: vi.fn(async () => "local"),
-            confirm: vi.fn(async () => {
-              throw cancellation;
-            }),
-          } as never,
-          runtime: { error: vi.fn(), log: vi.fn() } as never,
-          workspaceDir,
-        }),
-      ).rejects.toBe(cancellation);
-
-      expect(enablePluginInConfig).not.toHaveBeenCalled();
-      expect(recordPluginInstall).not.toHaveBeenCalled();
     });
   });
 
@@ -1809,7 +1614,6 @@ describe("ensureOnboardingPluginInstalled", () => {
         } as never,
         runtime: {} as never,
         workspaceDir,
-        acknowledgeNonClawHubInstall: true,
       });
 
       const [recordCfg, recordUpdate] = readFirstMockCall(

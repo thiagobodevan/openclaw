@@ -1111,9 +1111,9 @@ describe("plugins cli install", () => {
       primeBlockedPluginConfigMutation();
       setup();
 
-      await expect(runPluginsCommand(withNonClawHubInstallAcknowledgement(args))).rejects.toThrow(
-        "__exit__:1",
-      );
+      const commandArgs =
+        args[2] === "clawhub:demo" ? args : withNonClawHubInstallAcknowledgement(args);
+      await expect(runPluginsCommand(commandArgs)).rejects.toThrow("__exit__:1");
 
       expect(installer).not.toHaveBeenCalled();
       expect(writeConfigFile).not.toHaveBeenCalled();
@@ -1127,9 +1127,7 @@ describe("plugins cli install", () => {
     primeBlockedPluginConfigMutation();
     findBundledPluginSourceMock.mockReturnValue(undefined);
 
-    await expect(
-      runAcknowledgedPluginsInstallCommand(["plugins", "install", "brave"]),
-    ).rejects.toThrow("__exit__:1");
+    await expect(runPluginsCommand(["plugins", "install", "brave"])).rejects.toThrow("__exit__:1");
 
     expect(installPluginFromNpmSpec).not.toHaveBeenCalled();
     expect(writeConfigFile).not.toHaveBeenCalled();
@@ -1146,9 +1144,7 @@ describe("plugins cli install", () => {
       localPath: `/app/dist/extensions/${pluginId}`,
     });
 
-    await expect(
-      runAcknowledgedPluginsInstallCommand(["plugins", "install", pluginId]),
-    ).rejects.toThrow("__exit__:1");
+    await expect(runPluginsCommand(["plugins", "install", pluginId])).rejects.toThrow("__exit__:1");
 
     expect(installPluginFromPath).not.toHaveBeenCalled();
     expect(writeConfigFile).not.toHaveBeenCalled();
@@ -1450,6 +1446,36 @@ describe("plugins cli install", () => {
     },
   );
 
+  it("does not require acknowledgement for a bundled plugin's local source path", async () => {
+    const localPath = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-bundled-plugin-source-"));
+    findBundledPluginSourceMock.mockImplementation((params: unknown) => {
+      const { lookup } = params as {
+        lookup: { kind: "localPath" | "npmSpec" | "pluginId"; value: string };
+      };
+      return lookup.kind === "localPath" && path.resolve(lookup.value) === path.resolve(localPath)
+        ? { pluginId: "demo", localPath }
+        : undefined;
+    });
+    primeSuccessfulPluginPersistence("demo");
+    installPluginFromPath.mockResolvedValue({
+      ok: true,
+      pluginId: "demo",
+      targetDir: cliInstallPath("demo"),
+      version: "1.0.0",
+      extensions: ["index.js"],
+    });
+
+    try {
+      await runPluginsCommand(["plugins", "install", localPath]);
+    } finally {
+      fs.rmSync(localPath, { recursive: true, force: true });
+    }
+
+    expect(promptYesNo).not.toHaveBeenCalled();
+    expect(runtimeErrors.join("\n")).not.toContain("outside ClawHub review");
+    expect(installPluginFromPath).toHaveBeenCalledTimes(1);
+  });
+
   it("prompts interactive users before non-ClawHub plugin installs and cancels on no", async () => {
     setTty(true);
     promptYesNo.mockResolvedValueOnce(false);
@@ -1629,7 +1655,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo"]);
+    await runPluginsCommand(["plugins", "install", "clawhub:demo"]);
 
     expect(clawHubInstallCall().spec).toBe("clawhub:demo");
     const record = persistedInstallRecord("demo");
@@ -1677,12 +1703,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand([
-      "plugins",
-      "install",
-      "clawhub:demo",
-      "--acknowledge-clawhub-risk",
-    ]);
+    await runPluginsCommand(["plugins", "install", "clawhub:demo", "--acknowledge-clawhub-risk"]);
 
     expect(installPluginFromClawHub).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1709,9 +1730,9 @@ describe("plugins cli install", () => {
       warning: "WARNING - ClawHub found security risks in this release",
     });
 
-    await expect(
-      runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo"]),
-    ).rejects.toThrow("__exit__:1");
+    await expect(runPluginsCommand(["plugins", "install", "clawhub:demo"])).rejects.toThrow(
+      "__exit__:1",
+    );
 
     expect(runtimeErrors.at(-1)).toContain("--acknowledge-clawhub-risk");
   });
@@ -1726,9 +1747,9 @@ describe("plugins cli install", () => {
         'ClawHub blocked artifact download for "demo@1.2.3"; install was not started. ClawHub /api/v1/packages/demo/versions/1.2.3/artifact/download failed (403): blocked.',
     });
 
-    await expect(
-      runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo"]),
-    ).rejects.toThrow("__exit__:1");
+    await expect(runPluginsCommand(["plugins", "install", "clawhub:demo"])).rejects.toThrow(
+      "__exit__:1",
+    );
 
     expect(runtimeErrors.at(-1)).toContain("ClawHub blocked artifact download");
   });
@@ -1754,7 +1775,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo"]);
+    await runPluginsCommand(["plugins", "install", "clawhub:demo"]);
 
     expect(clawHubInstallCall().extensionsDir).toBe(extensionsDir);
     expect(clawHubInstallCall().spec).toBe("clawhub:demo");
@@ -1790,7 +1811,7 @@ describe("plugins cli install", () => {
       requiresConfig: true,
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", pluginId]);
+    await runPluginsCommand(["plugins", "install", pluginId]);
 
     const writtenConfig = writeConfigFile.mock.calls[
       writeConfigFile.mock.calls.length - 1
@@ -1837,7 +1858,7 @@ describe("plugins cli install", () => {
     });
     enablePluginInConfig.mockReturnValue({ config: enabledCfg });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", pluginId]);
+    await runPluginsCommand(["plugins", "install", pluginId]);
 
     expect(enablePluginInConfig).toHaveBeenCalledTimes(1);
     expect(writeConfigFile).toHaveBeenCalledWith(enabledCfg);
@@ -1869,7 +1890,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo", "--force"]);
+    await runPluginsCommand(["plugins", "install", "clawhub:demo", "--force"]);
 
     expect(clawHubInstallCall().spec).toBe("clawhub:demo");
     expect(clawHubInstallCall().mode).toBe("update");
@@ -1899,7 +1920,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo@1.2.3"]);
+    await runPluginsCommand(["plugins", "install", "clawhub:demo@1.2.3"]);
 
     expect(clawHubInstallCall().spec).toBe("clawhub:demo@1.2.3");
     const record = persistedInstallRecord("demo");
@@ -1930,7 +1951,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "brave"]);
+    await runPluginsCommand(["plugins", "install", "brave"]);
 
     expect(findBundledPluginSourceMock).toHaveBeenCalledWith({
       lookup: { kind: "pluginId", value: "brave" },
@@ -1939,8 +1960,7 @@ describe("plugins cli install", () => {
     expect(npmInstallCall().spec).toBe("@openclaw/brave-plugin");
     expect(npmInstallCall().expectedPluginId).toBe("brave");
     expect(npmInstallCall().trustedSourceLinkedOfficialInstall).toBe(true);
-    expect(runtimeLogsContain("Installing plugin from npm registry")).toBe(true);
-    expect(runtimeLogsContain("outside ClawHub review")).toBe(true);
+    expect(runtimeLogsContain("outside ClawHub review")).toBe(false);
     const record = persistedInstallRecord("brave");
     expect(record.source).toBe("npm");
     expect(record.spec).toBe("@openclaw/brave-plugin");
@@ -1963,7 +1983,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "wecom"]);
+    await runPluginsCommand(["plugins", "install", "wecom"]);
 
     expect(npmInstallCall().spec).toBe("@wecom/wecom-openclaw-plugin@2026.5.7");
     expect(npmInstallCall().expectedPluginId).toBe("wecom-openclaw-plugin");
@@ -1987,7 +2007,7 @@ describe("plugins cli install", () => {
         warnings: [],
       });
 
-      await runAcknowledgedPluginsInstallCommand(["plugins", "install", pluginId]);
+      await runPluginsCommand(["plugins", "install", pluginId]);
 
       expect(findBundledPluginSourceMock).toHaveBeenCalledWith({
         lookup: { kind: "pluginId", value: pluginId },
@@ -2014,9 +2034,7 @@ describe("plugins cli install", () => {
         "aborted: npm package integrity drift detected for @wecom/wecom-openclaw-plugin@2026.5.7",
     });
 
-    await expect(
-      runAcknowledgedPluginsInstallCommand(["plugins", "install", "wecom"]),
-    ).rejects.toThrow("__exit__:1");
+    await expect(runPluginsCommand(["plugins", "install", "wecom"])).rejects.toThrow("__exit__:1");
 
     expect(npmInstallCall().trustedSourceLinkedOfficialInstall).toBe(true);
     expect(hookNpmInstallCall().spec).toBe("@wecom/wecom-openclaw-plugin@2026.5.7");
@@ -2193,11 +2211,12 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "npm:@openclaw/discord"]);
+    await runPluginsCommand(["plugins", "install", "npm:@openclaw/discord"]);
 
     expect(npmInstallCall().spec).toBe("@openclaw/discord");
     expect(npmInstallCall().expectedPluginId).toBe("discord");
     expect(npmInstallCall().trustedSourceLinkedOfficialInstall).toBe(true);
+    expect(runtimeLogsContain("outside ClawHub review")).toBe(false);
     expect(installPluginFromClawHub).not.toHaveBeenCalled();
   });
 
@@ -2215,7 +2234,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand(["plugins", "install", "@openclaw/discord"]);
+    await runPluginsCommand(["plugins", "install", "@openclaw/discord"]);
 
     expect(npmInstallCall().spec).toBe("@openclaw/discord");
     expect(npmInstallCall().expectedPluginId).toBe("discord");
@@ -2289,11 +2308,7 @@ describe("plugins cli install", () => {
       warnings: [],
     });
 
-    await runAcknowledgedPluginsInstallCommand([
-      "plugins",
-      "install",
-      "@wecom/wecom-openclaw-plugin@latest",
-    ]);
+    await runPluginsCommand(["plugins", "install", "@wecom/wecom-openclaw-plugin@latest"]);
 
     // Alternate selectors stay trusted by catalog package name, but must not
     // inherit catalog integrity unless the install spec matches exactly.
@@ -2301,6 +2316,7 @@ describe("plugins cli install", () => {
     expect(npmInstallCall().expectedPluginId).toBe("wecom-openclaw-plugin");
     expect(npmInstallCall().trustedSourceLinkedOfficialInstall).toBe(true);
     expect(npmInstallCall().expectedIntegrity).toBeUndefined();
+    expect(runtimeLogsContain("outside ClawHub review")).toBe(false);
     expect(installPluginFromClawHub).not.toHaveBeenCalled();
   });
 
@@ -3066,9 +3082,9 @@ describe("plugins cli install", () => {
       code: "skill_package",
     });
 
-    await expect(
-      runAcknowledgedPluginsInstallCommand(["plugins", "install", "clawhub:demo"]),
-    ).rejects.toThrow("__exit__:1");
+    await expect(runPluginsCommand(["plugins", "install", "clawhub:demo"])).rejects.toThrow(
+      "__exit__:1",
+    );
 
     expect(installPluginFromNpmSpec).not.toHaveBeenCalled();
     expect(runtimeErrors.at(-1)).toContain('Use "openclaw skills install demo" instead.');

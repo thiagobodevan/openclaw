@@ -207,15 +207,6 @@ function formatConfigPath(segments: readonly ConfigPathSegment[]): string {
   return segments.join(".");
 }
 
-const NON_CLAWHUB_INSTALL_ACK_FLAG = "--acknowledge-non-clawhub-install";
-
-function formatPluginInstallHintCommand(installSpec: string): string {
-  const command = `openclaw plugins install ${installSpec}`;
-  return installSpec.trim().toLowerCase().startsWith("clawhub:")
-    ? command
-    : `${command} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
-}
-
 function formatMissingOfficialExternalPluginWarning(
   pluginId: string,
   opts?: { selectedMissingMemorySlot?: boolean },
@@ -232,11 +223,10 @@ function formatMissingOfficialExternalPluginWarning(
   if (!installSpec) {
     return null;
   }
-  const installCommand = formatPluginInstallHintCommand(installSpec);
   if (pluginId === "memory-lancedb" && opts?.selectedMissingMemorySlot) {
-    return `plugin not installed: ${pluginId} — gateway will run without persistent memory until installed; install the official external plugin with: ${installCommand}`;
+    return `plugin not installed: ${pluginId} — gateway will run without persistent memory until installed; install the official external plugin with: openclaw plugins install ${installSpec}`;
   }
-  return `plugin not installed: ${pluginId} — install the official external plugin with: ${installCommand}`;
+  return `plugin not installed: ${pluginId} — install the official external plugin with: openclaw plugins install ${installSpec}`;
 }
 
 function asJsonSchemaLike(value: unknown): JsonSchemaLike | null {

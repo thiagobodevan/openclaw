@@ -255,44 +255,8 @@ describe("resolveInstallableChannelPlugin", () => {
     expect(mocks.ensureChannelSetupPluginInstalled).toHaveBeenCalledTimes(1);
     const installRequest = firstMockArg(mocks.ensureChannelSetupPluginInstalled) as {
       entry?: ChannelPluginCatalogEntry;
-      acknowledgeNonClawHubInstall?: boolean;
     };
     expect(installRequest?.entry).toBe(catalogEntry);
-    expect(installRequest?.acknowledgeNonClawHubInstall).toBeUndefined();
     expect(result.pluginInstalled).toBe(true);
-  });
-
-  it("passes non-ClawHub acknowledgement into channel setup plugin installation", async () => {
-    const catalogEntry = createCatalogEntry({
-      id: "demo-directory",
-      pluginId: "@demo/directory",
-      origin: "bundled",
-    });
-
-    mocks.listChannelPluginCatalogEntries.mockReturnValue([catalogEntry]);
-    mocks.loadChannelSetupPluginRegistrySnapshotForChannel.mockReturnValue({
-      channels: [],
-      channelSetups: [],
-    });
-    mocks.ensureChannelSetupPluginInstalled.mockResolvedValueOnce({
-      cfg: { plugins: { entries: { "@demo/directory": { enabled: true } } } },
-      installed: true,
-      pluginId: "@demo/directory",
-      status: "installed",
-    });
-
-    await resolveInstallableChannelPlugin({
-      cfg: { plugins: { enabled: true } },
-      runtime: {} as never,
-      rawChannel: "demo-directory",
-      allowInstall: true,
-      acknowledgeNonClawHubInstall: true,
-    });
-
-    expect(mocks.ensureChannelSetupPluginInstalled).toHaveBeenCalledTimes(1);
-    const installRequest = firstMockArg(mocks.ensureChannelSetupPluginInstalled) as {
-      acknowledgeNonClawHubInstall?: boolean;
-    };
-    expect(installRequest.acknowledgeNonClawHubInstall).toBe(true);
   });
 });

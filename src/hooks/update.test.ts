@@ -38,61 +38,6 @@ describe("updateNpmInstalledHookPacks", () => {
     installHooksFromNpmSpecMock.mockReset();
   });
 
-  it("skips live npm updates when non-ClawHub install approval is absent", async () => {
-    const config = createHookInstallConfig({
-      hookId: "demo-hooks",
-      spec: "@openclaw/demo-hooks",
-    });
-
-    const result = await updateNpmInstalledHookPacks({
-      config,
-      hookIds: ["demo-hooks"],
-      allowNonClawHubInstall: false,
-    });
-
-    expect(installHooksFromNpmSpecMock).not.toHaveBeenCalled();
-    expect(result.changed).toBe(false);
-    expect(result.outcomes).toEqual([
-      {
-        hookId: "demo-hooks",
-        status: "skipped",
-        code: "non_clawhub_install_acknowledgement_required",
-        message:
-          'Skipped non-ClawHub update for hook pack "demo-hooks" from @openclaw/demo-hooks; explicit install acknowledgement is required.',
-      },
-    ]);
-  });
-
-  it("uses per-pack approval before a live npm update", async () => {
-    installHooksFromNpmSpecMock.mockResolvedValue({
-      ok: true,
-      hookPackId: "demo-hooks",
-      hooks: ["demo"],
-      targetDir: "/tmp/hooks/demo-hooks",
-      version: "1.2.3",
-    });
-    const onNonClawHubInstall = vi.fn(async () => true);
-    const config = createHookInstallConfig({
-      hookId: "demo-hooks",
-      spec: "@openclaw/demo-hooks",
-    });
-
-    const result = await updateNpmInstalledHookPacks({
-      config,
-      hookIds: ["demo-hooks"],
-      allowNonClawHubInstall: false,
-      onNonClawHubInstall,
-    });
-
-    expect(onNonClawHubInstall).toHaveBeenCalledWith({
-      hookId: "demo-hooks",
-      source: "npm",
-      spec: "@openclaw/demo-hooks",
-    });
-    expect(installHooksFromNpmSpecMock).toHaveBeenCalledOnce();
-    expect(result.changed).toBe(true);
-  });
-
   it("aborts exact pinned hook pack updates on integrity drift by default", async () => {
     const warn = vi.fn();
     installHooksFromNpmSpecMock.mockImplementation(

@@ -1,55 +1,24 @@
-import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
+import {
+  formatNonClawHubInstallWarning,
+  NON_CLAWHUB_INSTALL_ACK_FLAG,
+  type NonClawHubInstallSourceClass,
+} from "../plugins/install-provenance.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { promptYesNo } from "./prompt.js";
 
-export const NON_CLAWHUB_INSTALL_ACK_FLAG = "--acknowledge-non-clawhub-install";
-
-export type NonClawHubInstallSourceClass =
-  | "git"
-  | "local-archive"
-  | "local-path"
-  | "marketplace"
-  | "npm"
-  | "npm-pack";
+export {
+  formatNonClawHubInstallWarning,
+  NON_CLAWHUB_INSTALL_ACK_FLAG,
+  type NonClawHubInstallSourceClass,
+} from "../plugins/install-provenance.js";
 
 export type NonClawHubInstallAcknowledgementOptions = {
   acknowledgeNonClawHubInstall?: boolean;
 };
 
-export type NonClawHubInstallAcknowledgementRequest = {
-  pluginId: string;
-  sourceClass: NonClawHubInstallSourceClass;
-  spec: string;
-};
-
-const sourceClassLabels: Record<NonClawHubInstallSourceClass, string> = {
-  git: "Git repository",
-  "local-archive": "local archive",
-  "local-path": "local path",
-  marketplace: "marketplace source",
-  npm: "npm registry",
-  "npm-pack": "local npm-pack archive",
-};
-
 function canPromptForNonClawHubInstall(): boolean {
   return process.stdin.isTTY && process.stdout.isTTY;
-}
-
-function formatSourceClass(sourceClass: NonClawHubInstallSourceClass): string {
-  return sourceClassLabels[sourceClass];
-}
-
-export function formatNonClawHubInstallWarning(params: {
-  sourceClass: NonClawHubInstallSourceClass;
-  spec: string;
-}): string {
-  const sourceLabel = formatSourceClass(params.sourceClass);
-  const spec = sanitizeTerminalText(params.spec);
-  return [
-    `WARNING - Installing plugin from ${sourceLabel}: ${spec}`,
-    "This source is outside ClawHub review and trust metadata. Only continue if you trust the publisher, package contents, and install source.",
-  ].join("\n");
 }
 
 export async function confirmNonClawHubInstall(params: {

@@ -40,7 +40,6 @@ pack_fixture_plugin "$npm_pack_dir" /tmp/demo-corrupt-plugin.tgz demo-corrupt-pl
 start_npm_fixture_registry "@openclaw/demo-corrupt-plugin" "0.0.1" /tmp/demo-corrupt-plugin.tgz "$npm_registry_dir"
 
 echo "Installing managed external plugin..."
-# This command runs against the published baseline, which predates candidate-only flags.
 node "$entry" plugins install "npm:@openclaw/demo-corrupt-plugin@0.0.1" >/tmp/openclaw-corrupt-plugin-install.log 2>&1
 node "$entry" plugins inspect demo-corrupt-plugin --runtime --json >/tmp/openclaw-corrupt-plugin-before.json
 unset NPM_CONFIG_REGISTRY npm_config_registry
@@ -91,7 +90,6 @@ if [ "$update_status" -ne 0 ]; then
     openclaw_e2e_maybe_timeout "${update_timeout_seconds}s" \
     node "$entry" update \
     --yes \
-    --acknowledge-non-clawhub-install \
     --no-restart \
     --timeout "$update_step_timeout_seconds" \
     --json \

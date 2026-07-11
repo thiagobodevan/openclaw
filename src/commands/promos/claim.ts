@@ -2,10 +2,6 @@
 import { sanitizeTerminalText } from "../../../packages/terminal-core/src/safe-text.js";
 import { hasAvailableAuthForProvider } from "../../agents/model-auth.js";
 import { formatCliCommand } from "../../cli/command-format.js";
-import {
-  confirmNonClawHubInstall,
-  type NonClawHubInstallAcknowledgementRequest,
-} from "../../cli/non-clawhub-install-acknowledgement.js";
 import { promptYesNo } from "../../cli/prompt.js";
 import { readConfigFileSnapshot, replaceConfigFile } from "../../config/config.js";
 import { formatConfigIssueLines } from "../../config/issue-format.js";
@@ -40,7 +36,6 @@ import {
 } from "../models/shared.js";
 
 export type PromosClaimOptions = {
-  acknowledgeNonClawHubInstall?: boolean;
   apiKey?: string;
   setDefault?: boolean;
 };
@@ -261,17 +256,13 @@ async function ensureProviderAuth(params: {
       `Auth choice "${catalogEntry.choiceId}" does not accept --api-key; run without it to authenticate interactively.`,
     );
   }
-  const providerOptions = {
-    ...(apiKey && catalogEntry.optionKey ? { [catalogEntry.optionKey]: apiKey } : {}),
-    ...(opts.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
-  };
   const applied = await applyAuthChoiceLoadedPluginProvider({
     authChoice: catalogEntry.choiceId,
     config: structuredClone(snapshot.sourceConfig ?? snapshot.config) as OpenClawConfig,
     prompter: createClackPrompter(),
     runtime,
     setDefaultModel: false,
-    opts: Object.keys(providerOptions).length > 0 ? providerOptions : undefined,
+    opts: apiKey && catalogEntry.optionKey ? { [catalogEntry.optionKey]: apiKey } : undefined,
   });
   // The apply flow can return success-shaped results without usable auth
   // (cancelled retrySelection, disabled/unresolvable plugin). Revalidate
@@ -337,7 +328,7 @@ export async function promosClaimCommand(
   const registered: string[] = [];
   const skippedAliases: string[] = [];
   const invalidAliases: string[] = [];
-  await updateConfig(async (cfg, context) => {
+  const updated = await updateConfig((cfg, context) => {
     let base = cfg;
     // The credential-reuse path skips the auth flow, which is where plugin
     // enablement normally happens. Enable (or refuse) the provider plugin here
@@ -386,35 +377,12 @@ export async function promosClaimCommand(
       },
     };
     if (makeDefault && suggested) {
-      const candidate = applyDefaultModelPrimaryUpdate({
+      next = applyDefaultModelPrimaryUpdate({
         cfg: next,
         resolveCfg: context.runtimeConfig,
         modelRaw: suggested.modelRef,
         field: "model",
       });
-      const onNonClawHubInstall = ({
-        sourceClass,
-        spec,
-      }: NonClawHubInstallAcknowledgementRequest) =>
-        confirmNonClawHubInstall({ runtime, sourceClass, spec });
-      const repairOptions = {
-        cfg: candidate,
-        model: suggested.modelRef,
-        ...(opts.acknowledgeNonClawHubInstall
-          ? { acknowledgeNonClawHubInstall: true }
-          : { onNonClawHubInstall }),
-      };
-      const repaired = await repairCodexRuntimePluginInstallForModelSelection(repairOptions);
-      const copilotRepaired =
-        await repairCopilotRuntimePluginInstallForModelSelection(repairOptions);
-      for (const warning of [...repaired.warnings, ...copilotRepaired.warnings]) {
-        runtime.error?.(warning);
-      }
-      if (repaired.failed || copilotRepaired.failed) {
-        makeDefault = false;
-      } else {
-        next = candidate;
-      }
     }
     return next;
   });
@@ -430,6 +398,23 @@ export async function promosClaimCommand(
     claimedAtMs: Date.now(),
   });
   markPromotionSlugsNotified([promotion.slug]);
+
+  if (makeDefault && suggested) {
+    // `models set` repairs provider runtime plugin installs (Codex/Copilot)
+    // after a default change; a promo-selected default needs the same repair
+    // or an openai/* default can fail at execution time.
+    const repaired = await repairCodexRuntimePluginInstallForModelSelection({
+      cfg: updated,
+      model: suggested.modelRef,
+    });
+    const copilotRepaired = await repairCopilotRuntimePluginInstallForModelSelection({
+      cfg: updated,
+      model: suggested.modelRef,
+    });
+    for (const warning of [...repaired.warnings, ...copilotRepaired.warnings]) {
+      runtime.error?.(warning);
+    }
+  }
 
   runtime.log(`Claimed "${sanitizeTerminalText(promotion.title)}".`);
   for (const key of registered) {

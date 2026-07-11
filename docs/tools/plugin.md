@@ -62,10 +62,11 @@ bundled, official external, and source-only plugins, see
     ```
 
     Treat plugin installs like running code. Prefer pinned versions for
-    reproducible production installs. Sources outside ClawHub are not
-    ClawHub-reviewed; noninteractive installs from npm, git, local paths or
-    archives, `npm-pack:`, or marketplace sources require
-    `--acknowledge-non-clawhub-install` after you review and trust the source.
+    reproducible production installs. ClawHub packages and OpenClaw's
+    bundled/official catalog are trusted sources. New arbitrary npm, git,
+    local path/archive, `npm-pack:`, or marketplace sources require
+    `--acknowledge-non-clawhub-install` in noninteractive installs after you
+    review and trust the source.
 
   </Step>
 
@@ -78,7 +79,7 @@ bundled, official external, and source-only plugins, see
     ```
 
     If `plugins.allow` is set, the installed plugin id must be in that list
-    before the plugin can load. The install command adds the installed
+    before the plugin can load. `openclaw plugins install` adds the installed
     id to an existing `plugins.allow` list and removes the same id from
     `plugins.deny` so the explicit install can load after restart.
 

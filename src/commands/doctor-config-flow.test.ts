@@ -1608,7 +1608,6 @@ describe("doctor config flow", () => {
       changeNotes: ["Migrated 1 sidecar-backed Codex OAuth profile."],
       warningNotes: [],
       authProfilesRepaired: true,
-      failedConfiguredPluginInstallIds: [],
     }));
 
     await runDoctorConfigWithInput({
@@ -1636,7 +1635,6 @@ describe("doctor config flow", () => {
       changeNotes: ["Removed stale OAuth auth profile shadow openai-codex."],
       warningNotes: [],
       authProfilesRepaired: true,
-      failedConfiguredPluginInstallIds: [],
     }));
 
     await expect(
@@ -1657,24 +1655,6 @@ describe("doctor config flow", () => {
       params: { refresh: true },
       timeoutMs: 3000,
     });
-  });
-
-  it("carries failed configured plugin installs into later doctor phases", async () => {
-    runDoctorRepairSequenceMock.mockImplementation(async (params: { state: unknown }) => ({
-      state: params.state,
-      changeNotes: [],
-      warningNotes: ['Skipped missing configured plugin "matrix".'],
-      authProfilesRepaired: false,
-      failedConfiguredPluginInstallIds: ["matrix"],
-    }));
-
-    const result = await runDoctorConfigWithInput({
-      config: {},
-      repair: true,
-      run: loadAndMaybeMigrateDoctorConfig,
-    });
-
-    expect(result.failedConfiguredPluginInstallIds).toEqual(["matrix"]);
   });
 
   it("previews and repairs hooks token reuse of gateway auth", async () => {

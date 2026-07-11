@@ -34,7 +34,6 @@ export type ChannelsCapabilitiesOptions = {
   target?: string;
   timeout?: string;
   json?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
 };
 
 type ChannelCapabilitiesReport = {
@@ -346,7 +345,6 @@ export async function channelsCapabilitiesCommand(
             runtime,
             rawChannel,
             allowInstall: true,
-            ...(opts.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
           });
           if (resolved.configChanged) {
             cfg = await persistResolvedChannelPluginConfig({

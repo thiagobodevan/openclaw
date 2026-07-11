@@ -67,7 +67,7 @@ openclaw plugins install clawhub:<package>@beta
 # Install from npm.
 openclaw plugins install npm:<package> --acknowledge-non-clawhub-install
 openclaw plugins install npm:@scope/openclaw-plugin@1.2.3 --acknowledge-non-clawhub-install
-openclaw plugins install npm:@openclaw/codex --acknowledge-non-clawhub-install
+openclaw plugins install npm:@openclaw/codex
 
 # Install from a local npm-pack artifact.
 openclaw plugins install npm-pack:<path.tgz> --acknowledge-non-clawhub-install
@@ -81,10 +81,11 @@ openclaw plugins install --link ./my-plugin --acknowledge-non-clawhub-install
 Bare package specs install from npm during the launch cutover, unless the
 name matches a bundled or official plugin id, in which case OpenClaw uses
 that local/official copy instead. Use `clawhub:`, `npm:`, `git:`, or
-`npm-pack:` for deterministic source selection. Sources outside ClawHub are
-not ClawHub-reviewed; noninteractive installs from npm, git, local paths or
-archives, `npm-pack:`, or marketplace sources require
-`--acknowledge-non-clawhub-install` after you review and trust the source.
+`npm-pack:` for deterministic source selection. OpenClaw's bundled and official
+catalog packages are trusted alongside ClawHub packages. New arbitrary npm,
+git, local path/archive, `npm-pack:`, or marketplace sources require
+`--acknowledge-non-clawhub-install` in noninteractive installs after you review
+and trust the source.
 
 Use `--force` only to overwrite an existing install target from a different
 source. For routine upgrades of a tracked npm, ClawHub, or hook-pack install,

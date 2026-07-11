@@ -476,14 +476,6 @@ describe("channelsAddCommand", () => {
     expect(channelWizardMocks.prompter.outro).toHaveBeenCalledWith("No channel changes made.");
   });
 
-  it("forwards non-ClawHub install acknowledgement into guided channel setup", async () => {
-    configMocks.readConfigFileSnapshot.mockResolvedValue({ ...baseConfigSnapshot });
-
-    await channelsAddCommand({ acknowledgeNonClawHubInstall: true }, runtime, { hasFlags: false });
-
-    expect(setupOptions().acknowledgeNonClawHubInstall).toBe(true);
-  });
-
   it("preselects an installable catalog channel in guided setup", async () => {
     const config: OpenClawConfig = { channels: {} };
     configMocks.readConfigFileSnapshot.mockResolvedValue({
@@ -698,7 +690,6 @@ describe("channelsAddCommand", () => {
         channel: "external-chat",
         account: "default",
         token: "tenant-scoped",
-        acknowledgeNonClawHubInstall: true,
       },
       runtime,
       { hasFlags: true },
@@ -706,7 +697,6 @@ describe("channelsAddCommand", () => {
 
     expect(installCall().entry).toBe(catalogEntry);
     expect(installCall().promptInstall).toBe(false);
-    expect(installCall().acknowledgeNonClawHubInstall).toBe(true);
     expect(loadChannelSetupPluginRegistrySnapshotForChannel).toHaveBeenCalledTimes(1);
     expect(snapshotCall().forceSetupOnlyChannelPlugins).toBe(true);
     const refreshedChannels = requireRecord(

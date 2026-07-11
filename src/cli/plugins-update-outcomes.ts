@@ -1,9 +1,6 @@
 // User-facing logging for plugin and hook-pack update outcomes.
 import { theme } from "../../packages/terminal-core/src/theme.js";
-import {
-  isClawHubTrustSkippedOutcome,
-  isNonClawHubInstallAcknowledgementSkippedOutcome,
-} from "../plugins/update.js";
+import { isClawHubTrustSkippedOutcome } from "../plugins/update.js";
 
 type PluginUpdateCliOutcome = {
   status: string;
@@ -30,10 +27,7 @@ export function logPluginUpdateOutcomes(params: {
       continue;
     }
     if (outcome.status === "skipped") {
-      if (
-        isClawHubTrustSkippedOutcome(outcome) ||
-        isNonClawHubInstallAcknowledgementSkippedOutcome(outcome)
-      ) {
+      if (isClawHubTrustSkippedOutcome(outcome)) {
         hasErrors = true;
       }
       params.log(theme.warn(outcome.message));

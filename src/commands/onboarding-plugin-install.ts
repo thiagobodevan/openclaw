@@ -9,13 +9,8 @@ import path from "node:path";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
-import {
-  formatNonClawHubInstallWarning,
-  NON_CLAWHUB_INSTALL_ACK_FLAG,
-} from "../cli/non-clawhub-install-acknowledgement.js";
 import { resolveBundledInstallPlanForCatalogEntry } from "../cli/plugin-install-plan.js";
 import { invalidatePluginRuntimeDiscoveryAfterConfigMutation } from "../cli/plugins-registry-refresh.js";
-import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import { assertConfigWriteAllowedInCurrentMode } from "../config/nix-mode-write-guard.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { parseClawHubPluginSpec } from "../infra/clawhub-spec.js";
@@ -59,7 +54,7 @@ import type { RuntimeEnv } from "../runtime.js";
 import { withTimeout } from "../utils/with-timeout.js";
 import { VERSION } from "../version.js";
 import { t } from "../wizard/i18n/index.js";
-import { WizardCancelledError, type WizardPrompter } from "../wizard/prompts.js";
+import type { WizardPrompter } from "../wizard/prompts.js";
 
 type InstallChoice = "clawhub" | "npm" | "local" | "skip";
 type InstallPluginFromClawHubResult = Awaited<
@@ -709,44 +704,6 @@ function logInstallWarningWithLineBreaks(runtime: RuntimeEnv, message: string): 
   runtime.log?.(`${sanitized}\n`);
 }
 
-async function acknowledgeOnboardingNonClawHubSource(params: {
-  acknowledgeNonClawHubInstall?: boolean;
-  prompter: WizardPrompter;
-  runtime: RuntimeEnv;
-  sourceClass: "local-path" | "npm" | "npm-pack";
-  spec: string;
-  installCommandSpec: string;
-}): Promise<boolean> {
-  const nonClawHubWarning = formatNonClawHubInstallWarning({
-    sourceClass: params.sourceClass,
-    spec: params.spec,
-  });
-  params.runtime.log?.(nonClawHubWarning);
-  if (params.acknowledgeNonClawHubInstall) {
-    return true;
-  }
-  let acknowledged = false;
-  try {
-    acknowledged = await params.prompter.confirm({
-      message: "Install this non-ClawHub plugin source?",
-      initialValue: false,
-    });
-  } catch (error) {
-    if (error instanceof WizardCancelledError) {
-      throw error;
-    }
-    params.runtime.error?.(error instanceof Error ? error.message : String(error));
-  }
-  if (!acknowledged) {
-    const installCommand = `openclaw plugins install ${quoteCliArg(params.installCommandSpec)} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
-    params.runtime.error?.(
-      `Install cancelled; install the plugin with ${sanitizeTerminalText(installCommand)} after reviewing the source, then rerun setup.`,
-    );
-    return false;
-  }
-  return true;
-}
-
 function isReviewRequiredClawHubTrustWarning(message: string): boolean {
   return message.includes("WARNING - ClawHub found security risks");
 }
@@ -904,33 +861,11 @@ async function installPluginFromOverride(params: {
   override: PluginInstallOverride;
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
-  acknowledgeNonClawHubInstall?: boolean;
 }): Promise<OnboardingPluginInstallResult> {
   const { entry, prompter, runtime } = params;
   runtime.log?.(
     `Using plugin install override for ${sanitizeTerminalText(entry.pluginId)} from ${PLUGIN_INSTALL_OVERRIDES_ENV} (${ALLOW_PLUGIN_INSTALL_OVERRIDES_ENV}=1).`,
   );
-  const displaySpec =
-    params.override.kind === "npm"
-      ? params.override.spec
-      : `npm-pack:${params.override.archivePath}`;
-  if (
-    !(await acknowledgeOnboardingNonClawHubSource({
-      acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall,
-      prompter,
-      runtime,
-      sourceClass: params.override.kind === "npm" ? "npm" : "npm-pack",
-      spec: displaySpec,
-      installCommandSpec: displaySpec,
-    }))
-  ) {
-    return {
-      cfg: params.cfg,
-      installed: false,
-      pluginId: entry.pluginId,
-      status: "failed",
-    };
-  }
   // Overrides are explicit operator/developer input and intentionally bypass
   // catalog trust defaults while still recording the resulting install source.
   const installOutcome =
@@ -951,6 +886,10 @@ async function installPluginFromOverride(params: {
           runtime,
         });
 
+  const displaySpec =
+    params.override.kind === "npm"
+      ? params.override.spec
+      : `npm-pack:${params.override.archivePath}`;
   if (installOutcome.status === "timed_out") {
     await prompter.note(
       formatPluginInstallTimedOutNote(sanitizeTerminalText(displaySpec)),
@@ -1160,7 +1099,6 @@ export async function ensureOnboardingPluginInstalled(params: {
   workspaceDir?: string;
   promptInstall?: boolean;
   autoConfirmSingleSource?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
 }): Promise<OnboardingPluginInstallResult> {
   const { entry, prompter, runtime, workspaceDir } = params;
   let next = params.cfg;
@@ -1175,7 +1113,6 @@ export async function ensureOnboardingPluginInstalled(params: {
       override: installOverride,
       prompter,
       runtime,
-      acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall,
     });
   }
   const allowLocal = hasGitWorkspace(workspaceDir);
@@ -1248,25 +1185,6 @@ export async function ensureOnboardingPluginInstalled(params: {
   assertConfigWriteAllowedInCurrentMode();
 
   if (choice === "local" && localPath) {
-    const isBundledLocalPath = pathsReferToSameDirectory(localPath, bundledLocalPath);
-    if (
-      !isBundledLocalPath &&
-      !(await acknowledgeOnboardingNonClawHubSource({
-        acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall,
-        prompter,
-        runtime,
-        sourceClass: "local-path",
-        spec: localPath,
-        installCommandSpec: localPath,
-      }))
-    ) {
-      return {
-        cfg: next,
-        installed: false,
-        pluginId: entry.pluginId,
-        status: "failed",
-      };
-    }
     // Bundled plugin sources are already part of the host checkout; enabling is
     // enough and no install record/load path should be added for that case.
     const enableResult = await applyPluginEnablement({
@@ -1284,7 +1202,7 @@ export async function ensureOnboardingPluginInstalled(params: {
         status: "failed",
       };
     }
-    if (isBundledLocalPath) {
+    if (pathsReferToSameDirectory(localPath, bundledLocalPath)) {
       return await markOnboardingPluginInstalled(
         {
           cfg: enableResult.config,
@@ -1427,24 +1345,6 @@ export async function ensureOnboardingPluginInstalled(params: {
     };
   }
 
-  if (
-    !(await acknowledgeOnboardingNonClawHubSource({
-      acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall,
-      prompter,
-      runtime,
-      sourceClass: "npm",
-      spec: npmInstallSpec,
-      installCommandSpec: `npm:${npmInstallSpec}`,
-    }))
-  ) {
-    return {
-      cfg: next,
-      installed: false,
-      pluginId: entry.pluginId,
-      status: "failed",
-    };
-  }
-
   const installOutcome = await installPluginFromNpmSpecWithProgress({
     cfg: next,
     entry,
@@ -1533,25 +1433,6 @@ export async function ensureOnboardingPluginInstalled(params: {
       initialValue: true,
     });
     if (fallback) {
-      const isBundledLocalPath = pathsReferToSameDirectory(localPath, bundledLocalPath);
-      if (
-        !isBundledLocalPath &&
-        !(await acknowledgeOnboardingNonClawHubSource({
-          acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall,
-          prompter,
-          runtime,
-          sourceClass: "local-path",
-          spec: localPath,
-          installCommandSpec: localPath,
-        }))
-      ) {
-        return {
-          cfg: next,
-          installed: false,
-          pluginId: entry.pluginId,
-          status: "failed",
-        };
-      }
       const enableResult = await applyPluginEnablement({
         cfg: next,
         pluginId: entry.pluginId,
@@ -1567,7 +1448,7 @@ export async function ensureOnboardingPluginInstalled(params: {
           status: "failed",
         };
       }
-      if (isBundledLocalPath) {
+      if (pathsReferToSameDirectory(localPath, bundledLocalPath)) {
         return await markOnboardingPluginInstalled(
           {
             cfg: enableResult.config,

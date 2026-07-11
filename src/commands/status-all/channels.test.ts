@@ -48,11 +48,10 @@ vi.mock("../../plugins/official-external-plugin-repair-hints.js", () => ({
           channelId,
           label: "Feishu",
           installSpec: "@openclaw/feishu",
-          installCommand:
-            "openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install",
-          doctorFixCommand: "openclaw doctor --fix --acknowledge-non-clawhub-install",
+          installCommand: "openclaw plugins install @openclaw/feishu",
+          doctorFixCommand: "openclaw doctor --fix",
           repairHint:
-            "Install the official external plugin with: openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install, or run: openclaw doctor --fix --acknowledge-non-clawhub-install.",
+            "Install the official external plugin with: openclaw plugins install @openclaw/feishu, or run: openclaw doctor --fix.",
         }
       : null,
 }));
@@ -137,7 +136,7 @@ describe("buildChannelsTable", () => {
           enabled: true,
           state: "warn",
           detail:
-            "plugin not installed - run openclaw plugins install @openclaw/feishu --acknowledge-non-clawhub-install or openclaw doctor --fix --acknowledge-non-clawhub-install",
+            "plugin not installed - run openclaw plugins install @openclaw/feishu or openclaw doctor --fix",
         },
       ],
       details: [],

@@ -20,22 +20,6 @@ export type OfficialExternalPluginRepairHint = {
   repairHint: string;
 };
 
-const NON_CLAWHUB_INSTALL_ACK_FLAG = "--acknowledge-non-clawhub-install";
-
-function formatPluginInstallHintCommand(installSpec: string): string {
-  const command = `openclaw plugins install ${installSpec}`;
-  return installSpec.trim().toLowerCase().startsWith("clawhub:")
-    ? command
-    : `${command} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
-}
-
-function formatDoctorFixHintCommand(installSpec: string): string {
-  const command = "openclaw doctor --fix";
-  return installSpec.trim().toLowerCase().startsWith("clawhub:")
-    ? command
-    : `${command} ${NON_CLAWHUB_INSTALL_ACK_FLAG}`;
-}
-
 /** Resolves install/doctor commands for an official external plugin or channel id. */
 export function resolveOfficialExternalPluginRepairHint(
   pluginIdOrChannelId: string,
@@ -56,8 +40,8 @@ export function resolveOfficialExternalPluginRepairHint(
   const pluginId = resolveOfficialExternalPluginId(entry) ?? pluginIdOrChannelId.trim();
   const channelId = manifest?.channel?.id?.trim();
   const label = resolveOfficialExternalPluginLabel(entry);
-  const installCommand = formatPluginInstallHintCommand(installSpec);
-  const doctorFixCommand = formatDoctorFixHintCommand(installSpec);
+  const installCommand = `openclaw plugins install ${installSpec}`;
+  const doctorFixCommand = "openclaw doctor --fix";
   return {
     pluginId,
     ...(channelId ? { channelId } : {}),

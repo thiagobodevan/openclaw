@@ -736,6 +736,40 @@ describe("parseCrestodianOperation", () => {
     });
   });
 
+  it("does not require source acknowledgement for an official catalog plugin", async () => {
+    const tempDir = opTempDirs.make("crestodian-official-plugin-install-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
+    const { runtime } = createCrestodianTestRuntime();
+    const runPluginInstall = vi.fn(async (spec: string, pluginRuntime: RuntimeEnv) => {
+      pluginRuntime.log(`installed ${spec}`);
+    });
+
+    const result = await executeCrestodianOperation(
+      { kind: "plugin-install", spec: "brave" },
+      runtime,
+      { approved: true, deps: { runPluginInstall } },
+    );
+
+    expect(result.applied).toBe(true);
+    expect(requireFirstMockCall(runPluginInstall, "runPluginInstall")[0]).toBe("brave");
+  });
+
+  it("keeps explicit npm package semantics separate from official plugin ids", async () => {
+    const { runtime } = createCrestodianTestRuntime();
+    const runPluginInstall = vi.fn(async () => {});
+
+    const result = await executeCrestodianOperation(
+      { kind: "plugin-install", spec: "npm:brave" },
+      runtime,
+      { approved: true, deps: { runPluginInstall } },
+    );
+
+    expect(result.applied).toBe(false);
+    expect(result.message).toContain("Installing plugin from npm registry: npm:brave");
+    expect(result.message).toContain("--acknowledge-non-clawhub-install");
+    expect(runPluginInstall).not.toHaveBeenCalled();
+  });
+
   it("allows explicit npm package names that look like local plugin suffixes", async () => {
     const tempDir = opTempDirs.make("crestodian-plugin-install-npm-suffix-");
     setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);

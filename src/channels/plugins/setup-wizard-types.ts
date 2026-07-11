@@ -315,7 +315,6 @@ export type SetupChannelsOptions = {
   skipStatusNote?: boolean;
   skipDmPolicyPrompt?: boolean;
   skipConfirm?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
   quickstartDefaults?: boolean;
   initialSelection?: ChannelId[];
   secretInputMode?: "plaintext" | "ref";

@@ -21,11 +21,6 @@ export function registerMaintenanceCommands(program: Command) {
     .option("--repair", "Apply recommended repairs without prompting", false)
     .option("--fix", "Apply recommended repairs (alias for --repair)", false)
     .option("--force", "Apply aggressive repairs (overwrites custom service config)", false)
-    .option(
-      "--acknowledge-non-clawhub-install",
-      "Acknowledge non-ClawHub plugin repair installs without prompting",
-      false,
-    )
     .option("--non-interactive", "Run without prompts (safe migrations only)", false)
     .option("--generate-gateway-token", "Generate and configure a gateway token", false)
     .option(
@@ -59,8 +54,6 @@ export function registerMaintenanceCommands(program: Command) {
       [],
     )
     .action(async (opts) => {
-      const acknowledgeNonClawHubInstall =
-        opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true;
       if (opts.lint === true) {
         await runCommandWithRuntime(
           defaultRuntime,
@@ -98,7 +91,6 @@ export function registerMaintenanceCommands(program: Command) {
           yes: Boolean(opts.yes),
           repair: Boolean(opts.repair) || Boolean(opts.fix),
           force: Boolean(opts.force),
-          acknowledgeNonClawHubInstall,
           nonInteractive: Boolean(opts.nonInteractive),
           generateGatewayToken: Boolean(opts.generateGatewayToken),
           allowExec: Boolean(opts.allowExec),

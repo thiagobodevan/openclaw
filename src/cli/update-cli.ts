@@ -41,8 +41,6 @@ function inheritedUpdateTimeout(
 type CommanderUpdateOptions = Record<string, unknown> & {
   acknowledgeClawhubRisk?: boolean;
   acknowledgeClawHubRisk?: boolean;
-  acknowledgeNonClawhubInstall?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
   channel?: string;
   dryRun?: boolean;
   json?: boolean;
@@ -56,21 +54,10 @@ function normalizeCommanderClawHubRiskOption(opts: CommanderUpdateOptions): bool
   return opts.acknowledgeClawhubRisk === true || opts.acknowledgeClawHubRisk === true;
 }
 
-function normalizeCommanderNonClawHubInstallOption(opts: CommanderUpdateOptions): boolean {
-  return opts.acknowledgeNonClawhubInstall === true || opts.acknowledgeNonClawHubInstall === true;
-}
-
 function inheritedUpdateClawHubRisk(command?: Command): boolean {
   return Boolean(
     inheritOptionFromParent<boolean>(command, "acknowledgeClawhubRisk") ??
     inheritOptionFromParent<boolean>(command, "acknowledgeClawHubRisk"),
-  );
-}
-
-function inheritedUpdateNonClawHubInstall(command?: Command): boolean {
-  return Boolean(
-    inheritOptionFromParent<boolean>(command, "acknowledgeNonClawhubInstall") ??
-    inheritOptionFromParent<boolean>(command, "acknowledgeNonClawHubInstall"),
   );
 }
 
@@ -85,11 +72,6 @@ function registerUpdateFinalizationCommand(update: Command, name: string, hidden
     .option(
       "--acknowledge-clawhub-risk",
       "Acknowledge ClawHub release trust warnings during post-update plugin sync",
-      false,
-    )
-    .option(
-      "--acknowledge-non-clawhub-install",
-      "Acknowledge non-ClawHub plugin repair installs during post-update plugin sync",
       false,
     )
     .option("--no-restart", "Accepted for update command parity; repair never restarts")
@@ -116,9 +98,6 @@ function registerUpdateFinalizationCommand(update: Command, name: string, hidden
           restart: false,
           acknowledgeClawHubRisk:
             normalizeCommanderClawHubRiskOption(opts) || inheritedUpdateClawHubRisk(actionCommand),
-          acknowledgeNonClawHubInstall:
-            normalizeCommanderNonClawHubInstallOption(opts) ||
-            inheritedUpdateNonClawHubInstall(actionCommand),
         });
       } catch (err) {
         defaultRuntime.error(String(err));
@@ -148,11 +127,6 @@ export function registerUpdateCli(program: Command) {
       "Acknowledge ClawHub release trust warnings during post-update plugin sync",
       false,
     )
-    .option(
-      "--acknowledge-non-clawhub-install",
-      "Acknowledge non-ClawHub plugin repair installs during post-update plugin sync",
-      false,
-    )
     .addHelpText("after", () => {
       const examples = [
         ["openclaw update", "Update a source checkout (git)"],
@@ -170,10 +144,6 @@ export function registerUpdateCli(program: Command) {
         ["openclaw update --yes", "Non-interactive (accept downgrade prompts)"],
         ["openclaw update repair", "Repair stranded post-update plugin state"],
         ["openclaw update --acknowledge-clawhub-risk", "Acknowledge ClawHub plugin trust warnings"],
-        [
-          "openclaw update --acknowledge-non-clawhub-install",
-          "Acknowledge non-ClawHub plugin repair installs",
-        ],
         ["openclaw update wizard", "Interactive update wizard"],
         ["openclaw --update", "Shorthand for openclaw update"],
       ] as const;
@@ -194,7 +164,6 @@ ${theme.heading("Switch channels:")}
 ${theme.heading("Non-interactive:")}
   - Use --yes to accept downgrade prompts
   - Use --acknowledge-clawhub-risk only after reviewing ClawHub plugin trust warnings
-  - Use --acknowledge-non-clawhub-install only after reviewing non-ClawHub plugin sources
   - Combine with --channel/--tag/--no-restart/--json/--timeout as needed
   - Use --dry-run to preview actions without writing config/installing/restarting
 
@@ -220,7 +189,6 @@ ${theme.muted("Docs:")} ${formatDocsLink("/cli/update", "docs.openclaw.ai/cli/up
           timeout: opts.timeout,
           yes: Boolean(opts.yes),
           acknowledgeClawHubRisk: normalizeCommanderClawHubRiskOption(opts),
-          acknowledgeNonClawHubInstall: normalizeCommanderNonClawHubInstallOption(opts),
         });
       } catch (err) {
         defaultRuntime.error(String(err));
@@ -235,11 +203,6 @@ ${theme.muted("Docs:")} ${formatDocsLink("/cli/update", "docs.openclaw.ai/cli/up
     .command("wizard")
     .description("Interactive update wizard")
     .option("--timeout <seconds>", "Timeout for each update step in seconds (default: 1800)")
-    .option(
-      "--acknowledge-non-clawhub-install",
-      "Acknowledge non-ClawHub plugin repair installs during post-update plugin sync",
-      false,
-    )
     .addHelpText(
       "after",
       `\n${theme.muted("Docs:")} ${formatDocsLink("/cli/update", "docs.openclaw.ai/cli/update")}\n`,
@@ -248,9 +211,6 @@ ${theme.muted("Docs:")} ${formatDocsLink("/cli/update", "docs.openclaw.ai/cli/up
       try {
         await updateWizardCommand({
           timeout: inheritedUpdateTimeout(opts, command),
-          acknowledgeNonClawHubInstall:
-            normalizeCommanderNonClawHubInstallOption(opts) ||
-            inheritedUpdateNonClawHubInstall(command),
         });
       } catch (err) {
         defaultRuntime.error(String(err));

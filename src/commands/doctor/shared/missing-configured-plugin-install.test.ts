@@ -504,7 +504,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           matrix: { enabled: true, homeserver: "https://matrix.example.org" },
@@ -535,41 +534,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       'Installed missing configured plugin "matrix" from @openclaw/plugin-matrix@1.2.3.',
     ]);
     expect(result.warnings).toStrictEqual([]);
-  });
-
-  it("skips npm-backed doctor repair without non-ClawHub acknowledgement", async () => {
-    mocks.listChannelPluginCatalogEntries.mockReturnValue([
-      {
-        id: "matrix",
-        pluginId: "matrix",
-        meta: { label: "Matrix" },
-        install: {
-          npmSpec: "@openclaw/plugin-matrix@1.2.3",
-          expectedIntegrity: "sha512-test",
-        },
-        trustedSourceLinkedOfficialInstall: true,
-      },
-    ]);
-
-    const { repairMissingConfiguredPluginInstalls } =
-      await import("./missing-configured-plugin-install.js");
-    const result = await repairMissingConfiguredPluginInstalls({
-      cfg: {
-        channels: {
-          matrix: { enabled: true, homeserver: "https://matrix.example.org" },
-        },
-      },
-      env: {},
-    });
-
-    expect(mocks.installPluginFromClawHub).not.toHaveBeenCalled();
-    expect(mocks.installPluginFromNpmSpec).not.toHaveBeenCalled();
-    expect(mocks.writePersistedInstalledPluginIndexInstallRecords).not.toHaveBeenCalled();
-    expect(result.changes).toEqual([]);
-    expect(result.failedPluginIds).toEqual(["matrix"]);
-    expect(result.warnings).toEqual([
-      'Skipped installing missing configured plugin "matrix" from npm @openclaw/plugin-matrix@1.2.3: non-ClawHub install acknowledgement is required. Review the source, then run `openclaw plugins install npm:@openclaw/plugin-matrix@1.2.3 --acknowledge-non-clawhub-install` or rerun repair with --acknowledge-non-clawhub-install.',
-    ]);
   });
 
   it("uses an explicit ClawHub install spec before npm", async () => {
@@ -619,7 +583,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           matrix: { enabled: true, homeserver: "https://matrix.example.org" },
@@ -663,7 +626,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           matrix: { enabled: true, homeserver: "https://matrix.example.org" },
@@ -708,7 +670,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -751,7 +712,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           matrix: { enabled: true, homeserver: "https://matrix.example.org" },
@@ -800,7 +760,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       env: { MATRIX_HOMESERVER: "https://matrix.example.org" },
     });
@@ -849,7 +808,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingPluginInstallsForIds } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingPluginInstallsForIds({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       pluginIds: [],
       channelIds: ["matrix"],
@@ -889,7 +847,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingPluginInstallsForIds } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingPluginInstallsForIds({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       pluginIds: [],
       channelIds: ["matrix"],
@@ -933,7 +890,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingPluginInstallsForIds } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingPluginInstallsForIds({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       pluginIds: [],
       channelIds: ["twitch"],
@@ -980,7 +936,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1027,7 +982,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         update: { channel: "extended-stable" },
         plugins: { entries: { "diagnostics-otel": { enabled: true } } },
@@ -1085,7 +1039,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         agents: {
           defaults: {
@@ -1136,7 +1089,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         acp: {
           backend: "acpx",
@@ -1170,7 +1122,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1208,7 +1159,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg,
       env: {},
     });
@@ -1234,7 +1184,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1281,7 +1230,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1342,7 +1290,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1418,7 +1365,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1472,7 +1418,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       env: {},
     });
@@ -1547,7 +1492,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       const { repairMissingConfiguredPluginInstalls } =
         await import("./missing-configured-plugin-install.js");
       const result = await repairMissingConfiguredPluginInstalls({
-        acknowledgeNonClawHubInstall: true,
         cfg: {
           plugins: {
             entries: {
@@ -1592,7 +1536,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1657,7 +1600,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1723,7 +1665,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1792,7 +1733,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1820,54 +1760,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       resolvedVersion: "1.2.3",
       resolvedSpec: "@openclaw/matrix@1.2.3",
     });
-  });
-
-  it("does not adopt an existing npm payload during post-core repair without non-ClawHub acknowledgement", async () => {
-    const npmRoot = makeTempDir();
-    const packageDir = path.join(npmRoot, "node_modules", "@openclaw", "matrix");
-    fs.mkdirSync(packageDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(packageDir, "package.json"),
-      JSON.stringify({ name: "@openclaw/matrix", version: "1.2.3" }),
-    );
-    mocks.resolveDefaultPluginNpmDir.mockReturnValue(npmRoot);
-    mocks.listChannelPluginCatalogEntries.mockReturnValue([
-      {
-        id: "matrix",
-        pluginId: "matrix",
-        meta: { label: "Matrix" },
-        install: {
-          clawhubSpec: "clawhub:@openclaw/matrix",
-          npmSpec: "@openclaw/matrix",
-        },
-      },
-    ]);
-
-    const { repairMissingConfiguredPluginInstalls } =
-      await import("./missing-configured-plugin-install.js");
-    const result = await repairMissingConfiguredPluginInstalls({
-      cfg: {
-        plugins: {
-          entries: {
-            matrix: { enabled: true },
-          },
-        },
-        channels: {
-          matrix: { enabled: true },
-        },
-      },
-      env: {
-        OPENCLAW_UPDATE_POST_CORE_CONVERGENCE: "1",
-      },
-    });
-
-    expect(mocks.installPluginFromClawHub).not.toHaveBeenCalled();
-    expect(mocks.installPluginFromNpmSpec).not.toHaveBeenCalled();
-    expect(result.records.matrix).toBeUndefined();
-    expect(result.failedPluginIds).toEqual(["matrix"]);
-    expect(result.warnings).toEqual([
-      'Skipped installing missing configured plugin "matrix" from npm @openclaw/matrix: non-ClawHub install acknowledgement is required. Review the source, then run `openclaw plugins install npm:@openclaw/matrix --acknowledge-non-clawhub-install` or rerun repair with --acknowledge-non-clawhub-install.',
-    ]);
   });
 
   it("passes the post-core compatibility host version to ClawHub repair", async () => {
@@ -1908,7 +1800,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -1973,7 +1864,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: { discord: { enabled: true } },
@@ -2020,7 +1910,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           discord: { enabled: true, token: "secret" },
@@ -2063,7 +1952,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           discord: { enabled: true, token: "secret" },
@@ -2110,7 +1998,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           discord: { enabled: true, token: "secret" },
@@ -2161,7 +2048,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           whatsapp: { enabled: true, allowFrom: ["+15555550123"] },
@@ -2202,7 +2088,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           matrix: { enabled: true, homeserver: "https://matrix.example.org" },
@@ -2256,7 +2141,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           enabled: false,
@@ -2286,7 +2170,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           allow: ["codex"],
@@ -2328,7 +2211,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingPluginInstallsForIds } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingPluginInstallsForIds({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       pluginIds: [],
       channelIds: ["wecom"],
@@ -2375,7 +2257,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingPluginInstallsForIds } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingPluginInstallsForIds({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         agents: {
           defaults: {
@@ -2476,7 +2357,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         agents: {
           defaults: {
@@ -2583,7 +2463,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const firstPass = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg,
       env: {},
     });
@@ -2632,7 +2511,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     });
 
     const secondPass = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg,
       env: {},
     });
@@ -2685,7 +2563,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         agents: {
           defaults: {
@@ -2800,7 +2677,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg,
       env,
     });
@@ -2875,7 +2751,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg,
       env,
     });
@@ -2900,7 +2775,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingPluginInstallsForIds } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingPluginInstallsForIds({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       pluginIds: [],
       channelIds: ["matrix"],
@@ -2946,7 +2820,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3016,7 +2889,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           allow: ["some-other-plugin"],
@@ -3091,7 +2963,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3158,7 +3029,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3220,7 +3090,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3241,139 +3110,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     expect(updateArg.logger).toEqual(expect.objectContaining({ terminalLinks: false }));
     const updateConfig = updateArg.config as Record<string, unknown>;
     expectRecordFields(updateConfig.plugins, { installs: records });
-  });
-
-  it("requires per-source approval before persisted-record non-ClawHub repair", async () => {
-    const records = {
-      demo: {
-        source: "npm",
-        spec: "@openclaw/plugin-demo@1.0.0",
-        resolvedSpec: "@openclaw/plugin-demo@1.0.0",
-        resolvedVersion: "1.0.0",
-        installPath: "/missing/demo",
-      },
-    };
-    const onNonClawHubInstall = vi.fn(async () => false);
-    mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue(records);
-    mocks.updateNpmInstalledPlugins.mockImplementationOnce(
-      async (params: {
-        allowNonClawHubInstall?: boolean;
-        onNonClawHubInstall?: (request: {
-          pluginId: string;
-          source: "npm";
-          spec: string;
-        }) => boolean | Promise<boolean>;
-        config: Record<string, unknown>;
-      }) => {
-        expect(params.allowNonClawHubInstall).toBe(false);
-        await expect(
-          params.onNonClawHubInstall?.({
-            pluginId: "demo",
-            source: "npm",
-            spec: "@openclaw/plugin-demo@1.0.0",
-          }),
-        ).resolves.toBe(false);
-        return {
-          changed: false,
-          config: params.config,
-          outcomes: [
-            {
-              pluginId: "demo",
-              status: "skipped",
-              code: "non_clawhub_install_acknowledgement_required",
-              message: "Non-ClawHub acknowledgement required.",
-            },
-          ],
-        };
-      },
-    );
-
-    const { repairMissingConfiguredPluginInstalls } =
-      await import("./missing-configured-plugin-install.js");
-    const result = await repairMissingConfiguredPluginInstalls({
-      cfg: {
-        plugins: {
-          entries: {
-            demo: { enabled: true },
-          },
-        },
-      },
-      env: {},
-      onNonClawHubInstall,
-    });
-
-    expect(onNonClawHubInstall).toHaveBeenCalledWith({
-      pluginId: "demo",
-      sourceClass: "npm",
-      spec: "@openclaw/plugin-demo@1.0.0",
-    });
-    expect(result.failedPluginIds).toEqual(["demo"]);
-    expect(result.warnings).toContain("Non-ClawHub acknowledgement required.");
-    expect(mocks.writePersistedInstalledPluginIndexInstallRecords).not.toHaveBeenCalled();
-    expect(result.records.demo).toEqual(records.demo);
-  });
-
-  it("preserves declined repair metadata while removing another stale bundled record", async () => {
-    const records = {
-      demo: {
-        source: "npm",
-        spec: "@openclaw/plugin-demo@1.0.0",
-        resolvedSpec: "@openclaw/plugin-demo@1.0.0",
-        resolvedVersion: "1.0.0",
-        installPath: "/missing/demo",
-      },
-      "google-meet": {
-        source: "npm",
-        spec: "@openclaw/google-meet",
-        resolvedName: "@openclaw/google-meet",
-        installPath: "/missing/google-meet",
-      },
-    };
-    mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue(records);
-    mocks.loadInstalledPluginIndex.mockReturnValue({
-      plugins: [
-        {
-          pluginId: "google-meet",
-          origin: "bundled",
-          packageName: "@openclaw/google-meet",
-        },
-      ],
-      diagnostics: [],
-      installRecords: {},
-    });
-    mocks.updateNpmInstalledPlugins.mockImplementationOnce(
-      async (params: { config: { plugins?: { installs?: Record<string, unknown> } } }) => ({
-        changed: false,
-        config: params.config,
-        outcomes: [
-          {
-            pluginId: "demo",
-            status: "skipped",
-            code: "non_clawhub_install_acknowledgement_required",
-            message: "Non-ClawHub acknowledgement required.",
-          },
-        ],
-      }),
-    );
-
-    const { repairMissingConfiguredPluginInstalls } =
-      await import("./missing-configured-plugin-install.js");
-    const result = await repairMissingConfiguredPluginInstalls({
-      cfg: {
-        plugins: {
-          entries: {
-            demo: { enabled: true },
-          },
-        },
-      },
-      env: {},
-    });
-
-    expect(result.records).toEqual({ demo: records.demo });
-    expect(mocks.writePersistedInstalledPluginIndexInstallRecords).toHaveBeenCalledWith(
-      { demo: records.demo },
-      { env: {} },
-    );
   });
 
   it("keeps non-ClawHub updater warnings as persisted-record repair warnings", async () => {
@@ -3420,7 +3156,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3483,7 +3218,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3526,7 +3260,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3568,7 +3301,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3632,7 +3364,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       env: {},
     });
@@ -3713,7 +3444,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3798,7 +3528,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           entries: {
@@ -3887,7 +3616,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         update: { channel: "beta" },
         plugins: {
@@ -3986,7 +3714,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -4082,7 +3809,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -4179,7 +3905,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         channels: {
           slack: {
@@ -4269,7 +3994,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -4345,7 +4069,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -4422,7 +4145,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -4501,7 +4223,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -4568,7 +4289,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         messages: {
           tts: {
@@ -4632,7 +4352,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         agents: {
           defaults: {
@@ -4683,7 +4402,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           media: {
@@ -4736,7 +4454,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         agents: {
           defaults: {
@@ -4802,7 +4519,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       env: {
         EXA_API_KEY: "exa-key",
@@ -4854,7 +4570,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       await import("./missing-configured-plugin-install.js");
     const env = { GROQ_API_KEY: "groq-key" };
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {},
       env,
     });
@@ -4926,7 +4641,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         update: { channel: "beta" },
         tools: {
@@ -4984,7 +4698,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         plugins: {
           load: {
@@ -5051,7 +4764,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       await import("./missing-configured-plugin-install.js");
     const env = { FIRECRAWL_API_KEY: "firecrawl-key" };
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {
@@ -5123,7 +4835,6 @@ describe("repairMissingConfiguredPluginInstalls", () => {
     const { repairMissingConfiguredPluginInstalls } =
       await import("./missing-configured-plugin-install.js");
     const result = await repairMissingConfiguredPluginInstalls({
-      acknowledgeNonClawHubInstall: true,
       cfg: {
         tools: {
           web: {

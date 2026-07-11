@@ -149,22 +149,4 @@ describe("hooks cli formatting", () => {
       invalidateRuntimeCache: false,
     });
   });
-
-  it("forwards non-ClawHub acknowledgement through deprecated update alias", async () => {
-    runPluginUpdateCommandMock.mockResolvedValueOnce(undefined);
-    const program = new Command().exitOverride();
-    registerHooksCli(program);
-
-    await program.parseAsync(
-      ["hooks", "update", "demo-hooks", "--acknowledge-non-clawhub-install"],
-      { from: "user" },
-    );
-
-    expect(runPluginUpdateCommandMock).toHaveBeenCalledWith({
-      id: "demo-hooks",
-      opts: expect.objectContaining({
-        acknowledgeNonClawHubInstall: true,
-      }),
-    });
-  });
 });

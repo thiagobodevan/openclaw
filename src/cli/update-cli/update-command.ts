@@ -133,7 +133,6 @@ import {
 } from "../../plugins/official-external-install-records.js";
 import {
   isClawHubTrustSkippedOutcome,
-  isNonClawHubInstallAcknowledgementSkippedOutcome,
   syncPluginsForUpdateChannel,
   updateNpmInstalledPlugins,
   type PluginUpdateIntegrityDriftParams,
@@ -705,11 +704,7 @@ function isDisabledAfterFailureOutcome(outcome: PluginUpdateOutcome): boolean {
 }
 
 function isActionableSkippedPostUpdateOutcome(outcome: PluginUpdateOutcome): boolean {
-  return (
-    isDisabledAfterFailureOutcome(outcome) ||
-    isClawHubTrustSkippedOutcome(outcome) ||
-    isNonClawHubInstallAcknowledgementSkippedOutcome(outcome)
-  );
+  return isDisabledAfterFailureOutcome(outcome) || isClawHubTrustSkippedOutcome(outcome);
 }
 
 /**
@@ -2239,7 +2234,6 @@ export async function updatePluginsAfterCoreUpdate(params: {
       workspaceDir: params.root,
     }),
     ...clawHubRiskAcknowledgementOptions,
-    allowNonClawHubInstall: params.opts.acknowledgeNonClawHubInstall === true,
     logger: pluginLogger,
   });
   for (const error of syncResult.summary.errors) {
@@ -2315,7 +2309,6 @@ export async function updatePluginsAfterCoreUpdate(params: {
       logger: pluginLogger,
       onIntegrityDrift: onPluginIntegrityDrift,
       ...clawHubRiskAcknowledgementOptions,
-      allowNonClawHubInstall: params.opts.acknowledgeNonClawHubInstall === true,
     });
     pluginConfig = repairResult.config;
     pluginsChanged ||= repairResult.changed;
@@ -2338,7 +2331,6 @@ export async function updatePluginsAfterCoreUpdate(params: {
     logger: pluginLogger,
     onIntegrityDrift: onPluginIntegrityDrift,
     ...clawHubRiskAcknowledgementOptions,
-    allowNonClawHubInstall: params.opts.acknowledgeNonClawHubInstall === true,
   });
   pluginConfig = npmResult.config;
   pluginsChanged ||= npmResult.changed;
@@ -2393,7 +2385,6 @@ export async function updatePluginsAfterCoreUpdate(params: {
     env: process.env,
     baselineInstallRecords: convergenceBaselineRecords,
     ...clawHubRiskAcknowledgementOptions,
-    ...(params.opts.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
   });
   for (const change of convergence.changes) {
     if (!params.opts.json) {
@@ -3035,7 +3026,6 @@ export async function updateFinalizeCommand(opts: UpdateFinalizeOptions): Promis
         yes: opts.yes,
         restart: false,
         acknowledgeClawHubRisk: opts.acknowledgeClawHubRisk,
-        acknowledgeNonClawHubInstall: opts.acknowledgeNonClawHubInstall,
       },
       timeoutMs: timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
       pluginInstallRecords,
@@ -3467,9 +3457,6 @@ async function continuePostCoreUpdateInFreshProcess(params: {
   }
   if (params.opts.acknowledgeClawHubRisk) {
     argv.push("--acknowledge-clawhub-risk");
-  }
-  if (params.opts.acknowledgeNonClawHubInstall) {
-    argv.push("--acknowledge-non-clawhub-install");
   }
   if (params.opts.timeout) {
     argv.push("--timeout", params.opts.timeout);

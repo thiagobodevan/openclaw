@@ -2,11 +2,7 @@
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { ConfigSetOptions } from "../cli/config-set-input.js";
 import { looksLikeLocalInstallSpec } from "../cli/install-spec.js";
-import {
-  formatNonClawHubInstallWarning,
-  NON_CLAWHUB_INSTALL_ACK_FLAG,
-  type NonClawHubInstallAcknowledgementOptions,
-} from "../cli/non-clawhub-install-acknowledgement.js";
+import { resolveBundledInstallPlanBeforeNpm } from "../cli/plugin-install-plan.js";
 import type { DoctorOptions } from "../commands/doctor.types.js";
 import {
   detectInferenceBackends,
@@ -15,6 +11,15 @@ import {
 } from "../commands/onboard-inference.js";
 import { isSensitiveConfigPath } from "../config/sensitive-paths.js";
 import { validateRegistryNpmSpec } from "../infra/npm-registry-spec.js";
+import { findBundledPluginSource } from "../plugins/bundled-sources.js";
+import {
+  formatNonClawHubInstallWarning,
+  NON_CLAWHUB_INSTALL_ACK_FLAG,
+} from "../plugins/install-provenance.js";
+import {
+  resolveCatalogOfficialExternalInstallPlan,
+  resolveCatalogOfficialExternalNpmPackageTrust,
+} from "../plugins/official-external-install-trust.js";
 import { buildAgentMainSessionKey, normalizeAgentId } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { TuiResult } from "../tui/tui-types.js";
@@ -95,7 +100,9 @@ export type CrestodianOperationResult = {
   followUp?: Extract<CrestodianOperation, { kind: "model-setup" }>;
 };
 
-export type CrestodianPluginInstallOptions = NonClawHubInstallAcknowledgementOptions;
+export type CrestodianPluginInstallOptions = {
+  acknowledgeNonClawHubInstall?: boolean;
+};
 
 /** Injectable command dependencies used by tests and alternate runners. */
 export type CrestodianCommandDeps = {
@@ -528,7 +535,7 @@ export function describeCrestodianPersistentOperation(operation: CrestodianOpera
 /** Format the standard approval plan text for a persistent operation. */
 export function formatCrestodianPersistentPlan(operation: CrestodianOperation): string {
   const plan = `Plan: ${describeCrestodianPersistentOperation(operation)}. Say yes to apply.`;
-  if (operation.kind !== "plugin-install" || isClawHubPluginInstallSpec(operation.spec)) {
+  if (operation.kind !== "plugin-install" || isTrustedCrestodianPluginInstallSpec(operation.spec)) {
     return plan;
   }
   return [
@@ -544,11 +551,33 @@ function isClawHubPluginInstallSpec(spec: string): boolean {
   return spec.trim().toLowerCase().startsWith("clawhub:");
 }
 
+function isTrustedCrestodianPluginInstallSpec(spec: string): boolean {
+  if (isClawHubPluginInstallSpec(spec)) {
+    return true;
+  }
+  const trimmed = spec.trim();
+  const explicitNpm = trimmed.toLowerCase().startsWith("npm:");
+  const npmSpec = explicitNpm ? trimmed.slice("npm:".length) : trimmed;
+  if (explicitNpm) {
+    return resolveCatalogOfficialExternalNpmPackageTrust(npmSpec) !== null;
+  }
+  return Boolean(
+    resolveBundledInstallPlanBeforeNpm({
+      rawSpec: npmSpec,
+      findBundledSource: (lookup) => findBundledPluginSource({ lookup }),
+    }) ??
+    resolveCatalogOfficialExternalNpmPackageTrust(npmSpec) ??
+    resolveCatalogOfficialExternalInstallPlan(npmSpec),
+  );
+}
+
 /** Whether this operation needs source-specific approval in addition to generic write approval. */
 export function requiresNonClawHubPluginInstallAcknowledgement(
   operation: CrestodianOperation,
 ): operation is Extract<CrestodianOperation, { kind: "plugin-install" }> {
-  return operation.kind === "plugin-install" && !isClawHubPluginInstallSpec(operation.spec);
+  return (
+    operation.kind === "plugin-install" && !isTrustedCrestodianPluginInstallSpec(operation.spec)
+  );
 }
 
 function formatCreateAgentWorkspace(workspace: string | undefined): string {

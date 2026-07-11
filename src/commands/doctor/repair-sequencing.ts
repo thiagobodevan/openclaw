@@ -1,10 +1,6 @@
 // Doctor repair sequence coordinator for config, auth, plugin, and warning repairs.
 import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
 import {
-  formatNonClawHubInstallWarning,
-  type NonClawHubInstallSourceClass,
-} from "../../cli/non-clawhub-install-acknowledgement.js";
-import {
   applyPluginAutoEnable,
   materializePluginAutoEnableCandidates,
 } from "../../config/plugin-auto-enable.js";
@@ -19,7 +15,6 @@ import {
   maybeRepairManagedNpmOpenClawPeerLinks,
   maybeRepairStaleManagedNpmBundledPlugins,
 } from "../doctor-plugin-registry.js";
-import type { DoctorPrompter } from "../doctor-prompter.js";
 import { collectActiveToolSchemaProjectionWarnings } from "./shared/active-tool-schema-warnings.js";
 import { maybeRepairGroupAllowFromFallback } from "./shared/allowfrom-fallback-migration.js";
 import { maybeRepairAllowlistPolicyAllowFrom } from "./shared/allowlist-policy-repair.js";
@@ -51,29 +46,17 @@ export async function runDoctorRepairSequence(params: {
   state: DoctorConfigMutationState;
   doctorFixCommand: string;
   env?: NodeJS.ProcessEnv;
-  acknowledgeNonClawHubInstall?: boolean;
-  prompter?: DoctorPrompter;
 }): Promise<{
   state: DoctorConfigMutationState;
   changeNotes: string[];
   warningNotes: string[];
   authProfilesRepaired: boolean;
-  failedConfiguredPluginInstallIds: string[];
 }> {
   let state = params.state;
   const changeNotes: string[] = [];
   const warningNotes: string[] = [];
   const env = params.env ?? process.env;
   const sanitizeLines = (lines: string[]) => lines.map((line) => sanitizeForLog(line)).join("\n");
-  const prompter = params.prompter;
-  const confirmNonClawHubRepairInstall = prompter
-    ? async (request: { sourceClass: NonClawHubInstallSourceClass; spec: string }) =>
-        await prompter.confirmRuntimeRepair({
-          message: `${formatNonClawHubInstallWarning(request)}\nInstall this non-ClawHub plugin source during doctor repair?`,
-          initialValue: false,
-          requiresInteractiveConfirmation: true,
-        })
-    : undefined;
 
   const applyMutation = (mutation: {
     config: DoctorConfigMutationState["candidate"];
@@ -139,10 +122,6 @@ export async function runDoctorRepairSequence(params: {
   const missingConfiguredPluginInstallRepair = await repairMissingConfiguredPluginInstalls({
     cfg: state.candidate,
     env,
-    ...(params.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
-    ...(confirmNonClawHubRepairInstall
-      ? { onNonClawHubInstall: confirmNonClawHubRepairInstall }
-      : {}),
   });
   if (missingConfiguredPluginInstallRepair.changes.length > 0) {
     changeNotes.push(sanitizeLines(missingConfiguredPluginInstallRepair.changes));
@@ -268,11 +247,5 @@ export async function runDoctorRepairSequence(params: {
     warningNotes.push(sanitizeLines(activeToolSchemaWarnings));
   }
 
-  return {
-    state,
-    changeNotes,
-    warningNotes,
-    authProfilesRepaired,
-    failedConfiguredPluginInstallIds: failedPluginIds,
-  };
+  return { state, changeNotes, warningNotes, authProfilesRepaired };
 }

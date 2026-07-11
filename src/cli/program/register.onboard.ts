@@ -17,7 +17,6 @@ import type {
 } from "../../commands/onboard-types.js";
 import { resolveProviderOnboardAuthFlags } from "../../plugins/provider-auth-choices.js";
 import { runCommandWithRuntime } from "../cli-utils.js";
-import { NON_CLAWHUB_INSTALL_ACK_FLAG } from "../non-clawhub-install-acknowledgement.js";
 import { parsePort } from "../shared/parse-port.js";
 
 function resolveInstallDaemonFlag(
@@ -83,13 +82,6 @@ function resolveOnboardAuthFlags(): OnboardAuthFlag[] {
 }
 
 const ONBOARD_AUTH_FLAGS = resolveOnboardAuthFlags();
-
-function normalizeNonClawHubInstallAcknowledgementOption(opts: {
-  acknowledgeNonClawHubInstall?: boolean;
-  acknowledgeNonClawhubInstall?: boolean;
-}): boolean {
-  return opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true;
-}
 
 function pickOnboardProviderAuthOptionValues(
   opts: Record<string, unknown>,
@@ -186,11 +178,6 @@ export function registerOnboardCommand(program: Command): void {
       "Acknowledge that agents are powerful and full system access is risky (required for --non-interactive)",
       false,
     )
-    .option(
-      NON_CLAWHUB_INSTALL_ACK_FLAG,
-      "Acknowledge setup plugin installs whose source is outside ClawHub review",
-      false,
-    )
     .option("--flow <flow>", "Onboard flow: quickstart|advanced|manual|import")
     .option("--mode <mode>", "Onboard mode: local|remote");
 
@@ -253,7 +240,6 @@ export function registerOnboardCommand(program: Command): void {
           workspace: opts.workspace as string | undefined,
           nonInteractive: Boolean(opts.nonInteractive),
           acceptRisk: Boolean(opts.acceptRisk),
-          acknowledgeNonClawHubInstall: normalizeNonClawHubInstallAcknowledgementOption(opts),
           classic: Boolean(opts.classic),
           flow: opts.flow as "quickstart" | "advanced" | "manual" | "import" | undefined,
           mode: opts.mode as "local" | "remote" | undefined,

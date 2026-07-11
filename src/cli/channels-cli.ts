@@ -11,7 +11,6 @@ import { formatCliChannelOptions } from "./channel-options.js";
 import { runCommandWithRuntime } from "./cli-utils.js";
 import { hasExplicitOptions } from "./command-options.js";
 import { formatHelpExamples } from "./help-format.js";
-import { NON_CLAWHUB_INSTALL_ACK_FLAG } from "./non-clawhub-install-acknowledgement.js";
 import { applyParentDefaultHelpAction } from "./program/parent-default-help.js";
 import { normalizeWindowsArgv } from "./windows-argv.js";
 
@@ -20,14 +19,6 @@ type BundledPackageChannelMetadataModule =
   typeof import("../plugins/bundled-package-channel-metadata.js");
 
 const optionNamesRemove = ["channel", "account", "delete"] as const;
-const channelAddControlOnlyOptionNames = new Set([
-  "acknowledgeNonClawHubInstall",
-  "acknowledgeNonClawhubInstall",
-]);
-type NonClawHubInstallAckOption = {
-  acknowledgeNonClawHubInstall?: boolean;
-  acknowledgeNonClawhubInstall?: boolean;
-};
 
 type RegisterChannelsCliOptions = {
   includeSetupOptions?: boolean;
@@ -58,22 +49,6 @@ function runChannelsCommandWithDanger(action: () => Promise<void>, label: string
 
 function getOptionNames(command: Command): string[] {
   return command.options.map((option) => option.attributeName());
-}
-
-function getChannelAddConcreteOptionNames(command: Command): string[] {
-  return getOptionNames(command).filter((name) => !channelAddControlOnlyOptionNames.has(name));
-}
-
-function normalizeCommanderNonClawHubInstallOption(opts: NonClawHubInstallAckOption): boolean {
-  return opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true;
-}
-
-function addNonClawHubInstallAckOption(command: Command): Command {
-  return command.option(
-    NON_CLAWHUB_INSTALL_ACK_FLAG,
-    "Acknowledge setup plugin installs whose source is outside ClawHub review",
-    false,
-  );
 }
 
 function shouldRegisterChannelSetupOptions(
@@ -175,22 +150,11 @@ export async function registerChannelsCli(
     .option("--account <id>", "Account id (only with --channel)")
     .option("--target <dest>", "Channel target for permission audit (Discord channel:<id>)")
     .option("--timeout <ms>", "Timeout in ms", "10000")
-    .option(
-      NON_CLAWHUB_INSTALL_ACK_FLAG,
-      "Acknowledge setup plugin installs whose source is outside ClawHub review",
-      false,
-    )
     .option("--json", "Output JSON", false)
     .action(async (opts) => {
       await runChannelsCommand(async () => {
         const { channelsCapabilitiesCommand } = await loadChannelsCommands();
-        await channelsCapabilitiesCommand(
-          {
-            ...opts,
-            acknowledgeNonClawHubInstall: normalizeCommanderNonClawHubInstallOption(opts),
-          },
-          defaultRuntime,
-        );
+        await channelsCapabilitiesCommand(opts, defaultRuntime);
       });
     });
 
@@ -261,11 +225,6 @@ export async function registerChannelsCli(
     .option("--base-url <url>", "Channel base URL")
     .option("--http-url <url>", "Channel HTTP service URL")
     .option("--auth-dir <path>", "Channel auth directory override")
-    .option(
-      NON_CLAWHUB_INSTALL_ACK_FLAG,
-      "Acknowledge setup plugin installs whose source is outside ClawHub review",
-      false,
-    )
     .option("--use-env", "Use env-backed credentials when supported", false);
 
   if (shouldRegisterChannelSetupOptions(argv, options)) {
@@ -275,7 +234,7 @@ export async function registerChannelsCli(
   addCommand.action(async (opts, command) => {
     await runChannelsCommand(async () => {
       const { channelsAddCommand } = await loadChannelsCommands();
-      const hasFlags = hasExplicitOptions(command, getChannelAddConcreteOptionNames(command));
+      const hasFlags = hasExplicitOptions(command, getOptionNames(command));
       await channelsAddCommand(opts, defaultRuntime, { hasFlags });
     });
   });
@@ -294,45 +253,41 @@ export async function registerChannelsCli(
       });
     });
 
-  addNonClawHubInstallAckOption(
-    channels
-      .command("login")
-      .description("Link a channel account (if supported)")
-      .option("--channel <channel>", "Channel alias (auto when only one is configured)")
-      .option("--account <id>", "Account id (accountId)")
-      .option("--verbose", "Verbose connection logs", false),
-  ).action(async (opts) => {
-    await runChannelsCommandWithDanger(async () => {
-      await runChannelLogin(
-        {
-          channel: opts.channel as string | undefined,
-          account: opts.account as string | undefined,
-          verbose: Boolean(opts.verbose),
-          acknowledgeNonClawHubInstall: normalizeCommanderNonClawHubInstallOption(opts),
-        },
-        defaultRuntime,
-      );
-    }, "Channel login failed");
-  });
+  channels
+    .command("login")
+    .description("Link a channel account (if supported)")
+    .option("--channel <channel>", "Channel alias (auto when only one is configured)")
+    .option("--account <id>", "Account id (accountId)")
+    .option("--verbose", "Verbose connection logs", false)
+    .action(async (opts) => {
+      await runChannelsCommandWithDanger(async () => {
+        await runChannelLogin(
+          {
+            channel: opts.channel as string | undefined,
+            account: opts.account as string | undefined,
+            verbose: Boolean(opts.verbose),
+          },
+          defaultRuntime,
+        );
+      }, "Channel login failed");
+    });
 
-  addNonClawHubInstallAckOption(
-    channels
-      .command("logout")
-      .description("Log out of a channel session (if supported)")
-      .option("--channel <channel>", "Channel alias (auto when only one is configured)")
-      .option("--account <id>", "Account id (accountId)"),
-  ).action(async (opts) => {
-    await runChannelsCommandWithDanger(async () => {
-      await runChannelLogout(
-        {
-          channel: opts.channel as string | undefined,
-          account: opts.account as string | undefined,
-          acknowledgeNonClawHubInstall: normalizeCommanderNonClawHubInstallOption(opts),
-        },
-        defaultRuntime,
-      );
-    }, "Channel logout failed");
-  });
+  channels
+    .command("logout")
+    .description("Log out of a channel session (if supported)")
+    .option("--channel <channel>", "Channel alias (auto when only one is configured)")
+    .option("--account <id>", "Account id (accountId)")
+    .action(async (opts) => {
+      await runChannelsCommandWithDanger(async () => {
+        await runChannelLogout(
+          {
+            channel: opts.channel as string | undefined,
+            account: opts.account as string | undefined,
+          },
+          defaultRuntime,
+        );
+      }, "Channel logout failed");
+    });
 
   applyParentDefaultHelpAction(channels);
 }

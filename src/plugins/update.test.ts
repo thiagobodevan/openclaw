@@ -83,8 +83,7 @@ vi.mock("../process/exec.js", () => ({
 
 vi.resetModules();
 
-const { PLUGIN_UPDATE_SKIP_CODE, syncPluginsForUpdateChannel, updateNpmInstalledPlugins } =
-  await import("./update.js");
+const { syncPluginsForUpdateChannel, updateNpmInstalledPlugins } = await import("./update.js");
 
 function createSuccessfulNpmUpdateResult(params?: {
   pluginId?: string;
@@ -573,86 +572,6 @@ describe("updateNpmInstalledPlugins", () => {
         status: "skipped",
         message: 'No install record for "constructor".',
       },
-    ]);
-  });
-
-  it("skips non-ClawHub update installers when the core update has no acknowledgement", async () => {
-    const installPath = createInstalledPackageDir({
-      name: "@demo/plugin",
-      version: "1.0.0",
-    });
-    mockNpmViewMetadata({
-      name: "@demo/plugin",
-      version: "2.0.0",
-      integrity: "sha512-next",
-    });
-
-    const result = await updateNpmInstalledPlugins({
-      config: createNpmInstallConfig({
-        pluginId: "demo",
-        spec: "@demo/plugin",
-        installPath,
-        resolvedName: "@demo/plugin",
-        resolvedSpec: "@demo/plugin@1.0.0",
-        resolvedVersion: "1.0.0",
-      }),
-      pluginIds: ["demo"],
-      allowNonClawHubInstall: false,
-    });
-
-    expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
-    expect(result.changed).toBe(false);
-    expect(result.outcomes).toEqual([
-      expect.objectContaining({
-        pluginId: "demo",
-        status: "skipped",
-        code: PLUGIN_UPDATE_SKIP_CODE.NON_CLAWHUB_INSTALL_ACKNOWLEDGEMENT_REQUIRED,
-        message: expect.stringContaining("--acknowledge-non-clawhub-install"),
-      }),
-    ]);
-  });
-
-  it("uses per-plugin approval before a non-ClawHub update installer", async () => {
-    const installPath = createInstalledPackageDir({
-      name: "@demo/plugin",
-      version: "1.0.0",
-    });
-    mockNpmViewMetadata({
-      name: "@demo/plugin",
-      version: "2.0.0",
-      integrity: "sha512-next",
-    });
-    installPluginFromNpmSpecMock.mockResolvedValue(
-      createSuccessfulNpmUpdateResult({
-        pluginId: "demo",
-        targetDir: installPath,
-        version: "2.0.0",
-      }),
-    );
-    const onNonClawHubInstall = vi.fn(async () => true);
-
-    const result = await updateNpmInstalledPlugins({
-      config: createNpmInstallConfig({
-        pluginId: "demo",
-        spec: "@demo/plugin",
-        installPath,
-        resolvedName: "@demo/plugin",
-        resolvedSpec: "@demo/plugin@1.0.0",
-        resolvedVersion: "1.0.0",
-      }),
-      pluginIds: ["demo"],
-      allowNonClawHubInstall: false,
-      onNonClawHubInstall,
-    });
-
-    expect(onNonClawHubInstall).toHaveBeenCalledWith({
-      pluginId: "demo",
-      source: "npm",
-      spec: "@demo/plugin",
-    });
-    expect(installPluginFromNpmSpecMock).toHaveBeenCalledOnce();
-    expect(result.outcomes).toEqual([
-      expect.objectContaining({ pluginId: "demo", status: "updated" }),
     ]);
   });
 
@@ -3963,42 +3882,6 @@ describe("updateNpmInstalledPlugins", () => {
     ]);
   });
 
-  it("blocks official ClawHub-to-npm fallback without non-ClawHub acknowledgement", async () => {
-    const installPath = createInstalledPackageDir({
-      name: "@openclaw/discord",
-      version: "2026.5.12",
-    });
-    installPluginFromClawHubMock.mockResolvedValueOnce({
-      ok: false,
-      code: "artifact_unavailable",
-      error: "artifact unavailable",
-    });
-
-    const result = await updateNpmInstalledPlugins({
-      config: createClawHubInstallConfig({
-        pluginId: "discord",
-        installPath,
-        clawhubUrl: "https://clawhub.ai",
-        clawhubPackage: "@openclaw/discord",
-        clawhubFamily: "code-plugin",
-        clawhubChannel: "official",
-        spec: "clawhub:@openclaw/discord",
-      }),
-      pluginIds: ["discord"],
-      allowNonClawHubInstall: false,
-    });
-
-    expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
-    expect(result.changed).toBe(false);
-    expect(result.outcomes).toEqual([
-      expect.objectContaining({
-        pluginId: "discord",
-        status: "skipped",
-        message: expect.stringContaining("--acknowledge-non-clawhub-install"),
-      }),
-    ]);
-  });
-
   it("uses exact-core npm when an official ClawHub install falls back on extended-stable", async () => {
     const installPath = createInstalledPackageDir({
       name: "@openclaw/discord",
@@ -4544,29 +4427,6 @@ describe("updateNpmInstalledPlugins", () => {
     });
   });
 
-  it("shows persisted marketplace source details before repair approval", async () => {
-    const onNonClawHubInstall = vi.fn(async () => false);
-
-    await updateNpmInstalledPlugins({
-      config: createMarketplaceInstallConfig({
-        pluginId: "claude-bundle",
-        installPath: "/tmp/claude-bundle",
-        marketplaceSource: "vincentkoc/claude-marketplace",
-        marketplacePlugin: "claude-bundle",
-      }),
-      pluginIds: ["claude-bundle"],
-      allowNonClawHubInstall: false,
-      onNonClawHubInstall,
-    });
-
-    expect(onNonClawHubInstall).toHaveBeenCalledWith({
-      pluginId: "claude-bundle",
-      source: "marketplace",
-      spec: "claude-bundle from vincentkoc/claude-marketplace",
-    });
-    expect(installPluginFromMarketplaceMock).not.toHaveBeenCalled();
-  });
-
   it("updates git installs and records resolved commit metadata", async () => {
     installPluginFromGitSpecMock.mockResolvedValue({
       ok: true,
@@ -4895,44 +4755,6 @@ describe("syncPluginsForUpdateChannel", () => {
       resolvedVersion: "2.0.0",
       resolvedSpec: "@openclaw/legacy-chat@2.0.0",
     });
-  });
-
-  it("does not externalize a bundled plugin to npm without acknowledgement", async () => {
-    resolveBundledPluginSourcesMock.mockReturnValue(new Map());
-    const config: OpenClawConfig = {
-      channels: { "legacy-chat": { enabled: true } },
-      plugins: {
-        load: { paths: [appBundledPluginRoot("legacy-chat")] },
-        installs: {
-          "legacy-chat": {
-            source: "path",
-            sourcePath: appBundledPluginRoot("legacy-chat"),
-            installPath: appBundledPluginRoot("legacy-chat"),
-          },
-        },
-      },
-    };
-
-    const result = await syncPluginsForUpdateChannel({
-      channel: "stable",
-      allowNonClawHubInstall: false,
-      externalizedBundledPluginBridges: [
-        {
-          bundledPluginId: "legacy-chat",
-          npmSpec: "@openclaw/legacy-chat",
-          channelIds: ["legacy-chat"],
-        },
-      ],
-      config,
-    });
-
-    expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
-    expect(result.changed).toBe(false);
-    expect(result.config).toBe(config);
-    expect(result.summary.switchedToNpm).toStrictEqual([]);
-    expect(result.summary.errors).toEqual([
-      expect.stringContaining("--acknowledge-non-clawhub-install"),
-    ]);
   });
 
   it("marks official externalized bundled npm installs as trusted", async () => {

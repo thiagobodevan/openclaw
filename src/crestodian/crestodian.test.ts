@@ -37,15 +37,17 @@ describe("runCrestodian", () => {
     const { runtime, lines } = createCrestodianTestRuntime();
     const runPluginInstall = vi.fn(async () => {});
 
-    await runCrestodian(
-      {
-        message: "plugin install npm:@openclaw/demo",
-        yes: true,
-        deps: { runPluginInstall },
-        ...crestodianOverviewDeps,
-      },
-      runtime,
-    );
+    await expect(
+      runCrestodian(
+        {
+          message: "plugin install npm:@openclaw/demo",
+          yes: true,
+          deps: { runPluginInstall },
+          ...crestodianOverviewDeps,
+        },
+        runtime,
+      ),
+    ).rejects.toThrow("exit 1");
 
     expect(runPluginInstall).not.toHaveBeenCalled();
     expect(lines.join("\n")).toContain("--acknowledge-non-clawhub-install");

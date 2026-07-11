@@ -423,10 +423,7 @@ describe("channelsCapabilitiesCommand", () => {
     vi.mocked(listChannelPlugins).mockReturnValue([]);
     vi.mocked(getChannelPlugin).mockReturnValue(undefined);
 
-    await channelsCapabilitiesCommand(
-      { channel: "whatsapp", acknowledgeNonClawHubInstall: true },
-      runtime,
-    );
+    await channelsCapabilitiesCommand({ channel: "whatsapp" }, runtime);
 
     const resolveParams = requireFirstMockArg(
       mocks.resolveInstallableChannelPlugin,
@@ -434,7 +431,6 @@ describe("channelsCapabilitiesCommand", () => {
     );
     expect(resolveParams.rawChannel).toBe("whatsapp");
     expect(resolveParams.allowInstall).toBe(true);
-    expect(resolveParams.acknowledgeNonClawHubInstall).toBe(true);
 
     const replaceParams = requireFirstMockArg(mocks.replaceConfigFile, "config replace");
     expect(requireRecord(replaceParams.nextConfig, "replace next config").plugins).toStrictEqual({

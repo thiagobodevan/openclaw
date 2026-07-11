@@ -36,7 +36,7 @@ openclaw doctor --lint --all
 openclaw doctor --lint --allow-exec
 openclaw doctor --deep
 openclaw doctor --fix
-openclaw doctor --fix --non-interactive --acknowledge-non-clawhub-install
+openclaw doctor --fix --non-interactive
 openclaw doctor --generate-gateway-token
 openclaw doctor --post-upgrade
 openclaw doctor --post-upgrade --json
@@ -53,24 +53,23 @@ openclaw channels status --probe
 
 ## Options
 
-| Option                              | Effect                                                                                                                                                                                                                                                   |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-workspace-suggestions`        | Disable workspace memory/search suggestions.                                                                                                                                                                                                             |
-| `--yes`                             | Accept defaults without prompting.                                                                                                                                                                                                                       |
-| `--repair` / `--fix`                | Apply recommended non-service repairs without prompting (`--fix` is an alias). Gateway service installs/rewrites still require interactive confirmation or explicit `gateway` commands.                                                                  |
-| `--force`                           | Apply aggressive repairs, including overwriting custom service config.                                                                                                                                                                                   |
-| `--non-interactive`                 | Run without prompts; safe migrations and non-service repairs only.                                                                                                                                                                                       |
-| `--acknowledge-non-clawhub-install` | Allow doctor repair to install required non-ClawHub plugin sources after you review and trust those sources. Without it, noninteractive repair skips or fails closed before installing npm, git, local/archive, npm-pack, or marketplace plugin sources. |
-| `--generate-gateway-token`          | Generate and configure a gateway token.                                                                                                                                                                                                                  |
-| `--allow-exec`                      | Allow doctor to execute configured `exec` SecretRefs while verifying secrets.                                                                                                                                                                            |
-| `--deep`                            | Scan system services for extra gateway installs; report recent Gateway supervisor restart handoffs.                                                                                                                                                      |
-| `--lint`                            | Run modernized health checks in read-only mode and emit diagnostic findings.                                                                                                                                                                             |
-| `--post-upgrade`                    | Run post-upgrade plugin compatibility probes; findings go to stdout; exit code 1 if any error-level finding is present.                                                                                                                                  |
-| `--json`                            | With `--lint`: JSON findings. With `--post-upgrade`: machine-readable envelope `{ probesRun, findings }`.                                                                                                                                                |
-| `--severity-min <level>`            | With `--lint`: drop findings below `info`, `warning`, or `error`.                                                                                                                                                                                        |
-| `--all`                             | With `--lint`: run all registered checks, including opt-in checks excluded from the default set.                                                                                                                                                         |
-| `--skip <id>`                       | With `--lint`: skip a check id. Repeatable.                                                                                                                                                                                                              |
-| `--only <id>`                       | With `--lint`: run only the given check id(s). Repeatable.                                                                                                                                                                                               |
+| Option                       | Effect                                                                                                                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-workspace-suggestions` | Disable workspace memory/search suggestions.                                                                                                                                            |
+| `--yes`                      | Accept defaults without prompting.                                                                                                                                                      |
+| `--repair` / `--fix`         | Apply recommended non-service repairs without prompting (`--fix` is an alias). Gateway service installs/rewrites still require interactive confirmation or explicit `gateway` commands. |
+| `--force`                    | Apply aggressive repairs, including overwriting custom service config.                                                                                                                  |
+| `--non-interactive`          | Run without prompts; safe migrations and non-service repairs only.                                                                                                                      |
+| `--generate-gateway-token`   | Generate and configure a gateway token.                                                                                                                                                 |
+| `--allow-exec`               | Allow doctor to execute configured `exec` SecretRefs while verifying secrets.                                                                                                           |
+| `--deep`                     | Scan system services for extra gateway installs; report recent Gateway supervisor restart handoffs.                                                                                     |
+| `--lint`                     | Run modernized health checks in read-only mode and emit diagnostic findings.                                                                                                            |
+| `--post-upgrade`             | Run post-upgrade plugin compatibility probes; findings go to stdout; exit code 1 if any error-level finding is present.                                                                 |
+| `--json`                     | With `--lint`: JSON findings. With `--post-upgrade`: machine-readable envelope `{ probesRun, findings }`.                                                                               |
+| `--severity-min <level>`     | With `--lint`: drop findings below `info`, `warning`, or `error`.                                                                                                                       |
+| `--all`                      | With `--lint`: run all registered checks, including opt-in checks excluded from the default set.                                                                                        |
+| `--skip <id>`                | With `--lint`: skip a check id. Repeatable.                                                                                                                                             |
+| `--only <id>`                | With `--lint`: run only the given check id(s). Repeatable.                                                                                                                              |
 
 `--json`, `--severity-min`, `--all`, `--only`, and `--skip` are only accepted together with `--lint`.
 

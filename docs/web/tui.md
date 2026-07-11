@@ -162,7 +162,7 @@ openclaw crestodian -m "status"           # run one request and exit
 openclaw crestodian -m "set default model openai/gpt-5.2" --yes   # apply a config write
 ```
 
-- Persistent config writes need approval: either confirm interactively or pass `--yes`. A direct non-ClawHub plugin install also requires `--acknowledge-non-clawhub-install`; `--yes` alone is not source-provenance consent.
+- Persistent config writes need approval: either confirm interactively or pass `--yes`.
 - `--json` prints the startup overview as JSON instead of starting the chat.
 - From inside Crestodian, an `open-tui` request (for example, asking to talk to a normal agent) exits Crestodian and opens the regular agent TUI; use `/crestodian` there to come back.
 

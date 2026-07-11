@@ -49,9 +49,7 @@ describe("media-understanding formatDecisionSummary guards", () => {
 describe("media-understanding formatMissingProviderHint", () => {
   it("returns the catalog hint for a provider with mediaUnderstandingProviders contract (groq)", () => {
     const hint = formatMissingProviderHint("groq");
-    expect(hint).toContain(
-      "openclaw plugins install @openclaw/groq-provider --acknowledge-non-clawhub-install",
-    );
+    expect(hint).toContain("openclaw plugins install @openclaw/groq-provider");
     expect(hint).toContain("openclaw plugins registry --refresh");
     expect(hint).toContain("stop and start the gateway service");
     expect(hint).toContain("openclaw doctor --fix");

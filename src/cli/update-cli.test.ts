@@ -1427,33 +1427,6 @@ describe("update-cli", () => {
     ]);
   });
 
-  it("carries non-ClawHub install acknowledgement into post-core resume", async () => {
-    const { entrypoints } = setupUpdatedRootRefresh({
-      gatewayUpdateImpl: async (root) =>
-        makeOkUpdateResult({
-          mode: "git",
-          root,
-          before: { sha: "old-sha", version: "2026.4.26" },
-          after: { sha: "new-sha", version: "2026.4.27" },
-        }),
-    });
-
-    await updateCommand({
-      channel: "dev",
-      yes: true,
-      restart: false,
-      acknowledgeNonClawHubInstall: true,
-    });
-
-    expect(spawnCall()?.[1]).toEqual([
-      entrypoints[0],
-      "update",
-      "--no-restart",
-      "--yes",
-      "--acknowledge-non-clawhub-install",
-    ]);
-  });
-
   it("keeps downgrade post-update work in the current process", async () => {
     const downgradedRoot = createCaseDir("openclaw-downgraded-root");
     setupUpdatedRootRefresh({
@@ -1970,33 +1943,6 @@ describe("update-cli", () => {
     expect(jsonOutput?.postUpdate?.plugins?.npm.outcomes[0]?.message).toContain(
       "Run openclaw plugins inspect demo --runtime --json for details.",
     );
-  });
-
-  it("surfaces non-ClawHub acknowledgement skips as post-update warnings", async () => {
-    updateNpmInstalledPlugins.mockImplementationOnce(
-      async (params: { config: OpenClawConfig }) => ({
-        changed: false,
-        config: params.config,
-        outcomes: [
-          {
-            pluginId: "demo",
-            status: "skipped" as const,
-            code: "non_clawhub_install_acknowledgement_required" as const,
-            message:
-              'Skipped non-ClawHub install for "demo" from @example/demo; rerun with --acknowledge-non-clawhub-install after reviewing and trusting the source.',
-          },
-        ],
-      }),
-    );
-    vi.mocked(defaultRuntime.writeJson).mockClear();
-
-    await updateCommand({ json: true, restart: false });
-
-    const jsonOutput = lastWriteJsonCall() as UpdateRunResult | undefined;
-    expect(jsonOutput?.postUpdate?.plugins?.status).toBe("warning");
-    expect(pluginWarning(jsonOutput)?.pluginId).toBe("demo");
-    expect(pluginWarning(jsonOutput)?.reason).toContain("--acknowledge-non-clawhub-install");
-    expect(pluginOutcome(jsonOutput)?.status).toBe("skipped");
   });
 
   it("includes non-blocking ClawHub trust warnings in json post-core plugin output", async () => {
@@ -7448,7 +7394,6 @@ describe("update-cli", () => {
           timeout: "9",
           restart: false,
           acknowledgeClawHubRisk: true,
-          acknowledgeNonClawHubInstall: true,
         });
 
         expect(doctorEnv?.OPENCLAW_UPDATE_IN_PROGRESS).toBe("1");
@@ -7465,7 +7410,6 @@ describe("update-cli", () => {
         });
         expect(syncPluginCall()?.channel).toBe("stable");
         expect(syncPluginCall()?.acknowledgeClawHubRisk).toBe(true);
-        expect(syncPluginCall()?.allowNonClawHubInstall).toBe(true);
         expect(lastNpmPluginUpdateCall()?.timeoutMs).toBe(9_000);
         expect(
           vi
@@ -7473,7 +7417,6 @@ describe("update-cli", () => {
             .mock.calls.some(([options]) => options?.skipPluginValidation === true),
         ).toBe(true);
         expect(lastNpmPluginUpdateCall()?.acknowledgeClawHubRisk).toBe(true);
-        expect(lastNpmPluginUpdateCall()?.allowNonClawHubInstall).toBe(true);
         const output = lastWriteJsonCall() as
           | {
               status?: string;
@@ -7800,13 +7743,10 @@ describe("update-cli", () => {
         durationMs: 100,
       });
 
-      await updateWizardCommand({ acknowledgeNonClawHubInstall: true });
+      await updateWizardCommand({});
 
       const call = vi.mocked(runGatewayUpdate).mock.calls[0]?.[0];
       expect(call?.channel).toBe("dev");
-      expect(runPostCorePluginConvergenceSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ acknowledgeNonClawHubInstall: true }),
-      );
     });
   });
 

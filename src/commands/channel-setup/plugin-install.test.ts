@@ -377,7 +377,6 @@ describe("ensureChannelSetupPluginInstalled", () => {
       entry: baseEntry,
       prompter,
       runtime,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(result.installed).toBe(true);
@@ -414,7 +413,6 @@ describe("ensureChannelSetupPluginInstalled", () => {
       entry: baseEntry,
       prompter,
       runtime,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expectRecordFields(requireMockCallArg(installPluginFromNpmSpec, 0), "npm install args", {
@@ -436,7 +434,6 @@ describe("ensureChannelSetupPluginInstalled", () => {
       entry: baseEntry,
       prompter,
       runtime,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expectPluginLoadedFromLocalPath(result);
@@ -460,7 +457,6 @@ describe("ensureChannelSetupPluginInstalled", () => {
       },
       prompter,
       runtime,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(result.installed).toBe(true);
@@ -512,7 +508,6 @@ describe("ensureChannelSetupPluginInstalled", () => {
       prompter,
       runtime,
       promptInstall: false,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(select).not.toHaveBeenCalled();
@@ -712,7 +707,6 @@ describe("ensureChannelSetupPluginInstalled", () => {
       prompter,
       runtime,
       autoConfirmSingleSource: true,
-      acknowledgeNonClawHubInstall: true,
     });
 
     expect(select).not.toHaveBeenCalled();

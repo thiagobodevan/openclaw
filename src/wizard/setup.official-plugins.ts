@@ -94,7 +94,6 @@ export async function setupOfficialPluginInstalls(params: {
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
   workspaceDir?: string;
-  acknowledgeNonClawHubInstall?: boolean;
 }): Promise<OpenClawConfig> {
   const installEntries = resolveOfficialPluginOnboardingInstallEntries({
     config: params.config,
@@ -132,7 +131,6 @@ export async function setupOfficialPluginInstalls(params: {
       runtime: params.runtime,
       workspaceDir: params.workspaceDir,
       promptInstall: false,
-      acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall === true,
     });
     next = result.cfg;
   }

@@ -17,7 +17,6 @@ import { resolveMessageChannelSelection } from "../infra/outbound/channel-select
 import { parseStrictPositiveInteger } from "../infra/parse-finite-number.js";
 import { defaultRuntime } from "../runtime.js";
 import { formatHelpExamples } from "./help-format.js";
-import { NON_CLAWHUB_INSTALL_ACK_FLAG } from "./non-clawhub-install-acknowledgement.js";
 import { commitConfigWithPendingPluginInstalls } from "./plugins-install-record-commit.js";
 
 function parseLimit(value: unknown): number | null {
@@ -94,19 +93,9 @@ export function registerDirectoryCli(program: Command) {
     cmd
       .option("--channel <name>", "Channel (auto when only one is configured)")
       .option("--account <id>", "Account id (accountId)")
-      .option(
-        NON_CLAWHUB_INSTALL_ACK_FLAG,
-        "Acknowledge setup plugin installs whose source is outside ClawHub review",
-        false,
-      )
       .option("--json", "Output JSON", false);
 
-  const resolve = async (opts: {
-    channel?: string;
-    account?: string;
-    acknowledgeNonClawhubInstall?: boolean;
-    acknowledgeNonClawHubInstall?: boolean;
-  }) => {
+  const resolve = async (opts: { channel?: string; account?: string }) => {
     const sourceSnapshotPromise = readConfigFileSnapshot().catch(() => null);
     const autoEnabled = applyPluginAutoEnable({
       config: getRuntimeConfig(),
@@ -120,9 +109,6 @@ export function registerDirectoryCli(program: Command) {
           runtime: defaultRuntime,
           rawChannel: explicitChannel,
           allowInstall: true,
-          acknowledgeNonClawHubInstall:
-            opts.acknowledgeNonClawHubInstall === true ||
-            opts.acknowledgeNonClawhubInstall === true,
           supports: (plugin) => Boolean(plugin.directory),
         })
       : null;
@@ -165,8 +151,6 @@ export function registerDirectoryCli(program: Command) {
     opts: {
       channel?: unknown;
       account?: unknown;
-      acknowledgeNonClawhubInstall?: unknown;
-      acknowledgeNonClawHubInstall?: unknown;
       query?: unknown;
       limit?: unknown;
       json?: unknown;
@@ -180,9 +164,6 @@ export function registerDirectoryCli(program: Command) {
     const { cfg, channelId, accountId, plugin } = await resolve({
       channel: params.opts.channel as string | undefined,
       account: params.opts.account as string | undefined,
-      acknowledgeNonClawHubInstall:
-        params.opts.acknowledgeNonClawHubInstall === true ||
-        params.opts.acknowledgeNonClawhubInstall === true,
     });
     const fn =
       params.action === "listPeers"
@@ -211,9 +192,6 @@ export function registerDirectoryCli(program: Command) {
         const { cfg, channelId, accountId, plugin } = await resolve({
           channel: opts.channel as string | undefined,
           account: opts.account as string | undefined,
-          acknowledgeNonClawHubInstall:
-            opts.acknowledgeNonClawHubInstall === true ||
-            opts.acknowledgeNonClawhubInstall === true,
         });
         const fn = plugin.directory?.self;
         if (!fn) {
@@ -298,9 +276,6 @@ export function registerDirectoryCli(program: Command) {
         const { cfg, channelId, accountId, plugin } = await resolve({
           channel: opts.channel as string | undefined,
           account: opts.account as string | undefined,
-          acknowledgeNonClawHubInstall:
-            opts.acknowledgeNonClawHubInstall === true ||
-            opts.acknowledgeNonClawhubInstall === true,
         });
         const fn = plugin.directory?.listGroupMembers;
         if (!fn) {

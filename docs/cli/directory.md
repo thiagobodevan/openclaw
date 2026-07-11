@@ -16,7 +16,6 @@ Results are meant to be pasted into other commands, especially `openclaw message
 
 - `--channel <name>`: channel id/alias (required when multiple channels are configured; auto-selected when only one is configured)
 - `--account <id>`: account id (default: channel default)
-- `--acknowledge-non-clawhub-install`: allow an installable directory-capable channel plugin to be installed after you review and trust its non-ClawHub source
 - `--json`: output JSON
 
 Default (non-JSON) output is `id` (and sometimes `name`) separated by a tab.

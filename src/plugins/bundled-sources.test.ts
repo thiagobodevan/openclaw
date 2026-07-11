@@ -198,6 +198,11 @@ describe("bundled plugin sources", () => {
       { pluginId: "diffs", localPath: appBundledPluginRoot("diffs") },
     ],
     [
+      "finds bundled source by local path",
+      { kind: "localPath", value: appBundledPluginRoot("diffs") } as const,
+      { pluginId: "diffs", localPath: appBundledPluginRoot("diffs") },
+    ],
+    [
       "returns undefined for missing plugin id",
       { kind: "pluginId", value: "not-found" } as const,
       undefined,

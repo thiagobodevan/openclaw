@@ -40,7 +40,6 @@ const GUIDED_SAFE_ONBOARD_KEYS = new Set([
   "resetScope",
   "nonInteractive",
   "classic",
-  "acknowledgeNonClawHubInstall",
 ]);
 
 function wantsClassicInteractiveSetup(opts: OnboardOptions): boolean {

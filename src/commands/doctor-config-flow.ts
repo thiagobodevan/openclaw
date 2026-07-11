@@ -149,7 +149,6 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
   let candidate = structuredClone(baseCfg);
   let pendingChanges = false;
   let fixHints: string[] = [];
-  let failedConfiguredPluginInstallIds: string[] = [];
   const doctorFixCommand = formatCliCommand("openclaw doctor --fix");
   const sourceMeta = (snapshot.sourceConfig as { meta?: { lastTouchedVersion?: unknown } })?.meta;
   const sourceLastTouchedVersion =
@@ -304,11 +303,8 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
       state: { cfg, candidate, pendingChanges, fixHints },
       doctorFixCommand,
       env: process.env,
-      acknowledgeNonClawHubInstall: params.options.acknowledgeNonClawHubInstall === true,
-      prompter: params.prompter,
     });
     ({ cfg, candidate, pendingChanges, fixHints } = repairSequence.state);
-    failedConfiguredPluginInstallIds = repairSequence.failedConfiguredPluginInstallIds;
     if (repairSequence.authProfilesRepaired) {
       await refreshGatewayAuthStateAfterAuthProfileRepair();
     }
@@ -380,7 +376,6 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     shouldWriteConfig: finalized.shouldWriteConfig,
     sourceConfigValid: snapshot.valid,
     preservedLegacyRootKeys: ["defaultModel"],
-    ...(failedConfiguredPluginInstallIds.length > 0 ? { failedConfiguredPluginInstallIds } : {}),
     ...(sourceLastTouchedVersion ? { sourceLastTouchedVersion } : {}),
     ...(legacyMigrationPartiallyValid ? { skipPluginValidationOnWrite: true } : {}),
   };

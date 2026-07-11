@@ -4,13 +4,8 @@ import { createWizardPrompter } from "../../test/helpers/wizard-prompter.js";
 import { createNonExitingRuntime } from "../runtime.js";
 import type { WizardMultiSelectParams, WizardPrompter } from "./prompts.js";
 
-type OnboardingPluginInstallRequest = {
-  acknowledgeNonClawHubInstall?: boolean;
-  cfg: Record<string, unknown>;
-};
-
 const ensureOnboardingPluginInstalled = vi.hoisted(() =>
-  vi.fn(async ({ cfg }: OnboardingPluginInstallRequest) => ({
+  vi.fn(async ({ cfg }: { cfg: Record<string, unknown> }) => ({
     cfg,
     installed: true,
     status: "installed",
@@ -164,24 +159,7 @@ describe("setupOfficialPluginInstalls", () => {
       runtime,
       workspaceDir: "/tmp/workspace",
       promptInstall: false,
-      acknowledgeNonClawHubInstall: false,
     });
-  });
-
-  it("forwards non-ClawHub install acknowledgement to selected official plugin installs", async () => {
-    const prompter = createWizardPrompter({
-      multiselect: vi.fn(async () => ["diagnostics-otel"]) as WizardPrompter["multiselect"],
-    });
-
-    await setupOfficialPluginInstalls({
-      config: {},
-      prompter,
-      runtime: createNonExitingRuntime(),
-      acknowledgeNonClawHubInstall: true,
-    });
-
-    const [installRequest] = ensureOnboardingPluginInstalled.mock.calls[0] ?? [];
-    expect(installRequest?.acknowledgeNonClawHubInstall).toBe(true);
   });
 
   it("does not install when the user skips optional plugins", async () => {

@@ -43,7 +43,6 @@ const STRICT_LITERAL_STRUCTS = new Set([
 
 const DEFAULTED_OPTIONAL_INIT_PARAM_ENTRIES: readonly [string, readonly string[]][] = [
   ["CrestodianChatResult", ["sensitive"]],
-  ["CrestodianSetupActivateParams", ["acknowledgeNonClawHubInstall"]],
   ["SendParams", ["buffer", "filename", "contentType"]],
   ["SessionOperationEvent", ["agentId"]],
   ["SessionsCompactionListParams", ["agentId"]],

@@ -3,7 +3,6 @@ import { normalizeNullableString as normalizeId } from "@openclaw/normalization-
 import { collectConfiguredAgentHarnessRuntimes } from "../../../agents/harness-runtimes.js";
 import { listPotentialConfiguredChannelPresenceSignals } from "../../../channels/config-presence.js";
 import { normalizeChatChannelId } from "../../../channels/registry.js";
-import type { NonClawHubInstallAcknowledgementRequest } from "../../../cli/non-clawhub-install-acknowledgement.js";
 import { isChannelConfigured } from "../../../config/channel-configured.js";
 import { detectPluginAutoEnableCandidates } from "../../../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -346,10 +345,6 @@ export async function maybeRunConfiguredPluginInstallReleaseStep(params: {
   env?: NodeJS.ProcessEnv;
   touchedVersion?: string | null;
   currentVersion?: string | null;
-  acknowledgeNonClawHubInstall?: boolean;
-  onNonClawHubInstall?: (
-    request: NonClawHubInstallAcknowledgementRequest,
-  ) => boolean | Promise<boolean>;
 }): Promise<{
   changes: string[];
   warnings: string[];
@@ -374,8 +369,6 @@ export async function maybeRunConfiguredPluginInstallReleaseStep(params: {
       channelIds: configured.channelIds,
       blockedPluginIds: collectBlockedPluginIds(params.cfg),
       env,
-      ...(params.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
-      ...(params.onNonClawHubInstall ? { onNonClawHubInstall: params.onNonClawHubInstall } : {}),
     });
     const warnings = [...repaired.warnings, ...(repaired.notices ?? [])];
     const postInstallDoctorResult = createPostInstallDoctorResultForDeferredRepair({
@@ -400,8 +393,6 @@ export async function maybeRunConfiguredPluginInstallReleaseStep(params: {
     channelIds: configured.channelIds,
     blockedPluginIds: collectBlockedPluginIds(params.cfg),
     env,
-    ...(params.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
-    ...(params.onNonClawHubInstall ? { onNonClawHubInstall: params.onNonClawHubInstall } : {}),
   });
   const completed = repaired.warnings.length === 0 && !updateInProgress;
   const warnings = [...repaired.warnings, ...(repaired.notices ?? [])];

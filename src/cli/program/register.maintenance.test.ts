@@ -130,16 +130,6 @@ describe("registerMaintenanceCommands doctor action", () => {
     expect(options.crossStateDirImports).toBe(false);
   });
 
-  it("maps --acknowledge-non-clawhub-install to the doctor acknowledgement option", async () => {
-    doctorCommand.mockResolvedValue(undefined);
-
-    await runMaintenanceCli(["doctor", "--fix", "--acknowledge-non-clawhub-install"]);
-
-    expect(doctorCommand).toHaveBeenCalledTimes(1);
-    const [, options] = commandCall(doctorCommand);
-    expect(options.acknowledgeNonClawHubInstall).toBe(true);
-  });
-
   it("runs doctor lint mode without invoking repair doctor", async () => {
     runDoctorLintCli.mockResolvedValue(1);
 

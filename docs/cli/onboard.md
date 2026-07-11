@@ -40,7 +40,6 @@ openclaw onboard --flow quickstart
 openclaw onboard --flow manual
 openclaw onboard --flow import
 openclaw onboard --import-from hermes --import-source ~/.hermes
-openclaw onboard --import-from codex --acknowledge-non-clawhub-install
 openclaw onboard --skip-bootstrap
 openclaw onboard --mode remote --remote-url wss://gateway-host:18789
 ```
@@ -249,12 +248,6 @@ Daemon install control: `--no-install-daemon` / `--skip-daemon` (aliases; skip g
 Skills: `--node-manager <npm|pnpm|bun>` (default `npm`), `--skip-skills`.
 
 UI and hook setup: `--skip-ui` (skip Control UI/TUI prompts), `--skip-hooks` (skip webhook/hook setup), `--skip-channels`, `--skip-search`.
-
-Plugin install acknowledgement: `--acknowledge-non-clawhub-install` lets
-onboarding install required non-ClawHub plugin sources during setup, search,
-channel, runtime, or import-provider flows after you review and trust those
-sources. Without it, noninteractive onboarding fails closed before installing
-npm, git, local/archive, npm-pack, or marketplace plugin sources.
 
 Output: `--suppress-gateway-token-output` suppresses token-bearing Gateway/UI output (token hints, auto-login URL with embedded token, and automatic Control UI launch) - useful in shared terminals and CI.
 

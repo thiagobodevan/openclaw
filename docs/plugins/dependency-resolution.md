@@ -202,7 +202,7 @@ the repository root does not prepare bundled plugin dependencies.
 | -------------------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | `npm install -g openclaw`        | Built runtime tree inside the package | OpenClaw package and explicit plugin install/update/doctor flows     |
 | Git checkout plus `pnpm install` | `extensions/<id>` workspace packages  | The pnpm workspace, including each plugin package's own dependencies |
-| Plugin install command           | Managed npm project/git/ClawHub root  | The plugin install/update flow                                       |
+| `openclaw plugins install ...`   | Managed npm project/git/ClawHub root  | The plugin install/update flow                                       |
 
 ## Legacy cleanup
 

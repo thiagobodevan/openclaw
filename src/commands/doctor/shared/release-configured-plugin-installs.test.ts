@@ -23,8 +23,6 @@ type MissingPluginInstallRepairCall = {
   pluginIds: string[];
   channelIds?: string[];
   env?: NodeJS.ProcessEnv;
-  acknowledgeNonClawHubInstall?: boolean;
-  onNonClawHubInstall?: unknown;
 };
 
 function readOnlyAutoEnableDetectionCall(): AutoEnableDetectionCall {
@@ -554,7 +552,6 @@ describe("configured plugin install release step", () => {
       changes: ['Installed missing configured plugin "codex".'],
       warnings: [],
     });
-    const onNonClawHubInstall = vi.fn(async () => true);
 
     const { maybeRunConfiguredPluginInstallReleaseStep } =
       await import("./release-configured-plugin-installs.js");
@@ -570,16 +567,12 @@ describe("configured plugin install release step", () => {
       currentVersion: "2026.5.2-beta.1",
       touchedVersion: "2026.5.1",
       env: {},
-      acknowledgeNonClawHubInstall: true,
-      onNonClawHubInstall,
     });
 
     const repairCall = readOnlyMissingPluginInstallRepairCall();
     expect(repairCall.pluginIds).toEqual(["codex"]);
     expect(repairCall.channelIds).toEqual([]);
     expect(repairCall.env).toEqual({});
-    expect(repairCall.acknowledgeNonClawHubInstall).toBe(true);
-    expect(repairCall.onNonClawHubInstall).toBe(onNonClawHubInstall);
     expect(result.touchedConfig).toBe(true);
     expect(result.completed).toBe(true);
   });

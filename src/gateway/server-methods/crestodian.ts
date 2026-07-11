@@ -93,9 +93,6 @@ export const crestodianHandlers: GatewayRequestHandlers = {
       ...(params.authChoice !== undefined ? { authChoice: params.authChoice } : {}),
       ...(params.apiKey !== undefined ? { apiKey: params.apiKey } : {}),
       ...(params.workspace !== undefined ? { workspace: params.workspace } : {}),
-      ...(params.acknowledgeNonClawHubInstall === true
-        ? { acknowledgeNonClawHubInstall: true }
-        : {}),
       surface: "gateway",
       runtime,
     });

@@ -463,11 +463,7 @@ describe("applyAuthChoiceLoadedPluginProvider", () => {
       method: provider.auth[0],
     });
 
-    const result = await applyAuthChoiceLoadedPluginProvider(
-      buildParams({
-        opts: { acknowledgeNonClawHubInstall: true },
-      }),
-    );
+    const result = await applyAuthChoiceLoadedPluginProvider(buildParams());
 
     expect(ensureOnboardingPluginInstalled).toHaveBeenCalledOnce();
     const [installParams] = ensureOnboardingPluginInstalled.mock.calls[0] ?? [];
@@ -477,7 +473,6 @@ describe("applyAuthChoiceLoadedPluginProvider", () => {
     expect(installParams.entry?.pluginId).toBe("local-provider-plugin");
     expect(installParams.entry?.label).toBe(LOCAL_PROVIDER_LABEL);
     expect(installParams.workspaceDir).toBe("/tmp/workspace");
-    expect(installParams.acknowledgeNonClawHubInstall).toBe(true);
     expect(resolvePluginProviders).toHaveBeenCalledTimes(2);
     expect(result?.config.agents?.defaults?.model).toEqual({
       primary: LOCAL_DEFAULT_MODEL,

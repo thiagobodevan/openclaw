@@ -14,7 +14,7 @@ Status: downloadable plugin (bot token + WebSocket events). Channels, private ch
 <Tabs>
   <Tab title="npm registry">
     ```bash
-    openclaw plugins install npm:@openclaw/mattermost --acknowledge-non-clawhub-install
+    openclaw plugins install @openclaw/mattermost
     ```
   </Tab>
   <Tab title="Local checkout">

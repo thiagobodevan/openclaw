@@ -118,25 +118,14 @@ describe("registerDirectoryCli", () => {
     const program = new Command().name("openclaw");
     registerDirectoryCli(program);
 
-    await program.parseAsync(
-      [
-        "directory",
-        "self",
-        "--channel",
-        "demo-directory",
-        "--acknowledge-non-clawhub-install",
-        "--json",
-      ],
-      {
-        from: "user",
-      },
-    );
+    await program.parseAsync(["directory", "self", "--channel", "demo-directory", "--json"], {
+      from: "user",
+    });
 
     expect(mocks.resolveInstallableChannelPlugin).toHaveBeenCalledTimes(1);
     const installArgs = firstRecordArg(mocks.resolveInstallableChannelPlugin);
     expect(installArgs.rawChannel).toBe("demo-directory");
     expect(installArgs.allowInstall).toBe(true);
-    expect(installArgs.acknowledgeNonClawHubInstall).toBe(true);
     expect(mocks.replaceConfigFile).toHaveBeenCalledTimes(1);
     const replaceArgs = firstRecordArg(mocks.replaceConfigFile);
     expect(replaceArgs.nextConfig).toEqual({

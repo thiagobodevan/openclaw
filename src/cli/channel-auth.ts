@@ -24,7 +24,6 @@ type ChannelAuthOptions = {
   channel?: string;
   account?: string;
   verbose?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
 };
 
 type ChannelPlugin = NonNullable<ReturnType<typeof getChannelPlugin>>;
@@ -110,7 +109,6 @@ async function resolveChannelPluginForMode(
     rawChannel: channelInput,
     ...(normalizedChannelId ? { channelId: normalizedChannelId } : {}),
     allowInstall: true,
-    ...(opts.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
     supports: (candidate) => supportsChannelAuthMode(candidate, mode),
   });
   const channelId = resolved.channelId ?? normalizedChannelId;

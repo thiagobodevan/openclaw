@@ -113,7 +113,6 @@ export type ActivateSetupInferenceParams = {
   /** Manual step only: the pasted API key or token. Never logged. */
   apiKey?: string;
   workspace?: string;
-  acknowledgeNonClawHubInstall?: boolean;
   surface: "cli" | "gateway";
   runtime: RuntimeEnv;
   deps?: ActivateSetupInferenceDeps;
@@ -665,9 +664,6 @@ async function activateSetupInferenceUnredacted(
         prompter: createQuickstartNotePrompter(params.runtime),
         runtime: params.runtime,
         workspaceDir: tempDir,
-        ...(params.acknowledgeNonClawHubInstall === true
-          ? { acknowledgeNonClawHubInstall: true }
-          : {}),
       });
       if (!ensured.installed) {
         return {

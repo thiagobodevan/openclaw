@@ -40,7 +40,7 @@ openclaw plugins info <id>                    # alias for inspect
 openclaw plugins enable <id>
 openclaw plugins disable <id>
 openclaw plugins uninstall <id> [--dry-run] [--keep-files] [--force]
-openclaw plugins update <id-or-npm-spec> | --all [--dry-run] [--acknowledge-non-clawhub-install]
+openclaw plugins update <id-or-npm-spec> | --all [--dry-run]
 openclaw plugins registry [--refresh] [--json]
 openclaw plugins doctor
 openclaw plugins init <id> [--name <name>] [--type tool|provider] [--directory <path>]
@@ -121,7 +121,8 @@ generated README for first-time ClawHub publishing and trusted-publisher setup.
 
 ```bash
 openclaw plugins search "calendar"                      # search ClawHub plugins
-openclaw plugins install <package> --acknowledge-non-clawhub-install                       # source auto-detection
+openclaw plugins install @openclaw/<package>                                               # trusted official catalog
+openclaw plugins install <package> --acknowledge-non-clawhub-install                       # arbitrary npm package
 openclaw plugins install clawhub:<package>                # ClawHub only
 openclaw plugins install npm:<package> --acknowledge-non-clawhub-install                    # npm only
 openclaw plugins install npm-pack:<path.tgz> --acknowledge-non-clawhub-install               # local npm-pack tarball
@@ -147,11 +148,12 @@ Bare package names install from npm by default during the launch cutover, unless
 </Warning>
 
 <Warning>
-ClawHub installs carry ClawHub package trust metadata. Installs from npm,
-`npm-pack:`, git, local paths or archives, and marketplace sources are outside
-ClawHub review. Interactive installs warn and ask before continuing.
-Noninteractive installs must pass `--acknowledge-non-clawhub-install` after you
-review and trust the source. This acknowledgement is separate from
+ClawHub packages and OpenClaw's bundled/official catalog are trusted install
+sources. A new arbitrary npm, `npm-pack:`, git, local path/archive, or
+marketplace source warns and asks before continuing. Noninteractive arbitrary
+installs must pass `--acknowledge-non-clawhub-install` after you review and
+trust the source. Normal updates of an already tracked install do not require
+the flag. This acknowledgement is separate from
 `--acknowledge-clawhub-risk`, which only applies to risky ClawHub release trust
 warnings.
 </Warning>
@@ -186,7 +188,7 @@ non-npm sources are not rewritten.
   <Accordion title="--force and reinstall vs update">
     `--force` reuses the existing install target and overwrites an already-installed plugin or hook pack in place. Use it when intentionally reinstalling the same id from a new local path, archive, ClawHub package, or npm artifact. For routine upgrades of an already tracked npm plugin, prefer `openclaw plugins update <id-or-npm-spec>`.
 
-    If you run `plugins install` for a plugin id that is already installed, OpenClaw stops and points you at `plugins update <id-or-npm-spec>` for a normal upgrade, or at `plugins install <package> --force` when you genuinely want to overwrite the current install from a different source. `--force` is not supported with `--link`.
+    If you run `plugins install` for a plugin id that is already installed, OpenClaw stops and points you at `plugins update <id-or-npm-spec>` for a normal upgrade, or at `plugins install <package> --force --acknowledge-non-clawhub-install` when you genuinely want to overwrite the current install from an arbitrary different source. Trusted ClawHub and OpenClaw-catalog sources do not need the acknowledgement flag. `--force` is not supported with `--link`.
 
   </Accordion>
   <Accordion title="--pin scope">
@@ -213,7 +215,7 @@ non-npm sources are not rewritten.
 
     Use `npm:<package>` to make npm resolution explicit. Bare package specs also install directly from npm during the launch cutover unless they match an official plugin id.
 
-    Raw `@openclaw/*` specs that match bundled plugins resolve to the image-owned bundled copy before npm fallback. For example, `openclaw plugins install @openclaw/discord@2026.5.20 --pin` uses the bundled Discord plugin from the current OpenClaw build instead of creating a managed npm override. To force the external npm package, use `openclaw plugins install npm:@openclaw/discord@2026.5.20 --pin --acknowledge-non-clawhub-install`.
+    Raw `@openclaw/*` specs that match bundled plugins resolve to the image-owned bundled copy before npm fallback. For example, `openclaw plugins install @openclaw/discord@2026.5.20 --pin` uses the bundled Discord plugin from the current OpenClaw build instead of creating a managed npm override. To force the external npm package, use `openclaw plugins install npm:@openclaw/discord@2026.5.20 --pin`.
 
     Bare specs and `@latest` stay on the stable track. OpenClaw date-stamped correction versions such as `2026.5.3-1` count as stable for this check. If npm resolves either form to a prerelease, OpenClaw stops and asks you to opt in explicitly with a prerelease tag (`@beta`/`@rc`) or an exact prerelease version (`@1.2.3-beta.4`).
 
@@ -261,7 +263,7 @@ Use `npm:` to make npm-only resolution explicit:
 
 ```bash
 openclaw plugins install npm:openclaw-codex-app-server --acknowledge-non-clawhub-install
-openclaw plugins install npm:@openclaw/discord@2026.5.20 --acknowledge-non-clawhub-install
+openclaw plugins install npm:@openclaw/discord@2026.5.20
 openclaw plugins install npm:@scope/plugin-name@1.0.1 --acknowledge-non-clawhub-install
 ```
 
@@ -428,13 +430,12 @@ openclaw plugins update <id-or-npm-spec>
 openclaw plugins update --all
 openclaw plugins update <id-or-npm-spec> --dry-run
 openclaw plugins update @openclaw/voice-call
-openclaw plugins update @acme/demo --acknowledge-non-clawhub-install
+openclaw plugins update @acme/demo
 openclaw plugins update openclaw-codex-app-server --acknowledge-clawhub-risk
 openclaw plugins update openclaw-codex-app-server --dangerously-force-unsafe-install
 ```
 
-Updates apply to tracked plugin installs in the managed plugin index and tracked hook-pack installs in `hooks.internal.installs`.
-Live updates from npm, Git, and marketplace sources show their provenance and require interactive confirmation. For reviewed automation, pass `--acknowledge-non-clawhub-install`; dry runs do not require acknowledgement because they do not replace installed package contents.
+Updates apply to tracked plugin installs in the managed plugin index and tracked hook-pack installs in `hooks.internal.installs`. They reuse the source that the user already chose when installing the plugin, so they do not require a second source acknowledgement.
 
 <AccordionGroup>
   <Accordion title="Resolving plugin id vs npm spec">
@@ -478,7 +479,7 @@ openclaw plugins inspect <id> --json
 openclaw plugins inspect --all
 ```
 
-Inspect shows identity, load status, source, manifest capabilities, policy flags, diagnostics, install metadata, bundle capabilities, and any detected MCP or LSP server support without importing plugin runtime by default. JSON output includes the plugin manifest contracts, such as `contracts.agentToolResultMiddleware` and `contracts.trustedToolPolicies`, so operators can audit trusted-surface declarations before enabling or restarting a plugin. Add `--runtime` to load the plugin module and include registered hooks, tools, commands, services, gateway methods, and HTTP routes. Runtime inspection reports missing plugin dependencies directly; installs and repairs stay in the plugin install, plugin update, and `openclaw doctor --fix` flows.
+Inspect shows identity, load status, source, manifest capabilities, policy flags, diagnostics, install metadata, bundle capabilities, and any detected MCP or LSP server support without importing plugin runtime by default. JSON output includes the plugin manifest contracts, such as `contracts.agentToolResultMiddleware` and `contracts.trustedToolPolicies`, so operators can audit trusted-surface declarations before enabling or restarting a plugin. Add `--runtime` to load the plugin module and include registered hooks, tools, commands, services, gateway methods, and HTTP routes. Runtime inspection reports missing plugin dependencies directly; installs and repairs stay in `openclaw plugins install`, `openclaw plugins update`, and `openclaw doctor --fix`.
 
 Plugin-owned CLI commands are usually installed as root `openclaw` command groups, but plugins may also register nested commands under a core parent such as `openclaw nodes`. After `inspect --runtime` shows a command under `cliCommands`, run it at the listed path; for example a plugin that registers `demo-git` can be verified with `openclaw demo-git ping`.
 

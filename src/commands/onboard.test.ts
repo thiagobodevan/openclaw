@@ -196,19 +196,6 @@ describe("setupWizardCommand", () => {
     expect(mocks.runNonInteractiveSetup).not.toHaveBeenCalled();
   });
 
-  it("keeps non-ClawHub acknowledgement on the guided flow", async () => {
-    const runtime = makeRuntime();
-
-    await setupWizardCommand({ acknowledgeNonClawHubInstall: true }, runtime);
-
-    expect(mocks.runGuidedOnboarding).toHaveBeenCalledWith(
-      { acknowledgeNonClawHubInstall: true },
-      runtime,
-    );
-    expect(mocks.runInteractiveSetup).not.toHaveBeenCalled();
-    expect(mocks.runNonInteractiveSetup).not.toHaveBeenCalled();
-  });
-
   it.each([
     ["--classic", { classic: true }],
     ["--flow quickstart", { flow: "quickstart" as const }],

@@ -69,11 +69,14 @@ async function runOneShot(
   opts: RunCrestodianOptions,
 ): Promise<void> {
   const operation = await resolveCrestodianOperation(input, runtime, opts);
-  await executeCrestodianOperation(operation, runtime, {
+  const result = await executeCrestodianOperation(operation, runtime, {
     approved: opts.yes === true || !isPersistentCrestodianOperation(operation),
     ...(opts.acknowledgeNonClawHubInstall === true ? { acknowledgeNonClawHubInstall: true } : {}),
     deps: crestodianCommandDepsFromOptions(opts),
   });
+  if (operation.kind === "plugin-install" && opts.yes === true && !result.applied) {
+    runtime.exit(1);
+  }
 }
 
 /** Run Crestodian in JSON, one-shot message, or interactive TUI mode. */

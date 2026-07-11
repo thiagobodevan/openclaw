@@ -8,7 +8,6 @@ import {
 import { upsertAuthProfileWithLock } from "../agents/auth-profiles.js";
 import { formatLiteralProviderPrefixedModelRef } from "../agents/model-ref-shared.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
-import type { RuntimePluginInstallResult } from "../commands/runtime-plugin-install.js";
 import { normalizeAgentModelRefForConfig } from "../config/model-input.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { openUrl } from "../infra/browser-open.js";
@@ -116,10 +115,6 @@ function resolveConfiguredDefaultModelPrimary(cfg: OpenClawConfig): string | und
   return undefined;
 }
 
-function isMissingRequiredRuntimePlugin(result: RuntimePluginInstallResult): boolean {
-  return result.required && !result.installed;
-}
-
 async function noteDefaultModelResult(params: {
   previousPrimary: string | undefined;
   selectedModel: string;
@@ -158,7 +153,6 @@ async function applyDefaultModelFromAuthChoice(params: {
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
   workspaceDir?: string;
-  acknowledgeNonClawHubInstall?: boolean;
   runSelectedModelHook: (config: OpenClawConfig) => Promise<void>;
 }): Promise<OpenClawConfig> {
   const defaultModelBaseConfig = params.configBeforeProviderAuth ?? params.config;
@@ -183,12 +177,9 @@ async function applyDefaultModelFromAuthChoice(params: {
       prompter: params.prompter,
       runtime: params.runtime,
       ...(params.workspaceDir !== undefined ? { workspaceDir: params.workspaceDir } : {}),
-      ...(params.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
     });
     nextConfig = codexInstall.cfg;
-    if (isMissingRequiredRuntimePlugin(codexInstall)) {
-      return restoreConfiguredPrimaryModel(nextConfig, defaultModelBaseConfig);
-    }
+    await params.runSelectedModelHook(nextConfig);
     if (codexInstall.installed) {
       // Offer Codex CLI state migration whenever the harness is in place for
       // the selected model, regardless of whether this run was a fresh install
@@ -213,13 +204,8 @@ async function applyDefaultModelFromAuthChoice(params: {
       prompter: params.prompter,
       runtime: params.runtime,
       ...(params.workspaceDir !== undefined ? { workspaceDir: params.workspaceDir } : {}),
-      ...(params.acknowledgeNonClawHubInstall ? { acknowledgeNonClawHubInstall: true } : {}),
     });
     nextConfig = copilotInstall.cfg;
-    if (isMissingRequiredRuntimePlugin(copilotInstall)) {
-      return restoreConfiguredPrimaryModel(nextConfig, defaultModelBaseConfig);
-    }
-    await params.runSelectedModelHook(nextConfig);
   }
   await noteDefaultModelResult({
     previousPrimary,
@@ -491,7 +477,6 @@ export async function applyAuthChoiceLoadedPluginProvider(
       prompter: params.prompter,
       runtime: params.runtime,
       workspaceDir,
-      acknowledgeNonClawHubInstall: params.opts?.acknowledgeNonClawHubInstall === true,
     });
     if (!installResult.installed) {
       return { config: installResult.cfg, retrySelection: true };
@@ -540,7 +525,6 @@ export async function applyAuthChoiceLoadedPluginProvider(
         prompter: params.prompter,
         runtime: params.runtime,
         workspaceDir,
-        acknowledgeNonClawHubInstall: params.opts?.acknowledgeNonClawHubInstall === true,
         runSelectedModelHook: async (config) => {
           await runProviderModelSelectedHook({
             config,
@@ -635,7 +619,6 @@ export async function applyAuthChoicePluginProvider(
         prompter: params.prompter,
         runtime: params.runtime,
         workspaceDir,
-        acknowledgeNonClawHubInstall: params.opts?.acknowledgeNonClawHubInstall === true,
         runSelectedModelHook: async (config) => {
           await runProviderModelSelectedHook({
             config,

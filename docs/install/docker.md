@@ -389,7 +389,7 @@ If you installed from the older `scripts/shell-helpers/clawdock-helpers.sh` path
       '    cap_drop: !reset []' \
       > docker-compose.cli-no-dropped-caps.local.yml
 
-    docker compose -f docker-compose.yml -f docker-compose.cli-no-dropped-caps.local.yml run --rm openclaw-cli plugins install <package>
+    docker compose -f docker-compose.yml -f docker-compose.cli-no-dropped-caps.local.yml run --rm openclaw-cli plugins install <package> --acknowledge-non-clawhub-install
     ```
 
     If you already created a long-running `openclaw-cli` container, recreate it with the same override — `docker compose exec`/`docker exec` can't change Linux capabilities on an already-created container.

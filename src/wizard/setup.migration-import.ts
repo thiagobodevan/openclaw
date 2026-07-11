@@ -367,7 +367,6 @@ async function resolveSetupMigrationProvider(params: {
   prompter: WizardPrompter;
   runtime: RuntimeEnv;
   workspaceDir: string;
-  acknowledgeNonClawHubInstall?: boolean;
 }): Promise<{ provider: MigrationProviderPlugin; baseConfig: OpenClawConfig }> {
   const { ensureStandaloneMigrationProviderRegistryLoaded, resolvePluginMigrationProvider } =
     await loadMigrationProviderRuntimeModule();
@@ -395,7 +394,6 @@ async function resolveSetupMigrationProvider(params: {
     runtime: params.runtime,
     workspaceDir: params.workspaceDir,
     promptInstall: false,
-    acknowledgeNonClawHubInstall: params.acknowledgeNonClawHubInstall === true,
   });
   if (!result.installed) {
     throw new Error(`Could not install migration provider "${params.providerId}".`);
@@ -498,7 +496,6 @@ export async function runSetupMigrationImport(params: {
     prompter: params.prompter,
     runtime: params.runtime,
     workspaceDir,
-    acknowledgeNonClawHubInstall: params.opts.acknowledgeNonClawHubInstall === true,
   });
   const migrationLogger = createMigrationLogger(params.runtime);
   const selectedDetections = [...params.detections];

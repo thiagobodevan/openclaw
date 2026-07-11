@@ -2,18 +2,6 @@
 import type { Command } from "commander";
 import { formatDocsLink } from "../../packages/terminal-core/src/links.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
-import { NON_CLAWHUB_INSTALL_ACK_FLAG } from "./non-clawhub-install-acknowledgement.js";
-
-type CommanderNonClawHubInstallOptions = {
-  acknowledgeNonClawHubInstall?: boolean;
-  acknowledgeNonClawhubInstall?: boolean;
-};
-
-function normalizeNonClawHubInstallAcknowledgement(
-  opts: CommanderNonClawHubInstallOptions,
-): boolean {
-  return opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true;
-}
 
 type ModelsCliRuntime = typeof import("./models-cli.runtime.js");
 
@@ -127,19 +115,12 @@ export function registerModelsCli(program: Command) {
     .command("set")
     .description("Set the default model")
     .argument("<model>", "Model id or alias")
-    .option(
-      NON_CLAWHUB_INSTALL_ACK_FLAG,
-      "Acknowledge runtime plugin installs outside ClawHub review",
-      false,
-    )
-    .action(async (model: string, opts: CommanderNonClawHubInstallOptions, command: Command) => {
+    .action(async (model: string, _opts: unknown, command: Command) => {
       const runtime = await loadModelsRuntime();
       runtime.rejectAgentScopedModelWrite(command, "set");
       await runtime.runModelsCommand(async () => {
         const { modelsSetCommand } = await import("../commands/models/set.js");
-        await modelsSetCommand(model, runtime.defaultRuntime, {
-          acknowledgeNonClawHubInstall: normalizeNonClawHubInstallAcknowledgement(opts),
-        });
+        await modelsSetCommand(model, runtime.defaultRuntime);
       });
     });
 

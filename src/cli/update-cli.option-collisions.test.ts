@@ -49,7 +49,6 @@ function firstCallOptions(mock: { mock: { calls: unknown[][] } }) {
 
 type UpdateFinalizeCommandOptions = {
   acknowledgeClawHubRisk?: boolean;
-  acknowledgeNonClawHubInstall?: boolean;
   json?: boolean;
   timeout?: string;
   restart?: boolean;
@@ -84,7 +83,6 @@ describe("update cli option collisions", () => {
       argv: [
         "update",
         "--acknowledge-clawhub-risk",
-        "--acknowledge-non-clawhub-install",
         "finalize",
         "--json",
         "--timeout",
@@ -100,7 +98,6 @@ describe("update cli option collisions", () => {
         expect(opts?.timeout).toBe("17");
         expect(opts?.restart).toBe(false);
         expect(opts?.acknowledgeClawHubRisk).toBe(true);
-        expect(opts?.acknowledgeNonClawHubInstall).toBe(true);
       },
     },
     {
@@ -148,30 +145,6 @@ describe("update cli option collisions", () => {
         expect(updateWizardCommand).toHaveBeenCalledTimes(1);
         const opts = firstCallOptions(updateWizardCommand);
         expect((opts as { timeout?: string } | undefined)?.timeout).toBe("13");
-      },
-    },
-    {
-      name: "forwards parent-captured non-ClawHub acknowledgement to `update wizard`",
-      argv: ["update", "--acknowledge-non-clawhub-install", "wizard"],
-      assert: () => {
-        expect(updateWizardCommand).toHaveBeenCalledTimes(1);
-        const opts = firstCallOptions(updateWizardCommand);
-        expect(
-          (opts as { acknowledgeNonClawHubInstall?: boolean } | undefined)
-            ?.acknowledgeNonClawHubInstall,
-        ).toBe(true);
-      },
-    },
-    {
-      name: "forwards local non-ClawHub acknowledgement to `update wizard`",
-      argv: ["update", "wizard", "--acknowledge-non-clawhub-install"],
-      assert: () => {
-        expect(updateWizardCommand).toHaveBeenCalledTimes(1);
-        const opts = firstCallOptions(updateWizardCommand);
-        expect(
-          (opts as { acknowledgeNonClawHubInstall?: boolean } | undefined)
-            ?.acknowledgeNonClawHubInstall,
-        ).toBe(true);
       },
     },
   ])("$name", async ({ argv, assert }) => {

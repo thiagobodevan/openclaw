@@ -35,7 +35,7 @@ Gateway, then restart the Gateway to load it.
       <Tab title="From a local folder (dev)">
         ```bash
         PLUGIN_SRC=./path/to/local/voice-call-plugin
-        openclaw plugins install "$PLUGIN_SRC"
+        openclaw plugins install "$PLUGIN_SRC" --acknowledge-non-clawhub-install
         cd "$PLUGIN_SRC" && pnpm install
         ```
       </Tab>

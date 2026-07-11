@@ -34,11 +34,9 @@ import {
   resolveMarketplaceInstallShortcut,
 } from "../plugins/marketplace.js";
 import {
-  getOfficialExternalPluginCatalogEntryForPackage,
-  getOfficialExternalPluginCatalogEntry,
-  resolveOfficialExternalPluginId,
-  resolveOfficialExternalPluginInstall,
-} from "../plugins/official-external-plugin-catalog.js";
+  resolveCatalogOfficialExternalInstallPlan,
+  resolveCatalogOfficialExternalNpmPackageTrust,
+} from "../plugins/official-external-install-trust.js";
 import { tracePluginLifecyclePhaseAsync } from "../plugins/plugin-lifecycle-trace.js";
 import { validateJsonSchemaValue } from "../plugins/schema-validator.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
@@ -61,8 +59,6 @@ import {
 import {
   resolveBundledInstallPlanBeforeNpm,
   resolveBundledInstallPlanForNpmFailure,
-  resolveOfficialExternalInstallPlanBeforeNpm,
-  resolveOfficialExternalNpmPackageTrust,
 } from "./plugin-install-plan.js";
 import {
   createHookPackInstallLogger,
@@ -129,32 +125,6 @@ async function probeHookPackFromPath(
 
 const DEPRECATED_DANGEROUS_FORCE_UNSAFE_INSTALL_WARNING =
   "--dangerously-force-unsafe-install is deprecated and no longer affects plugin installs because built-in install-time dangerous-code scanning has been removed. Configure security.installPolicy for operator-owned install decisions.";
-
-function findTrustedCatalogPackageInstall(packageName: string):
-  | {
-      pluginId: string;
-      npmSpec?: string;
-      expectedIntegrity?: string;
-    }
-  | undefined {
-  // The catalog is the trust list. Raw npm selectors such as
-  // @scope/pkg@latest inherit install-scan trust when their package name is
-  // cataloged; integrity remains tied to exact catalog specs in the planner.
-  const entry = getOfficialExternalPluginCatalogEntryForPackage(packageName);
-  if (!entry) {
-    return undefined;
-  }
-  const pluginId = resolveOfficialExternalPluginId(entry);
-  if (!pluginId) {
-    return undefined;
-  }
-  const install = resolveOfficialExternalPluginInstall(entry);
-  return {
-    pluginId,
-    ...(install?.npmSpec ? { npmSpec: install.npmSpec } : {}),
-    ...(install?.expectedIntegrity ? { expectedIntegrity: install.expectedIntegrity } : {}),
-  };
-}
 
 function isEmptyRecord(value: Record<string, unknown>): boolean {
   return Object.keys(value).length === 0;
@@ -968,24 +938,7 @@ export async function runPluginInstallCommand(params: {
       });
   const officialExternalPlan = resolvesToLocalPath
     ? null
-    : resolveOfficialExternalInstallPlanBeforeNpm({
-        rawSpec: raw,
-        findOfficialExternalPlugin: (pluginId) => {
-          const entry = getOfficialExternalPluginCatalogEntry(pluginId);
-          const resolvedPluginId = entry ? resolveOfficialExternalPluginId(entry) : undefined;
-          const install = entry ? resolveOfficialExternalPluginInstall(entry) : null;
-          const npmSpec = install?.npmSpec;
-          return resolvedPluginId && npmSpec
-            ? {
-                pluginId: resolvedPluginId,
-                npmSpec,
-                ...(install.expectedIntegrity
-                  ? { expectedIntegrity: install.expectedIntegrity }
-                  : {}),
-              }
-            : undefined;
-        },
-      });
+    : resolveCatalogOfficialExternalInstallPlan(raw);
   if (bundledPreNpmPlan || officialExternalPlan) {
     request = { ...request, installKind: "plugin" };
   }
@@ -1048,7 +1001,11 @@ export async function runPluginInstallCommand(params: {
   }
 
   if (fs.existsSync(resolved)) {
+    const bundledLocalSource = resolveArchiveKind(resolved)
+      ? undefined
+      : findBundledPluginSource({ lookup: { kind: "localPath", value: resolved } });
     if (
+      !bundledLocalSource &&
       !(await acknowledgeNonClawHubSource(
         resolveArchiveKind(resolved) ? "local-archive" : "local-path",
         resolved,
@@ -1210,13 +1167,10 @@ export async function runPluginInstallCommand(params: {
       );
       return runtime.exit(1);
     }
-    if (!(await acknowledgeNonClawHubSource("npm", npmPrefixSpec))) {
+    const officialNpmTrust = resolveCatalogOfficialExternalNpmPackageTrust(npmPrefixSpec);
+    if (!officialNpmTrust && !(await acknowledgeNonClawHubSource("npm", npmPrefixSpec))) {
       return runtime.exit(1);
     }
-    const officialNpmTrust = resolveOfficialExternalNpmPackageTrust({
-      npmSpec: npmPrefixSpec,
-      findOfficialExternalPackage: findTrustedCatalogPackageInstall,
-    });
     const npmPrefixResult = await tryInstallPluginOrHookPackFromNpmSpec({
       snapshot,
       installMode,
@@ -1327,9 +1281,6 @@ export async function runPluginInstallCommand(params: {
   }
 
   if (officialExternalPlan) {
-    if (!(await acknowledgeNonClawHubSource("npm", officialExternalPlan.npmSpec))) {
-      return runtime.exit(1);
-    }
     const npmResult = await tryInstallPluginOrHookPackFromNpmSpec({
       snapshot,
       installMode,
@@ -1383,11 +1334,8 @@ export async function runPluginInstallCommand(params: {
     return;
   }
 
-  const officialNpmTrust = resolveOfficialExternalNpmPackageTrust({
-    npmSpec: raw,
-    findOfficialExternalPackage: findTrustedCatalogPackageInstall,
-  });
-  if (!(await acknowledgeNonClawHubSource("npm", raw))) {
+  const officialNpmTrust = resolveCatalogOfficialExternalNpmPackageTrust(raw);
+  if (!officialNpmTrust && !(await acknowledgeNonClawHubSource("npm", raw))) {
     return runtime.exit(1);
   }
   const npmResult = await tryInstallPluginOrHookPackFromNpmSpec({

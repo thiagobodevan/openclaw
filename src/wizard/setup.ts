@@ -577,7 +577,6 @@ async function runSetupWizardOnce(
       forceAllowFromChannels: quickstartAllowFromChannels,
       skipDmPolicyPrompt: flow === "quickstart",
       skipConfirm: flow === "quickstart",
-      acknowledgeNonClawHubInstall: opts.acknowledgeNonClawHubInstall === true,
       quickstartDefaults: flow === "quickstart",
       secretInputMode: opts.secretInputMode,
     });
@@ -598,7 +597,6 @@ async function runSetupWizardOnce(
   } else {
     const { setupSearch } = await import("../commands/onboard-search.js");
     nextConfig = await setupSearch(nextConfig, runtime, prompter, {
-      acknowledgeNonClawHubInstall: opts.acknowledgeNonClawHubInstall === true,
       quickstartDefaults: flow === "quickstart",
       secretInputMode: opts.secretInputMode,
     });
@@ -621,7 +619,6 @@ async function runSetupWizardOnce(
       prompter,
       runtime,
       workspaceDir,
-      acknowledgeNonClawHubInstall: opts.acknowledgeNonClawHubInstall === true,
     });
     const { setupPluginConfig } = await import("./setup.plugin-config.js");
     nextConfig = await setupPluginConfig({

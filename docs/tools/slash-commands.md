@@ -431,13 +431,15 @@ updates persist across restarts.
 /plugins enable context7
 /plugins disable context7
 /plugins install clawhub:<package>
+/plugins install npm:@openclaw/<official-package>
 ```
 
 `/plugins enable|disable` updates plugin config and hot-reloads the Gateway
 plugin runtime for new agent turns. `/plugins install` restarts managed
 Gateways automatically because plugin source modules changed. Chat installs are
-ClawHub-only; install npm, git, archive, marketplace, or local path sources from
-a trusted local shell with `openclaw plugins install ... --acknowledge-non-clawhub-install`
+limited to ClawHub and packages matched by OpenClaw's official catalog. Install
+arbitrary npm, git, archive, marketplace, or local path sources from a trusted
+local shell with `openclaw plugins install ... --acknowledge-non-clawhub-install`
 after reviewing the source.
 
 ## `/trace`: plugin trace output

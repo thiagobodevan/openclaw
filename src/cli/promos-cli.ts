@@ -2,21 +2,8 @@
 import type { Command } from "commander";
 import { formatDocsLink } from "../../packages/terminal-core/src/links.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
-import type { PromosClaimOptions } from "../commands/promos/claim.js";
 import { defaultRuntime } from "../runtime.js";
 import { runCommandWithRuntime } from "./cli-utils.js";
-import { NON_CLAWHUB_INSTALL_ACK_FLAG } from "./non-clawhub-install-acknowledgement.js";
-
-type CommanderPromosClaimOptions = {
-  acknowledgeNonClawHubInstall?: boolean;
-  acknowledgeNonClawhubInstall?: boolean;
-  apiKey?: string;
-  setDefault?: boolean;
-};
-
-function normalizeNonClawHubInstallAcknowledgement(opts: CommanderPromosClaimOptions): boolean {
-  return opts.acknowledgeNonClawHubInstall === true || opts.acknowledgeNonClawhubInstall === true;
-}
 
 export function registerPromosCli(program: Command) {
   const promos = program
@@ -47,21 +34,11 @@ export function registerPromosCli(program: Command) {
     // `onboard --token` non-interactive contract (AGENTS.md: public API). The
     // no-argv alternative is the provider's env var, detected as existing auth.
     .option("--api-key <key>", "Provider API key for non-interactive setup")
-    .option(
-      NON_CLAWHUB_INSTALL_ACK_FLAG,
-      "Acknowledge provider plugin installs whose source is outside ClawHub review",
-      false,
-    )
     .option("--set-default", "Set the promotion's suggested model as default without asking", false)
-    .action(async (slug: string, opts: CommanderPromosClaimOptions) => {
+    .action(async (slug: string, opts: { apiKey?: string; setDefault?: boolean }) => {
       await runCommandWithRuntime(defaultRuntime, async () => {
         const { promosClaimCommand } = await import("../commands/promos/claim.js");
-        const claimOptions: PromosClaimOptions = {
-          ...(opts.apiKey !== undefined ? { apiKey: opts.apiKey } : {}),
-          ...(opts.setDefault === true ? { setDefault: true } : {}),
-          acknowledgeNonClawHubInstall: normalizeNonClawHubInstallAcknowledgement(opts),
-        };
-        await promosClaimCommand(slug, claimOptions, defaultRuntime);
+        await promosClaimCommand(slug, opts, defaultRuntime);
       });
     });
 }

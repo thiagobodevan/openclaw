@@ -134,9 +134,7 @@ describe("sdk-loader", () => {
       }),
     ).rejects.toMatchObject({
       code: "COPILOT_SDK_MISSING",
-      message: expect.stringContaining(
-        "openclaw plugins install @openclaw/copilot --acknowledge-non-clawhub-install",
-      ),
+      message: expect.stringContaining("openclaw plugins install @openclaw/copilot"),
     });
 
     expect(fallbackImport).not.toHaveBeenCalled();
@@ -163,9 +161,7 @@ describe("sdk-loader", () => {
     expect(message).toContain("primary boom");
     expect(message).toContain(path.join(fallbackDir, "node_modules", "@github", "copilot-sdk"));
     expect(message).toContain(COPILOT_SDK_SPEC);
-    expect(message).toContain(
-      "openclaw plugins install @openclaw/copilot --acknowledge-non-clawhub-install",
-    );
+    expect(message).toContain("openclaw plugins install @openclaw/copilot");
   });
 
   it("caches successful loads across calls when cache is enabled", async () => {
