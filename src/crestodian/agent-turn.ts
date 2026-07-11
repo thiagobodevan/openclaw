@@ -96,7 +96,9 @@ function extractRunText(result: EmbeddedRunResult): string | undefined {
 
 function discardUnannouncedProposal(
   proposalRef: import("../agents/tools/crestodian-tool.js").CrestodianToolProposalRef,
-  proposalBeforeTurn: import("../agents/tools/crestodian-tool.js").CrestodianToolProposal | undefined,
+  proposalBeforeTurn:
+    | import("../agents/tools/crestodian-tool.js").CrestodianToolProposal
+    | undefined,
 ): void {
   // A failed/invisible turn cannot leave a newly registered mutation armable:
   // the planner fallback never showed that proposal to the user. Preserve a
@@ -389,8 +391,8 @@ export async function runCrestodianAgentTurnWithDeps(
           : {}),
       })) as EmbeddedRunResult;
     }
-    const text = extractRunText(result)?.trim() ?? "";
-    if (!text && !params.session.proposalRef.current) {
+    const text = extractRunText(result)?.trim();
+    if (!text) {
       discardUnannouncedProposal(params.session.proposalRef, proposalBeforeTurn);
       return null;
     }
