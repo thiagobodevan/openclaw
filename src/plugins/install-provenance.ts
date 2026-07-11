@@ -1,5 +1,8 @@
 // Shared policy and messaging for installs outside OpenClaw's trusted plugin sources.
 import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
+import { parseRegistryNpmSpec } from "../infra/npm-registry-spec.js";
+import { findBundledPluginSource } from "./bundled-sources.js";
+import { resolveCatalogOfficialExternalNpmPackageTrust } from "./official-external-install-trust.js";
 
 export const NON_CLAWHUB_INSTALL_ACK_FLAG = "--acknowledge-non-clawhub-install";
 
@@ -10,6 +13,23 @@ export type NonClawHubInstallSourceClass =
   | "marketplace"
   | "npm"
   | "npm-pack";
+
+export function resolveOpenClawTrustedNpmPackageInstall(npmSpec: string): {
+  pluginId: string;
+  expectedIntegrity?: string;
+} | null {
+  const packageName = parseRegistryNpmSpec(npmSpec)?.name;
+  if (!packageName) {
+    return null;
+  }
+  const bundled = findBundledPluginSource({
+    lookup: { kind: "npmSpec", value: packageName },
+  });
+  if (bundled) {
+    return { pluginId: bundled.pluginId };
+  }
+  return resolveCatalogOfficialExternalNpmPackageTrust(npmSpec);
+}
 
 const sourceClassLabels: Record<NonClawHubInstallSourceClass, string> = {
   git: "Git repository",

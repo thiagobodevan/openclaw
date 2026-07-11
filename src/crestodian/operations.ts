@@ -17,11 +17,9 @@ import { findBundledPluginSource } from "../plugins/bundled-sources.js";
 import {
   formatNonClawHubInstallWarning,
   NON_CLAWHUB_INSTALL_ACK_FLAG,
+  resolveOpenClawTrustedNpmPackageInstall,
 } from "../plugins/install-provenance.js";
-import {
-  resolveCatalogOfficialExternalInstallPlan,
-  resolveCatalogOfficialExternalNpmPackageTrust,
-} from "../plugins/official-external-install-trust.js";
+import { resolveCatalogOfficialExternalInstallPlan } from "../plugins/official-external-install-trust.js";
 import { buildAgentMainSessionKey, normalizeAgentId } from "../routing/session-key.js";
 import type { RuntimeEnv } from "../runtime.js";
 import type { TuiResult } from "../tui/tui-types.js";
@@ -643,14 +641,14 @@ function isTrustedCrestodianPluginInstallSpec(spec: string): boolean {
   const explicitNpm = trimmed.toLowerCase().startsWith("npm:");
   const npmSpec = explicitNpm ? trimmed.slice("npm:".length) : trimmed;
   if (explicitNpm) {
-    return resolveCatalogOfficialExternalNpmPackageTrust(npmSpec) !== null;
+    return resolveOpenClawTrustedNpmPackageInstall(npmSpec) !== null;
   }
   return Boolean(
     resolveBundledInstallPlanBeforeNpm({
       rawSpec: npmSpec,
       findBundledSource: (lookup) => findBundledPluginSource({ lookup }),
     }) ??
-    resolveCatalogOfficialExternalNpmPackageTrust(npmSpec) ??
+    resolveOpenClawTrustedNpmPackageInstall(npmSpec) ??
     resolveCatalogOfficialExternalInstallPlan(npmSpec),
   );
 }

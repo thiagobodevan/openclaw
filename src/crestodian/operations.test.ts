@@ -817,6 +817,26 @@ describe("parseCrestodianOperation", () => {
     expect(requireFirstMockCall(runPluginInstall, "runPluginInstall")[0]).toBe("memory-core");
   });
 
+  it("does not require source acknowledgement for a bundled npm package", async () => {
+    const tempDir = opTempDirs.make("crestodian-bundled-plugin-package-install-");
+    setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
+    const { runtime } = createCrestodianTestRuntime();
+    const runPluginInstall = vi.fn(async (spec: string, pluginRuntime: RuntimeEnv) => {
+      pluginRuntime.log(`installed ${spec}`);
+    });
+
+    const result = await executeCrestodianOperation(
+      { kind: "plugin-install", spec: "npm:@openclaw/discord" },
+      runtime,
+      { approved: true, deps: { runPluginInstall } },
+    );
+
+    expect(result.applied).toBe(true);
+    expect(requireFirstMockCall(runPluginInstall, "runPluginInstall")[0]).toBe(
+      "npm:@openclaw/discord",
+    );
+  });
+
   it("keeps explicit npm package semantics separate from official plugin ids", async () => {
     const { runtime } = createCrestodianTestRuntime();
     const runPluginInstall = vi.fn(async () => {});

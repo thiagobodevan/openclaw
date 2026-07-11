@@ -27,14 +27,12 @@ import {
 import {
   formatNonClawHubInstallWarning,
   NON_CLAWHUB_INSTALL_ACK_FLAG,
+  resolveOpenClawTrustedNpmPackageInstall,
   type NonClawHubInstallSourceClass,
 } from "../../plugins/install-provenance.js";
 import { installPluginFromNpmSpec } from "../../plugins/install.js";
 import { loadInstalledPluginIndexInstallRecords } from "../../plugins/installed-plugin-index-records.js";
-import {
-  resolveCatalogOfficialExternalInstallPlan,
-  resolveCatalogOfficialExternalNpmPackageTrust,
-} from "../../plugins/official-external-install-trust.js";
+import { resolveCatalogOfficialExternalInstallPlan } from "../../plugins/official-external-install-trust.js";
 import { refreshPluginRegistryAfterConfigMutation } from "../../plugins/registry-refresh.js";
 import type { PluginRecord } from "../../plugins/registry.js";
 import {
@@ -292,15 +290,15 @@ async function installPluginFromPluginsCommand(params: {
   const npmSpec = params.raw.trim().toLowerCase().startsWith("npm:")
     ? params.raw.trim().slice("npm:".length)
     : params.raw;
-  const officialNpmTrust = resolveCatalogOfficialExternalNpmPackageTrust(npmSpec);
+  const trustedNpmInstall = resolveOpenClawTrustedNpmPackageInstall(npmSpec);
   const officialIdPlan = resolveCatalogOfficialExternalInstallPlan(params.raw);
-  if (!officialNpmTrust && !officialIdPlan) {
+  if (!trustedNpmInstall && !officialIdPlan) {
     return rejectNonClawHubChatInstall({ sourceClass: "npm", spec: params.raw });
   }
-  const trustedPluginId = officialNpmTrust?.pluginId ?? officialIdPlan?.pluginId;
+  const trustedPluginId = trustedNpmInstall?.pluginId ?? officialIdPlan?.pluginId;
   const trustedNpmSpec = officialIdPlan?.npmSpec ?? npmSpec;
   const expectedIntegrity =
-    officialNpmTrust?.expectedIntegrity ?? officialIdPlan?.expectedIntegrity;
+    trustedNpmInstall?.expectedIntegrity ?? officialIdPlan?.expectedIntegrity;
   const result = await installPluginFromNpmSpec({
     spec: trustedNpmSpec,
     config: params.config,

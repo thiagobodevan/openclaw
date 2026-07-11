@@ -29,6 +29,7 @@ import {
   type ConfigMutationPreflight,
   type ConfigSnapshotForInstallPersist,
 } from "../plugins/install-persistence.js";
+import { resolveOpenClawTrustedNpmPackageInstall } from "../plugins/install-provenance.js";
 import type { InstallSafetyOverrides } from "../plugins/install-security-scan.js";
 import {
   PLUGIN_INSTALL_ERROR_CODE,
@@ -41,10 +42,7 @@ import {
   installPluginFromMarketplace,
   resolveMarketplaceInstallShortcut,
 } from "../plugins/marketplace.js";
-import {
-  resolveCatalogOfficialExternalInstallPlan,
-  resolveCatalogOfficialExternalNpmPackageTrust,
-} from "../plugins/official-external-install-trust.js";
+import { resolveCatalogOfficialExternalInstallPlan } from "../plugins/official-external-install-trust.js";
 import { tracePluginLifecyclePhaseAsync } from "../plugins/plugin-lifecycle-trace.js";
 import { validateJsonSchemaValue } from "../plugins/schema-validator.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
@@ -1167,8 +1165,8 @@ export async function runPluginInstallCommand(params: {
       );
       return runtime.exit(1);
     }
-    const officialNpmTrust = resolveCatalogOfficialExternalNpmPackageTrust(npmPrefixSpec);
-    if (!officialNpmTrust && !(await acknowledgeNonClawHubSource("npm", npmPrefixSpec))) {
+    const trustedNpmInstall = resolveOpenClawTrustedNpmPackageInstall(npmPrefixSpec);
+    if (!trustedNpmInstall && !(await acknowledgeNonClawHubSource("npm", npmPrefixSpec))) {
       return runtime.exit(1);
     }
     const npmPrefixResult = await tryInstallPluginOrHookPackFromNpmSpec({
@@ -1180,11 +1178,11 @@ export async function runPluginInstallCommand(params: {
       allowBundledFallback: false,
       extensionsDir,
       invalidateRuntimeCache,
-      ...(officialNpmTrust
+      ...(trustedNpmInstall
         ? {
-            expectedPluginId: officialNpmTrust.pluginId,
-            ...(officialNpmTrust.expectedIntegrity
-              ? { expectedIntegrity: officialNpmTrust.expectedIntegrity }
+            expectedPluginId: trustedNpmInstall.pluginId,
+            ...(trustedNpmInstall.expectedIntegrity
+              ? { expectedIntegrity: trustedNpmInstall.expectedIntegrity }
               : {}),
             trustedSourceLinkedOfficialInstall: true,
           }
@@ -1334,8 +1332,8 @@ export async function runPluginInstallCommand(params: {
     return;
   }
 
-  const officialNpmTrust = resolveCatalogOfficialExternalNpmPackageTrust(raw);
-  if (!officialNpmTrust && !(await acknowledgeNonClawHubSource("npm", raw))) {
+  const trustedNpmInstall = resolveOpenClawTrustedNpmPackageInstall(raw);
+  if (!trustedNpmInstall && !(await acknowledgeNonClawHubSource("npm", raw))) {
     return runtime.exit(1);
   }
   const npmResult = await tryInstallPluginOrHookPackFromNpmSpec({
@@ -1347,11 +1345,11 @@ export async function runPluginInstallCommand(params: {
     allowBundledFallback: true,
     extensionsDir,
     invalidateRuntimeCache,
-    ...(officialNpmTrust
+    ...(trustedNpmInstall
       ? {
-          expectedPluginId: officialNpmTrust.pluginId,
-          ...(officialNpmTrust.expectedIntegrity
-            ? { expectedIntegrity: officialNpmTrust.expectedIntegrity }
+          expectedPluginId: trustedNpmInstall.pluginId,
+          ...(trustedNpmInstall.expectedIntegrity
+            ? { expectedIntegrity: trustedNpmInstall.expectedIntegrity }
             : {}),
           trustedSourceLinkedOfficialInstall: true,
         }

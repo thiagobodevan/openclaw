@@ -209,6 +209,42 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
+  it("allows npm packages matched by a bundled plugin manifest", async () => {
+    installPluginFromNpmSpecMock.mockResolvedValue({
+      ok: true,
+      pluginId: "discord",
+      targetDir: "/tmp/discord",
+      version: "1.0.0",
+      extensions: ["index.js"],
+      npmResolution: {
+        name: "@openclaw/discord",
+        version: "1.0.0",
+        resolvedSpec: "@openclaw/discord@1.0.0",
+      },
+    });
+    persistPluginInstallMock.mockResolvedValue({});
+
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams("/plugins install npm:@openclaw/discord", workspaceDir);
+
+      const result = await handlePluginsCommand(params, true);
+
+      expect(result?.reply?.text).toContain('Installed plugin "discord"');
+      expectObjectFields(mockFirstObjectArg(installPluginFromNpmSpecMock), {
+        spec: "@openclaw/discord",
+        expectedPluginId: "discord",
+        trustedSourceLinkedOfficialInstall: true,
+      });
+      expectPersistedInstall("discord", {
+        source: "npm",
+        spec: "@openclaw/discord",
+        installPath: "/tmp/discord",
+        version: "1.0.0",
+      });
+    });
+  });
+
   it("allows plugin ids matched by the official catalog", async () => {
     installPluginFromNpmSpecMock.mockResolvedValue({
       ok: true,
