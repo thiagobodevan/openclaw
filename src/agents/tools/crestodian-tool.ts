@@ -81,6 +81,8 @@ function createCrestodianToolProposal(
 const CRESTODIAN_NEEDS_APPROVAL_PREFIX = "needs-approval:";
 const CRESTODIAN_APPROVAL_MISMATCH_PREFIX = "approval-mismatch:";
 const CRESTODIAN_DIRECTIVE_PREFIX = "directive:";
+const CRESTODIAN_SETUP_RETRY_ARGS_PREFIX =
+  "After the user approves, retry with these exact tool arguments: ";
 
 /**
  * Reconstruct a host directive from an out-of-process tool result. Directive
@@ -149,10 +151,39 @@ export function resolveCrestodianProposalTransition(params: {
   if (params.resultText.startsWith(CRESTODIAN_NEEDS_APPROVAL_PREFIX)) {
     const markerLine = params.resultText.split("\n", 1)[0] ?? "";
     const carriedHash = markerLine.slice(CRESTODIAN_NEEDS_APPROVAL_PREFIX.length).trim();
-    const operationHash = /^[a-f0-9]{64}$/.test(carriedHash)
-      ? carriedHash
-      : hashCrestodianOperation(operation);
-    return { proposal: createCrestodianToolProposal(operation, operationHash) };
+    if (!/^[a-f0-9]{64}$/.test(carriedHash)) {
+      return { proposal: undefined };
+    }
+    if (hashCrestodianOperation(operation) === carriedHash) {
+      return { proposal: createCrestodianToolProposal(operation, carriedHash) };
+    }
+    if (operation.kind !== "setup" || operation.inferenceRoutes !== undefined) {
+      return { proposal: undefined };
+    }
+    const retryLine = params.resultText
+      .split("\n")
+      .find((line) => line.startsWith(CRESTODIAN_SETUP_RETRY_ARGS_PREFIX));
+    if (!retryLine) {
+      return { proposal: undefined };
+    }
+    try {
+      const retryArgs: unknown = JSON.parse(
+        retryLine.slice(CRESTODIAN_SETUP_RETRY_ARGS_PREFIX.length),
+      );
+      if (!retryArgs || typeof retryArgs !== "object" || Array.isArray(retryArgs)) {
+        return { proposal: undefined };
+      }
+      const capturedOperation = operationForAction(retryArgs as Record<string, unknown>);
+      if (
+        capturedOperation.kind !== "setup" ||
+        hashCrestodianOperation(capturedOperation) !== carriedHash
+      ) {
+        return { proposal: undefined };
+      }
+      return { proposal: createCrestodianToolProposal(capturedOperation, carriedHash) };
+    } catch {
+      return { proposal: undefined };
+    }
   }
   // Executed or errored mutation: an armed approval is single-use either way.
   return { proposal: undefined };
@@ -481,7 +512,7 @@ export function createCrestodianTool(options: CrestodianToolOptions): AnyAgentTo
               : {}),
             approved: true,
           };
-          setupProposalDetail = `${preview.read()}\nAfter the user approves, retry with these exact tool arguments: ${JSON.stringify(retryArgs)}\n`;
+          setupProposalDetail = `${preview.read()}\n${CRESTODIAN_SETUP_RETRY_ARGS_PREFIX}${JSON.stringify(retryArgs)}\n`;
         }
         const operationHash = hashCrestodianOperation(operation);
         const armedForThisOperation =

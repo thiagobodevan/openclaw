@@ -205,10 +205,12 @@ describe("crestodian tool", () => {
     );
     expect(
       resolveCrestodianProposalTransition({
-        args: { action: "setup", workspace: "/tmp/work" },
+        args,
         resultText: toolText(result),
       }),
-    ).toEqual({ proposal: expect.objectContaining({ operationHash: proposalRef.current?.operationHash }) });
+    ).toEqual({
+      proposal: expect.objectContaining({ operationHash: proposalRef.current?.operationHash }),
+    });
   });
 
   it("prepares a route-less setup before registering its approval hash", async () => {
@@ -547,9 +549,13 @@ describe("crestodian tool", () => {
         args,
         resultText: "needs-approval: this action changes state.",
       }),
-    ).toEqual({
-      proposal: expect.objectContaining({ operationHash: hash, renderedByHost: false }),
-    });
+    ).toEqual({ proposal: undefined });
+    expect(
+      resolveCrestodianProposalTransition({
+        args,
+        resultText: `needs-approval:${"0".repeat(64)}\nThis action changes state.`,
+      }),
+    ).toEqual({ proposal: undefined });
     expect(
       resolveCrestodianProposalTransition({
         args,
@@ -576,5 +582,30 @@ describe("crestodian tool", () => {
     expect(
       resolveCrestodianProposalTransition({ args: { action: "bogus" }, resultText: "ok" }),
     ).toBeNull();
+  });
+
+  it("reconstructs a route-less setup proposal from its exact retry arguments", () => {
+    const capturedArgs = {
+      action: "setup",
+      workspace: "/tmp/work",
+      model: "openai/gpt-5.5",
+      inferenceRoutes: [{ kind: "codex-cli", model: "openai/gpt-5.5" }],
+      approved: true,
+    };
+    const operationHash = hashCrestodianOperation({
+      kind: "setup",
+      workspace: "/tmp/work",
+      model: "openai/gpt-5.5",
+      inferenceRoutes: [{ kind: "codex-cli", model: "openai/gpt-5.5" }],
+    });
+
+    expect(
+      resolveCrestodianProposalTransition({
+        args: { action: "setup", workspace: "/tmp/work" },
+        resultText: `needs-approval:${operationHash}\nAfter the user approves, retry with these exact tool arguments: ${JSON.stringify(capturedArgs)}\nPlan: configure Crestodian.`,
+      }),
+    ).toEqual({
+      proposal: expect.objectContaining({ operationHash, renderedByHost: false }),
+    });
   });
 });

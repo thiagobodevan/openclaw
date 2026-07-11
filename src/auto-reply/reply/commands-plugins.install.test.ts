@@ -245,6 +245,20 @@ describe("handleCommands /plugins install", () => {
     });
   });
 
+  it("does not treat an explicit npm package as an official plugin id", async () => {
+    await withTempHome("openclaw-command-plugins-home-", async () => {
+      const workspaceDir = await workspaceHarness.createWorkspace();
+      const params = buildPluginsParams("/plugins install npm:brave", workspaceDir);
+
+      const result = await handlePluginsCommand(params, true);
+
+      if (result === null) {
+        throw new Error("expected plugin install result");
+      }
+      expectNonClawHubChatInstallRejected(result, "Installing plugin from npm registry: npm:brave");
+    });
+  });
+
   it("rejects npm-pack chat installs before package installer side effects", async () => {
     await withTempHome("openclaw-command-plugins-home-", async () => {
       const workspaceDir = await workspaceHarness.createWorkspace();

@@ -201,11 +201,12 @@ describe("runCrestodianAgentTurn", () => {
         },
       } as never;
       const session = createCrestodianAgentSession();
-      session.proposalRef.current = {
+      const visibleProposal = {
         operationHash: "previously-shown-proposal",
         plan: "previously shown plan",
         renderedByHost: true,
       };
+      session.proposalRef.current = visibleProposal;
       const runCliAgent = vi.fn(async (params: Record<string, unknown>) => {
         const crestodianTool = params.crestodianTool as {
           proposalRef: typeof session.proposalRef;
@@ -234,7 +235,7 @@ describe("runCrestodianAgentTurn", () => {
         ),
       ).resolves.toBeNull();
 
-      expect(session.proposalRef.current?.operationHash).toBe("previously-shown-proposal");
+      expect(session.proposalRef.current).toBe(visibleProposal);
     },
   );
 
