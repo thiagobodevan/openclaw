@@ -47,7 +47,7 @@ cd ~/.openclaw/npm/projects/<encoded-package>
 npm install --omit=dev --omit=peer --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 ```
 
-`openclaw plugins install npm-pack:<path.tgz> --acknowledge-non-clawhub-install` uses the same per-plugin npm
+`openclaw plugins install npm-pack:<path.tgz>` uses the same per-plugin npm
 project root for a local npm-pack tarball: OpenClaw reads the tarball's npm
 metadata, adds it to the managed project as a copied `file:` dependency, runs
 the normal npm install above, then verifies the installed lockfile metadata
@@ -169,7 +169,7 @@ the operator to an explicit fix:
 
 ```bash
 openclaw plugins update <id>
-openclaw plugins install <source> --acknowledge-non-clawhub-install
+openclaw plugins install <source>
 openclaw doctor --fix
 ```
 

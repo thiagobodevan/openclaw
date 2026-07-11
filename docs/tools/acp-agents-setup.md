@@ -162,7 +162,7 @@ openclaw config set plugins.entries.acpx.enabled true
 Local workspace install during development:
 
 ```bash
-openclaw plugins install ./path/to/local/acpx-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/acpx-plugin
 ```
 
 Then verify backend health:

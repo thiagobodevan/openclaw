@@ -518,7 +518,7 @@ const setupWizard: ChannelSetupWizard = {
 <Tabs>
   <Tab title="npm">
     ```bash
-    openclaw plugins install npm:@myorg/openclaw-my-plugin --acknowledge-non-clawhub-install
+    openclaw plugins install @myorg/openclaw-my-plugin
     ```
 
     Bare package specs install from npm during the launch cutover, unless the name matches a bundled or official plugin id, in which case OpenClaw uses that local/official copy instead. Use `clawhub:`, `npm:`, `git:`, or `npm-pack:` for deterministic source selection — see [Manage plugins](/plugins/manage-plugins).
@@ -534,7 +534,7 @@ const setupWizard: ChannelSetupWizard = {
     direct npm install path during migration:
 
     ```bash
-    openclaw plugins install npm:@myorg/openclaw-my-plugin --acknowledge-non-clawhub-install
+    openclaw plugins install npm:@myorg/openclaw-my-plugin
     ```
 
   </Tab>

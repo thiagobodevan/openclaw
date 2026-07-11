@@ -16,7 +16,7 @@ openclaw plugins install @openclaw/googlechat
 Local checkout (when running from a git repo):
 
 ```bash
-openclaw plugins install ./path/to/local/googlechat-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/googlechat-plugin
 ```
 
 ## Quick setup (beginner)

@@ -19,7 +19,7 @@ Status: downloadable plugin (bot token + WebSocket events). Channels, private ch
   </Tab>
   <Tab title="Local checkout">
     ```bash
-    openclaw plugins install ./path/to/local/mattermost-plugin --acknowledge-non-clawhub-install
+    openclaw plugins install ./path/to/local/mattermost-plugin
     ```
   </Tab>
 </Tabs>

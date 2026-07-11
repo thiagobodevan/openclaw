@@ -26,7 +26,7 @@ openclaw plugins install @openclaw/line
 Local checkout (when running from a git repo):
 
 ```bash
-openclaw plugins install ./path/to/local/line-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/line-plugin
 ```
 
 ## Setup

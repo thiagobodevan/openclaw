@@ -89,7 +89,7 @@ Fix in the plugin package:
 
 1. Add `openclaw.extensions` to `package.json`, pointing at built runtime
    files (usually `./dist/index.js`).
-2. Republish, then run `openclaw plugins install <package> --acknowledge-non-clawhub-install` again.
+2. Republish, then run `openclaw plugins install <package>` again.
 
 ```json
 {

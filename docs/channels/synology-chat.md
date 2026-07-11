@@ -19,7 +19,7 @@ openclaw plugins install @openclaw/synology-chat
 Local checkout (when running from a git repo):
 
 ```bash
-openclaw plugins install ./path/to/local/synology-chat-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/synology-chat-plugin
 ```
 
 Details: [Plugins](/tools/plugin)

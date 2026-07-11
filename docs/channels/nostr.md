@@ -19,7 +19,7 @@ Use the bare package spec to follow the current official release tag. Pin an exa
 From a local checkout (dev workflows):
 
 ```bash
-openclaw plugins install --link <path-to-local-nostr-plugin> --acknowledge-non-clawhub-install
+openclaw plugins install --link <path-to-local-nostr-plugin>
 ```
 
 Restart the gateway after installing or enabling plugins. Onboarding (`openclaw onboard`) and `openclaw channels add` surface Nostr from the shared channel catalog once the plugin is installed.

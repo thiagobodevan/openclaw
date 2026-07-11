@@ -20,7 +20,7 @@ Twitch ships as an official plugin; it is not part of the core install.
   </Tab>
   <Tab title="Local checkout">
     ```bash
-    openclaw plugins install ./path/to/local/twitch-plugin --acknowledge-non-clawhub-install
+    openclaw plugins install ./path/to/local/twitch-plugin
     ```
   </Tab>
 </Tabs>

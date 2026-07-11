@@ -444,8 +444,9 @@ plugin runtime for new agent turns. `/plugins install` restarts managed
 Gateways automatically because plugin source modules changed. Chat installs are
 limited to ClawHub and packages matched by OpenClaw's official catalog. Install
 arbitrary npm, git, archive, marketplace, or local path sources from a trusted
-local shell with `openclaw plugins install ... --acknowledge-non-clawhub-install`
-after reviewing the source.
+local shell after reviewing the source and confirming the interactive warning.
+For noninteractive installs, also pass
+`--acknowledge-non-clawhub-install`.
 
 ## `/trace`: plugin trace output
 

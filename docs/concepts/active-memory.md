@@ -464,7 +464,7 @@ Selecting the memory slot is enough for active memory to use `memory_recall`:
 
 [Lossless Claw](https://github.com/martian-engineering/lossless-claw) is an
 external context-engine plugin (`openclaw plugins install
-@martian-engineering/lossless-claw --acknowledge-non-clawhub-install`) with its own recall tools. Set it up as
+@martian-engineering/lossless-claw`) with its own recall tools. Set it up as
 a context engine first; see [Context engine](/concepts/context-engine). Then
 point active memory at its tools:
 

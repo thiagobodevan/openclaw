@@ -213,7 +213,7 @@ The Gateway skips internal hook discovery on startup until internal hooks are co
 Hook packs are npm packages that export hooks via `openclaw.hooks` in `package.json`. Install with:
 
 ```bash
-openclaw plugins install <path-or-spec> --acknowledge-non-clawhub-install
+openclaw plugins install <path-or-spec>
 ```
 
 Npm specs are registry-only (package name + optional exact version or dist-tag). Git/URL/file specs and semver ranges are rejected. The older `openclaw hooks install` and `openclaw hooks update` commands are deprecated aliases for `openclaw plugins install` / `openclaw plugins update`.

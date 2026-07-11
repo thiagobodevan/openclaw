@@ -22,7 +22,7 @@ Use the bare package to follow the current official release tag. Pin an exact ve
 Local checkout (running from a git repo):
 
 ```bash
-openclaw plugins install ./path/to/local/msteams-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/msteams-plugin
 ```
 
 Details: [Plugins](/tools/plugin)

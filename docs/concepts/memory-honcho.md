@@ -47,7 +47,7 @@ Honcho registers tools the agent can use during conversation:
 Install the plugin and run setup:
 
 ```bash
-openclaw plugins install @honcho-ai/openclaw-honcho --acknowledge-non-clawhub-install
+openclaw plugins install @honcho-ai/openclaw-honcho
 openclaw honcho setup
 openclaw gateway --force
 ```

@@ -18,7 +18,7 @@ Use the bare package spec to follow the current official release tag. Pin an exa
 From a local checkout (dev workflows):
 
 ```bash
-openclaw plugins install ./path/to/local/nextcloud-talk-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/nextcloud-talk-plugin
 ```
 
 Restart the gateway after installing. Details: [Plugins](/tools/plugin)

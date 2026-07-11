@@ -28,7 +28,7 @@ only for reproducible installs.
 From a local checkout:
 
 ```bash
-openclaw plugins install ./path/to/local/tlon-plugin --acknowledge-non-clawhub-install
+openclaw plugins install ./path/to/local/tlon-plugin
 ```
 
 Details: [Plugins](/tools/plugin)

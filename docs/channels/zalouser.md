@@ -21,7 +21,7 @@ openclaw plugins install @openclaw/zalouser
 ```
 
 - Pin a version: `openclaw plugins install @openclaw/zalouser@<version>`
-- From a source checkout: `openclaw plugins install ./path/to/local/zalouser-plugin --acknowledge-non-clawhub-install`
+- From a source checkout: `openclaw plugins install ./path/to/local/zalouser-plugin`
 - Details: [Plugins](/tools/plugin)
 
 ## Quick setup

@@ -121,22 +121,21 @@ generated README for first-time ClawHub publishing and trusted-publisher setup.
 
 ```bash
 openclaw plugins search "calendar"                      # search ClawHub plugins
-openclaw plugins install @openclaw/<package>                                               # trusted official catalog
-openclaw plugins install <package> --acknowledge-non-clawhub-install                       # arbitrary npm package
+openclaw plugins install @openclaw/<package>            # trusted official catalog
+openclaw plugins install <package>                       # arbitrary npm package
 openclaw plugins install clawhub:<package>                # ClawHub only
-openclaw plugins install npm:<package> --acknowledge-non-clawhub-install                    # npm only
-openclaw plugins install npm-pack:<path.tgz> --acknowledge-non-clawhub-install               # local npm-pack tarball
-openclaw plugins install git:github.com/<owner>/<repo> --acknowledge-non-clawhub-install     # git repo
-openclaw plugins install git:github.com/<owner>/<repo>@<ref> --acknowledge-non-clawhub-install
-openclaw plugins install <path> --acknowledge-non-clawhub-install                            # local path or archive
-openclaw plugins install -l <path> --acknowledge-non-clawhub-install                         # link instead of copy
-openclaw plugins install <plugin>@<marketplace> --acknowledge-non-clawhub-install          # marketplace shorthand
-openclaw plugins install <plugin> --marketplace <name> --acknowledge-non-clawhub-install     # marketplace (explicit)
-openclaw plugins install <package> --force --acknowledge-non-clawhub-install               # overwrite existing install
-openclaw plugins install <package> --pin --acknowledge-non-clawhub-install                 # pin resolved npm version
+openclaw plugins install npm:<package>                    # npm only
+openclaw plugins install npm-pack:<path.tgz>               # local npm-pack tarball
+openclaw plugins install git:github.com/<owner>/<repo>     # git repo
+openclaw plugins install git:github.com/<owner>/<repo>@<ref>
+openclaw plugins install <path>                            # local path or archive
+openclaw plugins install -l <path>                         # link instead of copy
+openclaw plugins install <plugin>@<marketplace>             # marketplace shorthand
+openclaw plugins install <plugin> --marketplace <name>      # marketplace (explicit)
+openclaw plugins install <package> --force                  # overwrite existing install
+openclaw plugins install <package> --pin                    # pin resolved npm version
 openclaw plugins install clawhub:<package> --acknowledge-clawhub-risk
-openclaw plugins install npm:<package> --acknowledge-non-clawhub-install
-openclaw plugins install <package> --dangerously-force-unsafe-install --acknowledge-non-clawhub-install
+openclaw plugins install <package> --dangerously-force-unsafe-install
 ```
 
 Maintainers testing setup-time installs can override automatic plugin install
@@ -188,7 +187,7 @@ non-npm sources are not rewritten.
   <Accordion title="--force and reinstall vs update">
     `--force` reuses the existing install target and overwrites an already-installed plugin or hook pack in place. Use it when intentionally reinstalling the same id from a new local path, archive, ClawHub package, or npm artifact. For routine upgrades of an already tracked npm plugin, prefer `openclaw plugins update <id-or-npm-spec>`.
 
-    If you run `plugins install` for a plugin id that is already installed, OpenClaw stops and points you at `plugins update <id-or-npm-spec>` for a normal upgrade, or at `plugins install <package> --force --acknowledge-non-clawhub-install` when you genuinely want to overwrite the current install from an arbitrary different source. Trusted ClawHub and OpenClaw-catalog sources do not need the acknowledgement flag. `--force` is not supported with `--link`.
+    If you run `plugins install` for a plugin id that is already installed, OpenClaw stops and points you at `plugins update <id-or-npm-spec>` for a normal upgrade, or at `plugins install <package> --force` when you genuinely want to overwrite the current install from a different source. Arbitrary sources still show the interactive provenance warning; noninteractive installs must pass the acknowledgement flag after review. Trusted ClawHub and OpenClaw-catalog sources do not need it. `--force` is not supported with `--link`.
 
   </Accordion>
   <Accordion title="--pin scope">
@@ -256,15 +255,15 @@ openclaw plugins install clawhub:openclaw-codex-app-server@1.2.3
 Bare npm-safe plugin specs install from npm by default during the launch cutover unless they match an official plugin id:
 
 ```bash
-openclaw plugins install openclaw-codex-app-server --acknowledge-non-clawhub-install
+openclaw plugins install openclaw-codex-app-server
 ```
 
 Use `npm:` to make npm-only resolution explicit:
 
 ```bash
-openclaw plugins install npm:openclaw-codex-app-server --acknowledge-non-clawhub-install
+openclaw plugins install npm:openclaw-codex-app-server
 openclaw plugins install npm:@openclaw/discord@2026.5.20
-openclaw plugins install npm:@scope/plugin-name@1.0.1 --acknowledge-non-clawhub-install
+openclaw plugins install npm:@scope/plugin-name@1.0.1
 ```
 
 OpenClaw checks the advertised plugin API / minimum gateway compatibility before install. When the selected ClawHub version publishes a ClawPack artifact, OpenClaw downloads the versioned npm-pack `.tgz`, verifies the ClawHub digest header and the artifact digest, then installs it through the normal archive path. Older ClawHub versions without ClawPack metadata still install through the legacy package archive verification path. Recorded installs keep their ClawHub source metadata, artifact kind, npm integrity, npm shasum, tarball name, and ClawPack digest facts for later updates.
@@ -276,16 +275,16 @@ Use `plugin@marketplace` shorthand when the marketplace name exists in Claude's 
 
 ```bash
 openclaw plugins marketplace list <marketplace-name>
-openclaw plugins install <plugin-name>@<marketplace-name> --acknowledge-non-clawhub-install
+openclaw plugins install <plugin-name>@<marketplace-name>
 ```
 
 Use `--marketplace` to pass the marketplace source explicitly:
 
 ```bash
-openclaw plugins install <plugin-name> --marketplace <marketplace-name> --acknowledge-non-clawhub-install
-openclaw plugins install <plugin-name> --marketplace <owner/repo> --acknowledge-non-clawhub-install
-openclaw plugins install <plugin-name> --marketplace https://github.com/<owner>/<repo> --acknowledge-non-clawhub-install
-openclaw plugins install <plugin-name> --marketplace ./my-marketplace --acknowledge-non-clawhub-install
+openclaw plugins install <plugin-name> --marketplace <marketplace-name>
+openclaw plugins install <plugin-name> --marketplace <owner/repo>
+openclaw plugins install <plugin-name> --marketplace https://github.com/<owner>/<repo>
+openclaw plugins install <plugin-name> --marketplace ./my-marketplace
 ```
 
 <Tabs>
@@ -325,7 +324,7 @@ Use `-l`/`--link` to point at a local plugin directory without copying it (adds
 to `plugins.load.paths`):
 
 ```bash
-openclaw plugins install -l ./my-plugin --acknowledge-non-clawhub-install
+openclaw plugins install -l ./my-plugin
 ```
 
 `--link` is not supported with `--force` (linked plugins point at the source

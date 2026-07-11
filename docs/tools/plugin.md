@@ -51,14 +51,14 @@ bundled, official external, and source-only plugins, see
     openclaw plugins install clawhub:<package>
 
     # From npm.
-    openclaw plugins install npm:<package> --acknowledge-non-clawhub-install
+    openclaw plugins install npm:<package>
 
     # From git.
-    openclaw plugins install git:github.com/<owner>/<repo>@<ref> --acknowledge-non-clawhub-install
+    openclaw plugins install git:github.com/<owner>/<repo>@<ref>
 
     # From a local development checkout.
-    openclaw plugins install ./my-plugin --acknowledge-non-clawhub-install
-    openclaw plugins install --link ./my-plugin --acknowledge-non-clawhub-install
+    openclaw plugins install ./my-plugin
+    openclaw plugins install --link ./my-plugin
     ```
 
     Treat plugin installs like running code. Prefer pinned versions for
@@ -116,13 +116,13 @@ bundled, official external, and source-only plugins, see
 
 ### Choose an install source
 
-| Source      | Use when                                                                       | Example                                                                                          |
-| ----------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| ClawHub     | You want OpenClaw-native discovery, scans, version metadata, and install hints | `openclaw plugins install clawhub:<package>`                                                     |
-| npm         | You need direct npm registry or dist-tag workflows                             | `openclaw plugins install npm:<package> --acknowledge-non-clawhub-install`                       |
-| git         | You need a branch, tag, or commit from a repository                            | `openclaw plugins install git:github.com/<owner>/<repo>@<ref> --acknowledge-non-clawhub-install` |
-| local path  | You are developing or testing a plugin on the same machine                     | `openclaw plugins install --link ./my-plugin --acknowledge-non-clawhub-install`                  |
-| marketplace | You are installing a Claude-compatible marketplace plugin                      | `openclaw plugins install <plugin> --marketplace <source> --acknowledge-non-clawhub-install`     |
+| Source      | Use when                                                                       | Example                                                        |
+| ----------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| ClawHub     | You want OpenClaw-native discovery, scans, version metadata, and install hints | `openclaw plugins install clawhub:<package>`                   |
+| npm         | You need direct npm registry or dist-tag workflows                             | `openclaw plugins install npm:<package>`                       |
+| git         | You need a branch, tag, or commit from a repository                            | `openclaw plugins install git:github.com/<owner>/<repo>@<ref>` |
+| local path  | You are developing or testing a plugin on the same machine                     | `openclaw plugins install --link ./my-plugin`                  |
+| marketplace | You are installing a Claude-compatible marketplace plugin                      | `openclaw plugins install <plugin> --marketplace <source>`     |
 
 Bare package specs have special compatibility behavior: a bare name that
 matches a bundled plugin id uses that bundled source; a bare name that matches

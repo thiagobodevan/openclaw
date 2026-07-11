@@ -107,17 +107,17 @@ openclaw plugins install clawhub:<package>@1.2.3
 openclaw plugins install clawhub:<package>@beta
 
 # Install from npm.
-openclaw plugins install npm:<package> --acknowledge-non-clawhub-install
-openclaw plugins install npm:@scope/openclaw-plugin@1.2.3 --acknowledge-non-clawhub-install
+openclaw plugins install npm:<package>
+openclaw plugins install npm:@scope/openclaw-plugin@1.2.3
 openclaw plugins install npm:@openclaw/codex
 
 # Install from a local npm-pack artifact.
-openclaw plugins install npm-pack:<path.tgz> --acknowledge-non-clawhub-install
+openclaw plugins install npm-pack:<path.tgz>
 
 # Install from git or a local development checkout.
-openclaw plugins install git:github.com/acme/openclaw-plugin@v1.0.0 --acknowledge-non-clawhub-install
-openclaw plugins install ./my-plugin --acknowledge-non-clawhub-install
-openclaw plugins install --link ./my-plugin --acknowledge-non-clawhub-install
+openclaw plugins install git:github.com/acme/openclaw-plugin@v1.0.0
+openclaw plugins install ./my-plugin
+openclaw plugins install --link ./my-plugin
 ```
 
 Bare package specs install from npm during the launch cutover, unless the
@@ -205,14 +205,14 @@ for the install instead.
 
 ## Choose a source
 
-| Source      | Use when                                                                    | Example                                                                                          |
-| ----------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| ClawHub     | You want OpenClaw-native discovery, scan summaries, versions, and hints     | `openclaw plugins install clawhub:<package>`                                                     |
-| git         | You want a branch, tag, or commit from a repository                         | `openclaw plugins install git:github.com/<owner>/<repo>@<ref> --acknowledge-non-clawhub-install` |
-| local path  | You are developing or testing a plugin on the same machine                  | `openclaw plugins install --link ./my-plugin --acknowledge-non-clawhub-install`                  |
-| marketplace | You are installing a Claude-compatible marketplace plugin                   | `openclaw plugins install <plugin> --marketplace <source> --acknowledge-non-clawhub-install`     |
-| npm pack    | You are proving a local package artifact through npm install semantics      | `openclaw plugins install npm-pack:<path.tgz> --acknowledge-non-clawhub-install`                 |
-| npmjs.com   | You already ship JavaScript packages or need npm dist-tags/private registry | `openclaw plugins install npm:@acme/openclaw-plugin --acknowledge-non-clawhub-install`           |
+| Source      | Use when                                                                    | Example                                                        |
+| ----------- | --------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| ClawHub     | You want OpenClaw-native discovery, scan summaries, versions, and hints     | `openclaw plugins install clawhub:<package>`                   |
+| git         | You want a branch, tag, or commit from a repository                         | `openclaw plugins install git:github.com/<owner>/<repo>@<ref>` |
+| local path  | You are developing or testing a plugin on the same machine                  | `openclaw plugins install --link ./my-plugin`                  |
+| marketplace | You are installing a Claude-compatible marketplace plugin                   | `openclaw plugins install <plugin> --marketplace <source>`     |
+| npm pack    | You are proving a local package artifact through npm install semantics      | `openclaw plugins install npm-pack:<path.tgz>`                 |
+| npmjs.com   | You already ship JavaScript packages or need npm dist-tags/private registry | `openclaw plugins install npm:@acme/openclaw-plugin`           |
 
 Managed local path installs must be plugin directories or archives. Put
 standalone plugin files in `plugins.load.paths` instead of installing them
@@ -248,9 +248,9 @@ Native npm plugins must ship a plugin manifest (`openclaw.plugin.json`) plus
 
 ```bash
 npm publish --access public
-openclaw plugins install npm:@acme/openclaw-plugin --acknowledge-non-clawhub-install
-openclaw plugins install npm:@acme/openclaw-plugin@beta --acknowledge-non-clawhub-install
-openclaw plugins install npm:@acme/openclaw-plugin@1.0.0 --acknowledge-non-clawhub-install
+openclaw plugins install npm:@acme/openclaw-plugin
+openclaw plugins install npm:@acme/openclaw-plugin@beta
+openclaw plugins install npm:@acme/openclaw-plugin@1.0.0
 ```
 
 Use these pages for the full publishing contract instead of treating this
