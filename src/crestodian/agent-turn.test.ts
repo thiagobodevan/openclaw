@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hashCrestodianOperation } from "../agents/tools/crestodian-tool.js";
+import { emitAgentEvent } from "../infra/agent-events.js";
 import {
   cleanupCrestodianAgentSession,
   createCrestodianAgentSession,
@@ -184,6 +186,70 @@ describe("runCrestodianAgentTurn", () => {
     expect(runCliAgent).toHaveBeenCalledOnce();
     expect(runEmbeddedAgent).toHaveBeenCalledOnce();
     expect(session.localBackendPreference).toBe("codex-app-server");
+  });
+
+  it("correlates CLI MCP start arguments with proposal result events", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "crestodian-turn-mcp-proposal-"));
+    tempDirs.push(stateDir);
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    const overview = {
+      defaultModel: undefined,
+      tools: {
+        claude: { command: "claude", found: true },
+        codex: { command: "codex", found: false },
+        gemini: { command: "gemini", found: false },
+      },
+    } as never;
+    const session = createCrestodianAgentSession();
+    const args = { action: "set_default_model", model: "openai/gpt-5.5" };
+    const operationHash = hashCrestodianOperation({
+      kind: "set-default-model",
+      model: "openai/gpt-5.5",
+    });
+    const runCliAgent = vi.fn(async (params: Record<string, unknown>) => {
+      const runId = String(params.runId);
+      emitAgentEvent({
+        runId,
+        stream: "tool",
+        data: {
+          phase: "start",
+          name: "mcp__openclaw__crestodian",
+          toolCallId: "crestodian-call-1",
+          args,
+        },
+      });
+      emitAgentEvent({
+        runId,
+        stream: "tool",
+        data: {
+          phase: "result",
+          name: "mcp__openclaw__crestodian",
+          toolCallId: "crestodian-call-1",
+          isError: false,
+          result: `needs-approval:${operationHash}\nThis action changes state.`,
+        },
+      });
+      return { meta: { finalAssistantVisibleText: "I prepared that change." } };
+    });
+
+    await expect(
+      runCrestodianAgentTurnWithDeps(
+        {
+          input: "change the model",
+          overview,
+          surface: "gateway",
+          approvalArmed: false,
+          session,
+        },
+        { runCliAgent: runCliAgent as never },
+      ),
+    ).resolves.toMatchObject({ text: "I prepared that change." });
+
+    expect(session.proposalRef.current).toMatchObject({
+      operationHash,
+      plan: expect.stringContaining("set agents.defaults.model.primary to openai/gpt-5.5"),
+      renderedByHost: false,
+    });
   });
 
   it.each(["empty reply", "throw"] as const)(

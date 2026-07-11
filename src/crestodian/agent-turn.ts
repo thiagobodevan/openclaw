@@ -261,8 +261,9 @@ async function mirrorCrestodianToolStateFromEvents(params: {
     import("../agents/embedded-agent-subscribe.tools.js"),
     import("../agents/tools/crestodian-tool.js"),
   ]);
+  const argsByToolCallId = new Map<string, Record<string, unknown>>();
   return onAgentEvent((evt) => {
-    if (evt.runId !== params.runId || evt.stream !== "tool" || evt.data.phase !== "result") {
+    if (evt.runId !== params.runId || evt.stream !== "tool") {
       return;
     }
     const name = typeof evt.data.name === "string" ? evt.data.name : "";
@@ -270,10 +271,25 @@ async function mirrorCrestodianToolStateFromEvents(params: {
     if (name !== "crestodian" && !name.endsWith("__crestodian")) {
       return;
     }
-    const args =
+    const toolCallId = typeof evt.data.toolCallId === "string" ? evt.data.toolCallId : "";
+    const eventArgs =
       typeof evt.data.args === "object" && evt.data.args !== null
         ? (evt.data.args as Record<string, unknown>)
-        : {};
+        : undefined;
+    if (evt.data.phase === "start") {
+      if (toolCallId && eventArgs) {
+        // Result events omit args, so retain them only until the matching result.
+        argsByToolCallId.set(toolCallId, eventArgs);
+      }
+      return;
+    }
+    if (evt.data.phase !== "result") {
+      return;
+    }
+    const args = eventArgs ?? argsByToolCallId.get(toolCallId) ?? {};
+    if (toolCallId) {
+      argsByToolCallId.delete(toolCallId);
+    }
     const resultText = extractToolResultText(evt.data.result) ?? "";
     const transition = resolveCrestodianProposalTransition({ args, resultText });
     if (transition) {
