@@ -3,7 +3,9 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -11,7 +13,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import path, { basename, dirname, join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   formatShippedBaselineExclusions,
@@ -31,6 +33,7 @@ import {
 } from "./lib/release-source-inventory.mjs";
 
 const repo = "openclaw/openclaw";
+const githubSnapshotSchemaVersion = 1;
 const commitAssociationQueryBatchSize = 20;
 const githubApiRetryDelaysMs = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 const githubGitObjectLimit = 2_048;
@@ -97,6 +100,7 @@ const toolingModuleFiles = [
     url: new URL("../../../../scripts/render-github-release-notes.mjs", import.meta.url),
   },
 ];
+let githubSnapshotState;
 
 function fail(message) {
   throw new Error(message);
@@ -361,6 +365,11 @@ Required:
 
 Options:
   --manifest <path>     Read or write the complete contribution record ledger.
+  --github-snapshot <path>
+                        Override the exact-range GitHub GraphQL snapshot path.
+  --no-github-snapshot  Disable GitHub GraphQL snapshot reuse.
+  --refresh-github-snapshot
+                        Ignore an existing exact-range snapshot and rebuild it.
   --seed-ref <ref>      Use an existing release section as editorial input.
   --tooling-commit <full-SHA>
                         Commit containing the exact trusted verifier modules.
@@ -404,7 +413,9 @@ function parseArgs(argv) {
     help: false,
     json: false,
     manifestPath: undefined,
+    githubSnapshotPath: undefined,
     maxSourceTailCommits: 1,
+    noGithubSnapshot: false,
     provenanceAdaptedPullRequests: [],
     comparisonPullRequestMemberOverlaps: [],
     comparisonPullRequestMemberSubsetOverlaps: [],
@@ -412,6 +423,7 @@ function parseArgs(argv) {
     provenancePartialPullRequests: [],
     provenancePullRequests: [],
     provenanceRefs: [],
+    refreshGithubSnapshot: false,
     seedRef: undefined,
     shippedRefs: [],
     toolingCommit: undefined,
@@ -425,9 +437,23 @@ function parseArgs(argv) {
       options.help = true;
       continue;
     }
-    if (arg === "--check-github" || arg === "--json" || arg === "--write-ledger") {
+    if (
+      arg === "--check-github" ||
+      arg === "--json" ||
+      arg === "--no-github-snapshot" ||
+      arg === "--refresh-github-snapshot" ||
+      arg === "--write-ledger"
+    ) {
       options[
-        arg === "--check-github" ? "checkGithub" : arg === "--write-ledger" ? "writeLedger" : "json"
+        arg === "--check-github"
+          ? "checkGithub"
+          : arg === "--write-ledger"
+            ? "writeLedger"
+            : arg === "--no-github-snapshot"
+              ? "noGithubSnapshot"
+              : arg === "--refresh-github-snapshot"
+                ? "refreshGithubSnapshot"
+                : "json"
       ] = true;
       continue;
     }
@@ -437,6 +463,7 @@ function parseArgs(argv) {
       arg === "--version" ||
       arg === "--release-tag" ||
       arg === "--shipped-ref" ||
+      arg === "--github-snapshot" ||
       arg === "--source-target" ||
       arg === "--max-changelog-tail" ||
       arg === "--comparison-base" ||
@@ -550,6 +577,8 @@ function parseArgs(argv) {
         });
       } else if (arg === "--manifest") {
         options.manifestPath = value;
+      } else if (arg === "--github-snapshot") {
+        options.githubSnapshotPath = value;
       } else if (arg === "--seed-ref") {
         options.seedRef = value;
       } else if (arg === "--tooling-commit") {
@@ -588,6 +617,12 @@ function parseArgs(argv) {
   }
   if (options.comparisonBaseBranch && !options.toolingCommit) {
     fail("--comparison-base main requires --tooling-commit and --tooling-tree");
+  }
+  if (options.noGithubSnapshot && options.githubSnapshotPath) {
+    fail("--no-github-snapshot cannot be combined with --github-snapshot");
+  }
+  if (options.noGithubSnapshot && options.refreshGithubSnapshot) {
+    fail("--no-github-snapshot cannot be combined with --refresh-github-snapshot");
   }
   const uniqueShippedRefs = new Set(options.shippedRefs);
   if (uniqueShippedRefs.size !== options.shippedRefs.length) {
@@ -1064,7 +1099,7 @@ function isRetryableGithubApiFailure(error, raw) {
   return raw.trim() === "";
 }
 
-export function githubApi(
+function fetchGithubApi(
   args,
   { execute = run, retryDelaysMs = githubApiRetryDelaysMs, sleep = sleepSync } = {},
 ) {
@@ -1101,6 +1136,133 @@ export function githubApi(
     sleep(retryDelaysMs[attempt - 1]);
   }
   throw githubApiFailure({ args, attempt: attempts, attempts, error: lastError, raw: lastRaw });
+}
+
+export function createGithubSnapshotState({
+  base,
+  filePath,
+  refresh = false,
+  repository = repo,
+  target,
+}) {
+  let responses = {};
+  if (!refresh && existsSync(filePath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    } catch (error) {
+      fail(
+        `could not read GitHub snapshot ${filePath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    if (
+      parsed.schemaVersion !== githubSnapshotSchemaVersion ||
+      parsed.repository !== repository ||
+      parsed.base !== base ||
+      parsed.target !== target ||
+      !parsed.responses ||
+      typeof parsed.responses !== "object" ||
+      Array.isArray(parsed.responses)
+    ) {
+      fail(
+        `GitHub snapshot ${filePath} does not match ${repository} ${base}..${target}; use --refresh-github-snapshot`,
+      );
+    }
+    responses = parsed.responses;
+  }
+  return {
+    base,
+    dirty: refresh && existsSync(filePath),
+    filePath,
+    hits: 0,
+    misses: 0,
+    repository,
+    responses,
+    target,
+  };
+}
+
+export function githubApiWithSnapshot(args, fetchApi, snapshotState) {
+  if (!snapshotState || args[0] !== "graphql") {
+    return fetchApi(args);
+  }
+  const key = JSON.stringify(args);
+  const cached = snapshotState.responses[key];
+  if (cached !== undefined) {
+    snapshotState.hits += 1;
+    return structuredClone(cached);
+  }
+  snapshotState.misses += 1;
+  const response = fetchApi(args);
+  if (
+    !response ||
+    typeof response !== "object" ||
+    Array.isArray(response) ||
+    response.data === undefined ||
+    (Array.isArray(response.errors) && response.errors.length > 0)
+  ) {
+    return response;
+  }
+  snapshotState.responses[key] = structuredClone(response);
+  snapshotState.dirty = true;
+  return response;
+}
+
+export function persistGithubSnapshot(snapshotState) {
+  if (!snapshotState?.dirty) {
+    return;
+  }
+  const output = `${JSON.stringify(
+    {
+      schemaVersion: githubSnapshotSchemaVersion,
+      repository: snapshotState.repository,
+      base: snapshotState.base,
+      target: snapshotState.target,
+      responses: snapshotState.responses,
+    },
+    null,
+    2,
+  )}\n`;
+  mkdirSync(path.dirname(snapshotState.filePath), { recursive: true });
+  const tempPath = `${snapshotState.filePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tempPath, output);
+    renameSync(tempPath, snapshotState.filePath);
+    snapshotState.dirty = false;
+  } finally {
+    rmSync(tempPath, { force: true });
+  }
+}
+
+export function githubApi(args, options) {
+  return githubApiWithSnapshot(
+    args,
+    (requestArgs) => fetchGithubApi(requestArgs, options),
+    githubSnapshotState,
+  );
+}
+
+function initializeGithubSnapshot(options) {
+  if (options.noGithubSnapshot) {
+    return undefined;
+  }
+  const base = git(["rev-parse", `${options.base}^{commit}`]);
+  const target = git(["rev-parse", `${options.target}^{commit}`]);
+  const defaultName = `verify-release-notes-${base}-${target}.json`;
+  const filePath = path.resolve(
+    options.githubSnapshotPath ??
+      git(["rev-parse", "--git-path", `openclaw-release-cache/${defaultName}`]),
+  );
+  const state = createGithubSnapshotState({
+    base,
+    filePath,
+    refresh: options.refreshGithubSnapshot,
+    target,
+  });
+  process.once("exit", () => persistGithubSnapshot(state));
+  return state;
 }
 
 function escapeRegExp(value) {
@@ -3683,6 +3845,7 @@ function main() {
     printUsage();
     return;
   }
+  githubSnapshotState = initializeGithubSnapshot(options);
   if (
     options.manifestPath &&
     canonicalFilesystemPath(options.manifestPath) === canonicalFilesystemPath("CHANGELOG.md")
@@ -4061,16 +4224,27 @@ function main() {
       unlinkedCommits: manifest.unlinkedCommits.length,
     },
     github,
+    githubSnapshot: githubSnapshotState
+      ? {
+          path: githubSnapshotState.filePath,
+          hits: githubSnapshotState.hits,
+          misses: githubSnapshotState.misses,
+        }
+      : null,
     reconciliation,
     reconciliations,
     errors,
     toolingSha256: tooling.aggregateSha256,
   };
+  persistGithubSnapshot(githubSnapshotState);
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else {
+    const snapshotSummary = githubSnapshotState
+      ? `, GitHub snapshot ${githubSnapshotState.hits} hits/${githubSnapshotState.misses} misses`
+      : "";
     process.stdout.write(
-      `${options.version}: ${ledger.pullRequests.length} PRs, ${ledger.issues.length} issues, ${errors.length === 0 ? "verified" : `${errors.length} errors`}\n`,
+      `${options.version}: ${ledger.pullRequests.length} PRs, ${ledger.issues.length} issues, ${errors.length === 0 ? "verified" : `${errors.length} errors`}${snapshotSummary}\n`,
     );
   }
   if (errors.length > 0) {
