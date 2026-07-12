@@ -25,6 +25,7 @@ import {
 } from "./runtime-snapshots.js";
 import {
   clearRuntimeAuthProfileStoreSnapshots,
+  ensureAuthProfileStoreWithoutExternalProfiles,
   getRuntimeAuthProfileStoreSnapshot,
   loadAuthProfileStoreForRuntime,
   loadAuthProfileStoreWithoutExternalProfiles,

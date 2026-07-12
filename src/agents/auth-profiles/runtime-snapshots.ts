@@ -198,6 +198,7 @@ export function setRuntimeAuthProfileStoreSnapshot(
  * Invalidates prepared credential ownership after a persisted owner-store write.
  * Main-store credentials are inherited by custom-agent snapshots, so those
  * derived snapshots must be dropped even when no exact main snapshot exists.
+ * State-only saves refresh them in the publisher without changing credential ownership.
  */
 export function noteRuntimeAuthProfileStorePersistedMutation(
   agentDir: string | undefined,
@@ -233,7 +234,7 @@ export function noteRuntimeAuthProfileStorePersistedMutation(
     record.stateRevisionKnown = true;
   }
   const mainKey = resolveRuntimeStoreKey(undefined);
-  if (ownerKey !== mainKey) {
+  if (ownerKey !== mainKey || (!mutation.credentialsChanged && !mutation.profileSetChanged)) {
     return;
   }
   for (const key of runtimeAuthStoreSnapshots.keys()) {
