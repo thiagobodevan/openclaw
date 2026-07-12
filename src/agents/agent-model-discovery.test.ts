@@ -2,15 +2,22 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { clearCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { discoverAuthStorage, discoverModels } from "./agent-model-discovery.js";
 
-// Discovery prefers the process-global plugin metadata snapshot; a snapshot
-// leaked by a sibling worker test would override authored models.json fields.
+// Discovery must not cold-load bundled plugin runtime: with build artifacts
+// present, the openai plugin's normalizeResolvedModel currently overrides
+// authored models.json api values, making these assertions machine-dependent.
+// The ambient plugin metadata snapshot is cleared for the same reason.
 beforeEach(() => {
+  vi.stubEnv("OPENCLAW_DISABLE_BUNDLED_PLUGINS", "1");
   clearCurrentPluginMetadataSnapshot();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 function writeModelsJson(agentDir: string, modelId: string): void {
