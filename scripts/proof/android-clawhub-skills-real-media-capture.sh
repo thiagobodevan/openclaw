@@ -830,7 +830,7 @@ copy_ui_xml proof-output/02-settings-list-ui.xml
 record_screen /sdcard/openclaw-settings-list.mp4 proof-output/settings-list.mp4 4
 
 tap_text "$SKILLS_TEXT" "230 1560"
-wait_for_text "$CLAW_HUB_TEXT" 90
+wait_for_text "Search installed skills" 90
 wait_for_text_absent "Connect the gateway to load and manage skills." 90
 capture_png /sdcard/openclaw-03-skills-entry.png proof-output/03-real-skills-entry.png
 copy_ui_xml proof-output/03-skills-entry-ui.xml
