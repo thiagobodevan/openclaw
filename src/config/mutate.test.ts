@@ -15,6 +15,7 @@ import {
 import { resolveConfigPath } from "./paths.js";
 import {
   registerRuntimeConfigWriteListener,
+  registerManagedRuntimeConfigWriteOwner,
   resetConfigRuntimeState,
   setRuntimeConfigSnapshotRefreshHandler,
 } from "./runtime-snapshot.js";
@@ -1344,6 +1345,80 @@ describe("config mutate helpers", () => {
     } finally {
       setRuntimeConfigSnapshotRefreshHandler(null);
     }
+  });
+
+  it("preserves auth-store refresh scope for managed top-level include writes", async () => {
+    const home = await suiteRootTracker.make("include-managed-refresh-scope");
+    const configPath = path.join(home, ".openclaw", "openclaw.json");
+    const pluginsPath = path.join(home, ".openclaw", "config", "plugins.json5");
+    await fs.mkdir(path.dirname(pluginsPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify({ plugins: { $include: "./config/plugins.json5" } }, null, 2)}\n`,
+      "utf-8",
+    );
+    await fs.writeFile(pluginsPath, `${JSON.stringify({ entries: {} }, null, 2)}\n`, "utf-8");
+    const snapshot = createSnapshot({
+      hash: "hash-include-managed-refresh-scope",
+      path: configPath,
+      parsed: { plugins: { $include: "./config/plugins.json5" } },
+      sourceConfig: { plugins: { entries: {} } },
+    });
+    const nextConfig = {
+      plugins: { entries: { demo: { enabled: true } } },
+    } satisfies OpenClawConfig;
+    ioMocks.readConfigFileSnapshotForWrite.mockResolvedValue({
+      snapshot: createSnapshot({
+        hash: "hash-include-managed-refresh-scope-written",
+        path: configPath,
+        parsed: { plugins: { $include: "./config/plugins.json5" } },
+        sourceConfig: nextConfig,
+      }),
+      writeOptions: { expectedConfigPath: configPath },
+    });
+    const preflight = vi.fn(
+      async (sourceConfig: OpenClawConfig, refreshOptions?: { includeAuthStoreRefs?: boolean }) => {
+        if (refreshOptions?.includeAuthStoreRefs !== false) {
+          throw new Error("unavailable auth-profile SecretRef");
+        }
+        return { runtimeConfig: sourceConfig, compareConfig: sourceConfig };
+      },
+    );
+    const releaseOwner = registerManagedRuntimeConfigWriteOwner(configPath, preflight);
+    const notifications: Array<{ includeAuthStoreRefs?: boolean } | undefined> = [];
+    const releaseListener = registerRuntimeConfigWriteListener((event) => {
+      if (event.configPath === configPath) {
+        notifications.push(event.runtimeRefresh);
+      }
+    });
+
+    try {
+      await replaceConfigFile({
+        baseHash: snapshot.hash,
+        snapshot,
+        writeOptions: {
+          expectedConfigPath: snapshot.path,
+          assertConfigPathForWrite: allowConfigPathWrite,
+          includeFileTargetsForWrite: {
+            [pluginsPath]: await resolveIncludeTarget(pluginsPath),
+          },
+          runtimeRefresh: { includeAuthStoreRefs: false },
+        },
+        nextConfig,
+      });
+    } finally {
+      releaseListener();
+      releaseOwner();
+    }
+
+    expect(preflight).toHaveBeenCalledWith(expect.any(Object), {
+      includeAuthStoreRefs: false,
+    });
+    expect(notifications).toEqual([{ includeAuthStoreRefs: false }]);
+    const persisted = JSON.parse(
+      await fs.readFile(pluginsPath, "utf-8"),
+    ) as OpenClawConfig["plugins"];
+    expect(persisted?.entries?.demo?.enabled).toBe(true);
   });
 
   it("does not overwrite concurrent include edits made during preflight", async () => {

@@ -29,6 +29,7 @@ export {
   selectApplicableRuntimeConfig,
   setRuntimeConfigSnapshotRefreshHandler,
   setRuntimeConfigSnapshot,
+  setRuntimeConfigSourceSnapshotIfCurrent,
   writeConfigFile,
 } from "./io.js";
 export {

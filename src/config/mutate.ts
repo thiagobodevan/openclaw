@@ -41,15 +41,18 @@ import { resolveConfigPath } from "./paths.js";
 import {
   createRuntimeConfigWriteNotification,
   finalizeRuntimeSnapshotWrite,
+  hasManagedRuntimeConfigWriteOwner,
   getRuntimeConfigSnapshot,
   getRuntimeConfigSnapshotRefreshHandler,
   getRuntimeConfigSourceSnapshot,
   notifyRuntimeConfigWriteListeners,
+  preflightManagedRuntimeConfigWrite,
   preflightRuntimeSnapshotWrite,
   resolveConfigWriteAfterWrite,
   resolveConfigWriteFollowUp,
   type ConfigWriteAfterWrite,
   type ConfigWriteFollowUp,
+  type RuntimeConfigWritePreparedCandidate,
 } from "./runtime-snapshot.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "./types.js";
 import { validateConfigObjectWithPlugins } from "./validation.js";
@@ -689,16 +692,27 @@ async function tryWriteSingleTopLevelIncludeMutation(params: {
   const runtimeConfigSourceSnapshot = getRuntimeConfigSourceSnapshot();
   const hadRuntimeSnapshot = Boolean(runtimeConfigSnapshot);
   const hadBothSnapshots = Boolean(runtimeConfigSnapshot && runtimeConfigSourceSnapshot);
-  const runtimePreflightResult = await preflightRuntimeSnapshotWrite({
-    nextSourceConfig: runtimeConfigToWrite,
-    refreshOptions: params.writeOptions?.runtimeRefresh,
-    formatRefreshError: (error) => formatErrorMessage(error),
-    createRefreshError: (detail, cause) =>
-      new Error(
-        `Config write blocked before committing ${includePath}: active SecretRef resolution failed: ${detail}`,
-        { cause },
-      ),
-  });
+  const deferRuntimeActivation = hasManagedRuntimeConfigWriteOwner(params.snapshot.path);
+  let managedPreparedCandidates = new Map<symbol, RuntimeConfigWritePreparedCandidate>();
+  let runtimePreflightResult: unknown;
+  if (deferRuntimeActivation) {
+    managedPreparedCandidates = await preflightManagedRuntimeConfigWrite(
+      params.snapshot.path,
+      runtimeConfigToWrite,
+      params.writeOptions?.runtimeRefresh,
+    );
+  } else {
+    runtimePreflightResult = await preflightRuntimeSnapshotWrite({
+      nextSourceConfig: runtimeConfigToWrite,
+      refreshOptions: params.writeOptions?.runtimeRefresh,
+      formatRefreshError: (error) => formatErrorMessage(error),
+      createRefreshError: (detail, cause) =>
+        new Error(
+          `Config write blocked before committing ${includePath}: active SecretRef resolution failed: ${detail}`,
+          { cause },
+        ),
+    });
+  }
   const committedIncludeRaw = formatJsonFileValue(includedValueToWrite);
   const committedIncludeHash = hashConfigIncludeRaw(committedIncludeRaw);
   const callerPreCommit = params.writeOptions?.preCommitRuntimePreflight;
@@ -762,16 +776,37 @@ async function tryWriteSingleTopLevelIncludeMutation(params: {
 
     const notifyCommittedWrite = () => {
       const currentRuntimeConfig = getRuntimeConfigSnapshot();
-      if (!currentRuntimeConfig) {
+      const notificationRuntimeConfig = deferRuntimeActivation
+        ? refreshedSnapshot.runtimeConfig
+        : currentRuntimeConfig;
+      if (!notificationRuntimeConfig) {
         return;
       }
+      const notificationPreparedCandidates = new Map(
+        [...managedPreparedCandidates].map(([ownerId, candidate]) => [
+          ownerId,
+          {
+            ...candidate,
+            runtimeConfig:
+              candidate.reapplyRuntimeOverlays?.(refreshedSnapshot.runtimeConfig) ??
+              candidate.runtimeConfig,
+            compareConfig:
+              candidate.reapplyCompareOverlays?.(refreshedSnapshot.sourceConfig) ??
+              candidate.compareConfig,
+          },
+        ]),
+      );
       notifyRuntimeConfigWriteListeners(
         createRuntimeConfigWriteNotification({
           configPath: params.snapshot.path,
           sourceConfig: refreshedSnapshot.sourceConfig,
-          runtimeConfig: currentRuntimeConfig,
+          runtimeConfig: notificationRuntimeConfig,
           persistedHash,
           afterWrite: params.afterWrite ?? params.writeOptions?.afterWrite,
+          runtimeRefresh: params.writeOptions?.runtimeRefresh,
+          ...(notificationPreparedCandidates.size > 0
+            ? { preparedCandidatesByOwner: notificationPreparedCandidates }
+            : {}),
         }),
       );
     };
@@ -783,6 +818,7 @@ async function tryWriteSingleTopLevelIncludeMutation(params: {
       loadFreshConfig: () => refreshedSnapshot.runtimeConfig,
       notifyCommittedWrite,
       preflightResult: runtimePreflightResult,
+      deferRuntimeActivation,
       formatRefreshError: (error) => formatErrorMessage(error),
       createRefreshError: (detail, cause) =>
         new Error(

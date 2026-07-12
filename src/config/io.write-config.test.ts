@@ -2528,6 +2528,53 @@ describe("config io write", () => {
     });
   });
 
+  it("preserves auth-store refresh scope through managed preflight and notification", async () => {
+    await withSuiteHome(async (home) => {
+      const configPath = path.join(home, ".openclaw", "openclaw.json");
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      const initialConfig = {
+        gateway: { mode: "local" as const },
+        logging: { level: "info" as const },
+      } satisfies OpenClawConfig;
+      await fs.writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, "utf-8");
+      const preflight = vi.fn(
+        async (
+          sourceConfig: OpenClawConfig,
+          refreshOptions?: { includeAuthStoreRefs?: boolean },
+        ) => ({
+          runtimeConfig: sourceConfig,
+          compareConfig: sourceConfig,
+          refreshOptions,
+        }),
+      );
+      const notifications: Array<{ includeAuthStoreRefs?: boolean } | undefined> = [];
+      const unsubscribe = registerConfigWriteListener(
+        (event) => notifications.push(event.runtimeRefresh),
+        {
+          ownsRuntimeActivationFor: configPath,
+          preCommitRuntimePreflight: preflight,
+        },
+      );
+
+      try {
+        await withEnvAsync({ OPENCLAW_CONFIG_PATH: configPath }, async () => {
+          setRuntimeConfigSnapshot(initialConfig, initialConfig);
+          await writeConfigFile(
+            { ...initialConfig, logging: { level: "debug" } },
+            { runtimeRefresh: { includeAuthStoreRefs: false } },
+          );
+        });
+      } finally {
+        unsubscribe();
+      }
+
+      expect(preflight).toHaveBeenCalledWith(expect.any(Object), {
+        includeAuthStoreRefs: false,
+      });
+      expect(notifications).toEqual([{ includeAuthStoreRefs: false }]);
+    });
+  });
+
   it("rejects ambiguous removals from arrays containing environment references", async () => {
     await withSuiteHome(async (home) => {
       const configPath = path.join(home, ".openclaw", "openclaw.json");

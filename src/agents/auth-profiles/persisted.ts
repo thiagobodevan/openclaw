@@ -593,6 +593,8 @@ export function mergeAuthProfileStores(
     !override.lastGood &&
     !override.usageStats &&
     override.runtimePersistedProfileIds === undefined &&
+    override.runtimeLocalProfileIds === undefined &&
+    override.runtimeInheritsMainState === undefined &&
     override.runtimeExternalProfileIds === undefined &&
     override.runtimeExternalProfileIdsAuthoritative !== true
   ) {
@@ -660,6 +662,9 @@ export function mergeAuthProfileStores(
   ]
     .filter((profileId) => merged.profiles[profileId])
     .toSorted();
+  const runtimeLocalProfileIds = override.runtimeLocalProfileIds
+    ?.filter((profileId) => merged.profiles[profileId])
+    .toSorted();
   const baseRuntimeExternalProfileIds =
     override.runtimeExternalProfileIdsAuthoritative === true &&
     options?.preserveBaseRuntimeExternalProfiles !== true
@@ -692,6 +697,10 @@ export function mergeAuthProfileStores(
       ...merged,
       ...(runtimePersistedProfileIds.length > 0
         ? { runtimePersistedProfileIds: [...new Set(runtimePersistedProfileIds)] }
+        : {}),
+      ...(runtimeLocalProfileIds ? { runtimeLocalProfileIds } : {}),
+      ...(override.runtimeInheritsMainState !== undefined
+        ? { runtimeInheritsMainState: override.runtimeInheritsMainState }
         : {}),
       ...runtimeExternalProfileMetadata,
     },
