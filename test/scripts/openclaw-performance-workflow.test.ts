@@ -40,7 +40,7 @@ function findStep(name: string): WorkflowStep {
 describe("OpenClaw performance workflow", () => {
   it("pins the Kova evaluator that reads truncated agent payloads", () => {
     const workflow = readFileSync(WORKFLOW, "utf8");
-    const kovaRef = "0a6d104f44753edef94462375c8b614e03fa378f";
+    const kovaRef = "4dde6b6022d94058abced883343de7ee8ce69917";
     const installRun = findStep("Install OCM and Kova").run ?? "";
 
     expect(workflow).toContain(`default: ${kovaRef}`);
@@ -64,6 +64,15 @@ describe("OpenClaw performance workflow", () => {
       '"https://github.com/shakkernerd/ocm/releases/download/${OCM_VERSION}/ocm-x86_64-unknown-linux-gnu.tar.gz"',
     );
     expect(installRun).toContain('echo "${OCM_LINUX_X64_SHA256}  ${ocm_archive}" | sha256sum -c -');
+  });
+
+  it("rewrites only Kova files that own the performance model pin", () => {
+    const pinModel = findStep("Pin Kova OpenAI model to GPT 5.5").run ?? "";
+
+    expect(pinModel).toContain('"support/configure-openclaw-mock-auth.mjs"');
+    expect(pinModel).toContain('"support/configure-openclaw-live-auth.mjs"');
+    expect(pinModel).toContain('"states/mock-openai-provider.json"');
+    expect(pinModel).not.toContain('"support/mock-openai-server.mjs"');
   });
 
   it("keeps manual rehearsal reports artifact-only by default", () => {
@@ -108,6 +117,7 @@ describe("OpenClaw performance workflow", () => {
   it("requires the shared Kova report gate before tolerating partial verdicts", () => {
     const runKova = findStep("Run Kova");
 
+    expect(runKova.run).toContain("! -name '*.summary.json'");
     expect(runKova.run).toContain(
       'node "$PERFORMANCE_HELPER_DIR/scripts/lib/kova-report-gate.mjs" "$report_json"',
     );
