@@ -6,8 +6,8 @@ mkdir -p proof-output
 APP_ID="ai.openclaw.app"
 SETTINGS_TEXT="Settings"
 SKILLS_TEXT="Skills"
-CLAW_HUB_TEXT="ClawHub"
-REVIEW_TITLE="Review ClawHub audit"
+CLAW_HUB_TEXT="Find on ClawHub"
+REVIEW_TITLE="Review ClawHub skill"
 PROOF_SKILL_TITLE="Proof Clean Skill"
 REVIEW_SKILL_TITLE="Proof Review Skill"
 MALICIOUS_SKILL_TITLE="Proof Malicious Skill"
@@ -508,28 +508,12 @@ start_real_gateway() {
     --params '{"slug":"proof-clean-skill"}' \
     --timeout 20000 \
     --json > proof-output/gateway-skills-detail.json 2> proof-output/gateway-skills-detail.err
-  if ! run_openclaw_gateway_call skills.securityReview \
-      --params '{"slug":"proof-clean-skill","version":"1.2.3","ownerHandle":"openclaw"}' \
-      --timeout 20000 \
-      --json > proof-output/gateway-skills-verdict.json 2> proof-output/gateway-skills-verdict-initial.err; then
-    if ! grep -q "scope upgrade pending approval" proof-output/gateway-skills-verdict-initial.err; then
-      cat proof-output/gateway-skills-verdict-initial.err >&2
-      return 1
-    fi
-    approve_pending_device_pairings 30 true
-    run_openclaw_gateway_call skills.securityReview \
-      --params '{"slug":"proof-clean-skill","version":"1.2.3","ownerHandle":"openclaw"}' \
-      --timeout 20000 \
-      --json > proof-output/gateway-skills-verdict.json 2> proof-output/gateway-skills-verdict.err
-  fi
-
   python3 - <<'PY'
 from pathlib import Path
-needles = ["Proof Clean Skill", "proof-clean-skill", "clean", "security-verdicts"]
+needles = ["Proof Clean Skill", "proof-clean-skill", "latestVersion"]
 combined = "\n".join(Path(p).read_text(encoding="utf-8", errors="ignore") for p in [
     "proof-output/gateway-skills-search.json",
     "proof-output/gateway-skills-detail.json",
-    "proof-output/gateway-skills-verdict.json",
     "proof-output/clawhub-fixture.jsonl",
 ])
 missing = [needle for needle in needles if needle not in combined]
@@ -552,6 +536,18 @@ wait_for_text() {
   done
   echo "Timed out waiting for UI text: ${needle}" >&2
   return 1
+}
+
+reveal_text_above() {
+  local needle="$1"
+  for _ in $(seq 1 10); do
+    if wait_for_text "$needle" 2; then
+      return 0
+    fi
+    adb shell input swipe 540 750 540 2050 500 || true
+    sleep 1
+  done
+  wait_for_text "$needle" 60
 }
 
 copy_ui_xml() {
@@ -639,7 +635,7 @@ tap_text() {
   return 1
 }
 
-tap_install_for_skill() {
+tap_review_for_skill() {
   local skill_title="$1"
   local coords=""
   for attempt in $(seq 1 10); do
@@ -665,24 +661,24 @@ skill_nodes = [node for node in nodes if node[0] == title]
 if len(skill_nodes) != 1:
     raise SystemExit(f"expected one skill title {title!r}, found {len(skill_nodes)}")
 _, _, skill_top, _, skill_bottom = skill_nodes[0]
-buttons = [node for node in nodes if node[0] == "Install" and not (node[4] < skill_top - 80 or node[2] > skill_bottom + 80)]
+buttons = [node for node in nodes if node[0] == "Review" and not (node[4] < skill_top - 80 or node[2] > skill_bottom + 80)]
 if len(buttons) != 1:
-    raise SystemExit(f"expected one Install near {title!r}, found {len(buttons)}")
+    raise SystemExit(f"expected one Review near {title!r}, found {len(buttons)}")
 _, left, top, right, bottom = buttons[0]
 print((left + right) // 2, (top + bottom) // 2)
 PY
 )" && [ -n "$coords" ]; then
-      echo "[proof] tap Install for '${skill_title}' at ${coords} (attempt ${attempt})" | tee -a proof-output/capture.log
+      echo "[proof] tap Review for '${skill_title}' at ${coords} (attempt ${attempt})" | tee -a proof-output/capture.log
       adb shell input tap $coords
       sleep 1
       return 0
     fi
-    echo "[proof] '${skill_title}' card is not fully actionable; scroll for adjacent Install (attempt ${attempt})" | tee -a proof-output/capture.log
+    echo "[proof] '${skill_title}' card is not fully actionable; scroll for adjacent Review (attempt ${attempt})" | tee -a proof-output/capture.log
     adb shell input swipe 540 2050 540 1450 400 || true
     sleep 1
   done
   copy_ui_xml "proof-output/install-target-${skill_title// /-}-failure-ui.xml"
-  echo "Unable to find one actionable Install button for skill: ${skill_title}" >&2
+  echo "Unable to find one actionable Review button for skill: ${skill_title}" >&2
   return 1
 }
 
@@ -851,30 +847,30 @@ copy_ui_xml proof-output/04-installed-filter-ui.xml
 
 # Bring the ClawHub panel/search field into view, enter a query, and run the actual Gateway search.
 for _ in $(seq 1 8); do
-  if wait_for_text "Search ClawHub skills" 2; then
+  if wait_for_text "Search ClawHub" 2; then
     break
   fi
   adb shell input swipe 540 2200 540 600 800 || true
   sleep 1
 done
-wait_for_text "Search ClawHub skills" 45
-tap_text "Search ClawHub skills" "420 1580"
+wait_for_text "Search ClawHub" 45
+tap_text "Search ClawHub" "420 1580"
 adb shell input text 'proof%sclean'
 adb shell input keyevent 4 || true
 # The search field can land at the bottom edge after filtering installed skills; reveal the
 # action row before tapping so we exercise the real button instead of a coordinate guess.
 for _ in $(seq 1 4); do
-  if wait_for_text "Search ClawHub" 2; then
+  if wait_for_text "Search" 2; then
     break
   fi
   adb shell input swipe 540 2150 540 1720 350 || true
   sleep 1
 done
-wait_for_text "Search ClawHub" 30
+wait_for_text "Search" 30
 capture_png /sdcard/openclaw-05-clawhub-query.png proof-output/05-clawhub-query-before-search.png
 copy_ui_xml proof-output/05-clawhub-query-ui.xml
 
-tap_text "Search ClawHub" "300 1720"
+tap_exact_text "Search" "300 1720"
 # Search results render below the ClawHub action row; scroll them into the visible UI tree before
 # asserting/capturing so the media proof contains the result row and install CTA.
 for _ in $(seq 1 10); do
@@ -890,7 +886,7 @@ copy_ui_xml proof-output/06-clawhub-results-ui.xml
 record_screen /sdcard/openclaw-clawhub-results.mp4 proof-output/clawhub-results.mp4 6
 
 # Open the clean install review dialog by binding the target title to its adjacent Install action.
-tap_install_for_skill "$PROOF_SKILL_TITLE"
+tap_review_for_skill "$PROOF_SKILL_TITLE"
 wait_for_text "$REVIEW_TITLE" 120
 capture_png /sdcard/openclaw-07-clawhub-review-dialog.png proof-output/07-real-clawhub-review-dialog.png
 copy_ui_xml proof-output/07-clawhub-review-dialog-ui.xml
@@ -899,8 +895,8 @@ record_screen /sdcard/openclaw-clawhub-review-dialog.mp4 proof-output/clawhub-re
 # Clean path: record the real confirm action, Gateway download/install, success message, and
 # the installed-skill refresh that follows the successful RPC.
 start_interaction_record /sdcard/openclaw-clean-install.mp4 20
-tap_exact_text "Install"
-wait_for_text "Installed proof-clean-skill@1.2.3" 120
+tap_exact_text "Verify and install"
+reveal_text_above "Installed proof-clean-skill@1.2.3"
 capture_png /sdcard/openclaw-08-clean-installed.png proof-output/08-clean-install-success.png
 copy_ui_xml proof-output/08-clean-install-success-ui.xml
 finish_interaction_record /sdcard/openclaw-clean-install.mp4 proof-output/clean-install-and-refresh.mp4
@@ -917,14 +913,16 @@ for _ in $(seq 1 8); do
   sleep 1
 done
 wait_for_text "$REVIEW_SKILL_TITLE" 60
-tap_install_for_skill "$REVIEW_SKILL_TITLE"
-wait_for_text "Acknowledge and install" 120
+tap_review_for_skill "$REVIEW_SKILL_TITLE"
+wait_for_text "$REVIEW_TITLE" 120
+tap_exact_text "Verify and install"
+reveal_text_above "Acknowledge Gateway warning and install"
 capture_png /sdcard/openclaw-10-review-required.png proof-output/10-review-required-dialog.png
 copy_ui_xml proof-output/10-review-required-dialog-ui.xml
 assert_fixture_download_count "proof-review-skill" 0 "review-before-ack"
 start_interaction_record /sdcard/openclaw-review-install.mp4 20
-tap_exact_text "Acknowledge and install"
-wait_for_text "Installed proof-review-skill@1.2.3" 120
+tap_exact_text "Acknowledge Gateway warning and install"
+reveal_text_above "Installed proof-review-skill@1.2.3"
 capture_png /sdcard/openclaw-11-review-installed.png proof-output/11-review-required-install-success.png
 copy_ui_xml proof-output/11-review-required-install-success-ui.xml
 finish_interaction_record /sdcard/openclaw-review-install.mp4 proof-output/review-required-install-and-refresh.mp4
@@ -942,8 +940,10 @@ for _ in $(seq 1 8); do
   sleep 1
 done
 wait_for_text "$MALICIOUS_SKILL_TITLE" 60
-tap_install_for_skill "$MALICIOUS_SKILL_TITLE"
-wait_for_text "This release is blocked by ClawHub and will not be downloaded." 120
+tap_review_for_skill "$MALICIOUS_SKILL_TITLE"
+wait_for_text "$REVIEW_TITLE" 120
+tap_exact_text "Verify and install"
+reveal_text_above "install was not started"
 capture_png /sdcard/openclaw-13-malicious-blocked.png proof-output/13-malicious-blocked.png
 copy_ui_xml proof-output/13-malicious-blocked-ui.xml
 record_screen /sdcard/openclaw-malicious-blocked.mp4 proof-output/malicious-blocked.mp4 8
@@ -973,16 +973,15 @@ assert_fixture_download_count "proof-malicious-skill" 0 "malicious-gateway-rejec
 python3 - <<'PY'
 from pathlib import Path
 checks = {
-    '06-clawhub-results-ui.xml': ['Proof Clean Skill', 'Install'],
-    '07-clawhub-review-dialog-ui.xml': ['Review ClawHub audit', 'Proof Clean Skill', 'Safety', 'Clean', 'Install'],
+    '06-clawhub-results-ui.xml': ['Proof Clean Skill', 'Review'],
+    '07-clawhub-review-dialog-ui.xml': ['Review ClawHub skill', 'Proof Clean Skill', 'Version', 'Publisher', 'Verify and install'],
     '08-clean-install-success-ui.xml': ['Installed proof-clean-skill@1.2.3'],
     '09-clean-post-install-refresh-ui.xml': ['Proof Clean Skill'],
-    '10-review-required-dialog-ui.xml': ['Proof Review Skill', 'Review required', 'Acknowledge and install'],
+    '10-review-required-dialog-ui.xml': ['Acknowledge Gateway warning and install'],
     '11-review-required-install-success-ui.xml': ['Installed proof-review-skill@1.2.3'],
     '12-review-required-post-install-refresh-ui.xml': ['Proof Review Skill'],
-    '13-malicious-blocked-ui.xml': ['Proof Malicious Skill', 'Blocked', 'This release is blocked by ClawHub and will not be downloaded.', 'Close'],
+    '13-malicious-blocked-ui.xml': ['install was not started', 'Dismiss'],
     'gateway-skills-search.json': ['Proof Clean Skill', 'proof-clean-skill'],
-    'gateway-skills-verdict.json': ['clean', 'securityAuditUrl'],
     'clawhub-fixture.jsonl': ['/api/v1/search', '/api/v1/skills/-/security-verdicts'],
 }
 missing = []
@@ -995,7 +994,7 @@ if missing:
     raise SystemExit('Missing expected proof evidence: ' + ', '.join(missing))
 
 blocked = Path('proof-output/13-malicious-blocked-ui.xml').read_text(encoding='utf-8', errors='ignore')
-if 'Acknowledge and install' in blocked or 'text="Install"' in blocked:
+if 'Acknowledge Gateway warning and install' in blocked or 'text="Verify and install"' in blocked:
     raise SystemExit('Malicious dialog exposed an install action')
 PY
 
@@ -1033,7 +1032,7 @@ cat > proof-output/README.md <<EOF
 - Runner: GitHub-hosted ubuntu-24.04 + Android emulator API 35
 - App launch mode: normal Android launcher; screenshot mode disabled
 - Gateway path: Android Settings → Skills → clean install + refresh → review-required acknowledgement + install → malicious block
-- RPC evidence: skills.search, skills.detail, skills.securityReview via a temporary OpenClaw Gateway started from this checkout
+- RPC evidence: skills.search, skills.detail, skills.install via a temporary OpenClaw Gateway started from this checkout
 - ClawHub fixture: local ClawHub-compatible HTTP service inside this Actions run, logged in clawhub-fixture.jsonl
 
 Key media:

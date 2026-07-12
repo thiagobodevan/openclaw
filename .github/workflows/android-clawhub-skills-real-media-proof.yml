@@ -192,7 +192,7 @@ jobs:
             fi
             echo "- Capture source: GitHub-hosted ubuntu-24.04 runner + Android emulator API 35"
             echo "- App artifact: \`$(cat proof-output/apk-path.txt)\`"
-            echo "- Gateway proof: temporary OpenClaw Gateway started from this checkout; Android connects through the normal launcher, Settings → Skills, then performs real Gateway \`skills.search\`, \`skills.detail\`, and \`skills.securityVerdicts\` RPCs."
+            echo "- Gateway proof: temporary OpenClaw Gateway started from this checkout; Android connects through the normal launcher, Settings → Skills, then performs real Gateway \`skills.search\`, \`skills.detail\`, and \`skills.install\` RPCs."
             echo "- ClawHub data source: deterministic local ClawHub-compatible HTTP fixture served inside the same Actions run; media is a real emulator capture, not screenshot-mode/static mock."
             echo "- Screenshot mode: false"
             echo
