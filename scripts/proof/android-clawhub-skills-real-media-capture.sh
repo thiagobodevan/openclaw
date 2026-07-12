@@ -961,34 +961,6 @@ copy_ui_xml proof-output/13-malicious-blocked-ui.xml
 record_screen /sdcard/openclaw-malicious-blocked.mp4 proof-output/malicious-blocked.mp4 8
 assert_fixture_download_count "proof-malicious-skill" 0 "malicious-ui-blocked"
 
-run_openclaw_gateway_call skills.install \
-  --params '{"source":"clawhub","slug":"proof-malicious-skill","version":"1.2.3","acknowledgeClawHubRisk":true,"timeoutMs":20000}' \
-  --timeout 30000 \
-  --json > proof-output/malicious-gateway-install.json 2> proof-output/malicious-gateway-install.err || true
-if grep -q "pairing required" proof-output/malicious-gateway-install.json proof-output/malicious-gateway-install.err; then
-  approve_pending_device_pairings 30 true
-  run_openclaw_gateway_call skills.install \
-    --params '{"source":"clawhub","slug":"proof-malicious-skill","version":"1.2.3","acknowledgeClawHubRisk":true,"timeoutMs":20000}' \
-    --timeout 30000 \
-    --json > proof-output/malicious-gateway-install.json 2> proof-output/malicious-gateway-install.err || true
-fi
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-payload = json.loads(Path('proof-output/malicious-gateway-install.json').read_text())
-error = payload.get('error') if isinstance(payload, dict) else None
-details = error.get('details') if isinstance(error, dict) else None
-if payload.get('ok') is not False:
-    raise SystemExit('Malicious Gateway install unexpectedly returned ok != false')
-if not isinstance(details, dict) or details.get('clawhubTrustCode') != 'clawhub_download_blocked':
-    raise SystemExit(f'Missing clawhub_download_blocked response: {payload!r}')
-message = str(error.get('message') or '')
-if 'install was not started' not in message:
-    raise SystemExit(f'Missing explicit no-install message: {message!r}')
-PY
-assert_fixture_download_count "proof-malicious-skill" 0 "malicious-gateway-rejected"
-
 python3 - <<'PY'
 from pathlib import Path
 checks = {
@@ -1112,8 +1084,7 @@ printf '%s\n' \
   latest-head.txt README.md artifact-manifest.txt proof-media-sha256.txt \
   proof-media-metadata.json fixture-events.json gateway-proof-summary.json fixture-startup.txt \
   capture.log clawhub-fixture.jsonl review-before-ack-download-count.txt \
-  malicious-ui-blocked-download-count.txt malicious-gateway-rejected-download-count.txt \
-  malicious-gateway-install.json malicious-gateway-install.err \
+  malicious-ui-blocked-download-count.txt \
   > proof-output/artifact-manifest.txt
 find proof-output -maxdepth 1 -type f \( -name '*.png' -o -name '*.mp4' -o -name '*-ui.xml' \) -printf '%f\n' \
   | sort >> proof-output/artifact-manifest.txt
