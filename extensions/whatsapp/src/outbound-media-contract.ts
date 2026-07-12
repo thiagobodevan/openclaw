@@ -2,6 +2,7 @@
 import path from "node:path";
 import { sanitizeForPlainText } from "openclaw/plugin-sdk/channel-outbound";
 import { MEDIA_FFMPEG_MAX_AUDIO_DURATION_SECS, runFfmpeg } from "openclaw/plugin-sdk/media-runtime";
+import { resolveOutboundMediaUrls } from "openclaw/plugin-sdk/reply-payload";
 import { writeExternalFileWithinRoot } from "openclaw/plugin-sdk/security-runtime";
 import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolvePreferredOpenClawTmpDir, withTempWorkspace } from "openclaw/plugin-sdk/temp-path";
@@ -83,7 +84,7 @@ export function normalizeWhatsAppPayloadTextPreservingIndentation(
   return normalized.trim() ? normalized : "";
 }
 
-export function normalizeWhatsAppMediaUrls(mediaUrls: readonly string[]): string[] {
+function normalizeWhatsAppMediaUrls(mediaUrls: readonly string[]): string[] {
   return uniqueStrings(mediaUrls.map((entry) => entry.trim()).filter(Boolean));
 }
 
@@ -103,12 +104,12 @@ export function normalizeWhatsAppOutboundPayload<T extends WhatsAppOutboundPaylo
   payload: T,
   options?: {
     normalizeText?: (text: string | undefined) => string;
-    mediaUrls?: readonly string[];
   },
 ): NormalizedWhatsAppOutboundPayload<T> {
-  const mediaUrls = options?.mediaUrls
-    ? normalizeWhatsAppMediaUrls(options.mediaUrls)
-    : resolveAdditiveWhatsAppMediaUrls(payload);
+  const preferredMediaUrls = normalizeWhatsAppMediaUrls(payload.mediaUrls ?? []);
+  const mediaUrls = normalizeWhatsAppMediaUrls(
+    resolveOutboundMediaUrls({ mediaUrl: payload.mediaUrl, mediaUrls: preferredMediaUrls }),
+  );
   const normalizeText = options?.normalizeText ?? normalizeWhatsAppPayloadText;
   return {
     ...payload,
