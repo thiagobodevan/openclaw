@@ -12,7 +12,8 @@ import type {
 import { mulawToPcm } from "openclaw/plugin-sdk/realtime-voice";
 import { detectBinary } from "openclaw/plugin-sdk/setup-tools";
 import { resolveOAuthDir } from "openclaw/plugin-sdk/state-paths";
-import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
+import { resolvePreferredOpenClawTmpDir, withTempWorkspace } from "openclaw/plugin-sdk/temp-path";
+import { jsonResult } from "openclaw/plugin-sdk/tool-results";
 import { Type } from "typebox";
 import { resolveWhatsAppAccount } from "./accounts.js";
 import { getWhatsAppConnectionController } from "./connection-controller-runtime-context.js";
@@ -66,13 +67,6 @@ const defaultDependencies: WhatsAppCallToolDependencies = {
   resolveStateDir: (accountId) =>
     path.join(resolveOAuthDir(), "whatsapp-calls", normalizeAccountId(accountId)),
 };
-
-function jsonResult(payload: unknown) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-    details: payload,
-  };
-}
 
 async function isRegularFile(filePath: string): Promise<boolean> {
   try {
@@ -278,59 +272,61 @@ function createWhatsAppCallToolWithDependencies(
         if (!speech.success || !speech.audioBuffer || !speech.sampleRate) {
           throw new Error(speech.error ?? "TTS synthesis failed");
         }
+        const sampleRate = speech.sampleRate;
         const pcm = normalizeTelephonyPcm(speech.audioBuffer, speech.outputFormat);
-        const callWindowMs = resolveCallWindowMs(pcm.length, speech.sampleRate);
-        const tempDir = await fs.mkdtemp(
-          path.join(resolvePreferredOpenClawTmpDir(), "openclaw-whatsapp-call-"),
-        );
-        const audioPath = path.join(tempDir, "message.wav");
-        try {
-          await fs.writeFile(audioPath, wrapPcm16MonoInWav(pcm, speech.sampleRate), {
-            mode: 0o600,
-          });
-          const result = await api.runtime.system.runCommandWithTimeout(
-            [
-              MEOWCALLER_COMMAND,
-              "notify",
-              "--store",
-              sessionStorePath,
-              "--answer-timeout",
-              MEOWCALLER_ANSWER_TIMEOUT,
-              "--max-duration",
-              MEOWCALLER_MAX_DURATION,
-              target,
-              audioPath,
-            ],
-            {
-              cwd: stateDir,
-              env: { MEOW_LOG_LEVEL: "warn" },
-              timeoutMs: callWindowMs,
-              signal,
-              killProcessTree: true,
-              maxOutputBytes: MAX_COMMAND_OUTPUT_BYTES,
-            },
-          );
-          if (result.termination === "signal") {
-            throw new Error("WhatsApp call cancelled");
-          }
-          if (result.termination === "timeout") {
-            throw new Error("MeowCaller exceeded the bounded WhatsApp call window");
-          }
-          if (result.termination !== "exit" || result.code !== 0) {
-            throw new Error(
-              `MeowCaller did not complete the call (code ${result.code ?? "unknown"})`,
+        const callWindowMs = resolveCallWindowMs(pcm.length, sampleRate);
+        return await withTempWorkspace(
+          {
+            rootDir: resolvePreferredOpenClawTmpDir(),
+            prefix: "openclaw-whatsapp-call-",
+          },
+          async (workspace) => {
+            const audioPath = await workspace.write(
+              "message.wav",
+              wrapPcm16MonoInWav(pcm, sampleRate),
             );
-          }
-          return jsonResult({
-            completed: true,
-            recipient: "current WhatsApp requester",
-            callWindowSeconds: Math.ceil(callWindowMs / 1_000),
-            ttsProvider: speech.provider,
-            note: "MeowCaller completed answer, playback, and hangup for the requester-bound call.",
-          });
-        } finally {
-          await fs.rm(tempDir, { recursive: true, force: true });
-        }
+            const result = await api.runtime.system.runCommandWithTimeout(
+              [
+                MEOWCALLER_COMMAND,
+                "notify",
+                "--store",
+                sessionStorePath,
+                "--answer-timeout",
+                MEOWCALLER_ANSWER_TIMEOUT,
+                "--max-duration",
+                MEOWCALLER_MAX_DURATION,
+                target,
+                audioPath,
+              ],
+              {
+                cwd: stateDir,
+                env: { MEOW_LOG_LEVEL: "warn" },
+                timeoutMs: callWindowMs,
+                signal,
+                killProcessTree: true,
+                maxOutputBytes: MAX_COMMAND_OUTPUT_BYTES,
+              },
+            );
+            if (result.termination === "signal") {
+              throw new Error("WhatsApp call cancelled");
+            }
+            if (result.termination === "timeout") {
+              throw new Error("MeowCaller exceeded the bounded WhatsApp call window");
+            }
+            if (result.termination !== "exit" || result.code !== 0) {
+              throw new Error(
+                `MeowCaller did not complete the call (code ${result.code ?? "unknown"})`,
+              );
+            }
+            return jsonResult({
+              completed: true,
+              recipient: "current WhatsApp requester",
+              callWindowSeconds: Math.ceil(callWindowMs / 1_000),
+              ttsProvider: speech.provider,
+              note: "MeowCaller completed answer, playback, and hangup for the requester-bound call.",
+            });
+          },
+        );
       } finally {
         activeCallAccounts.delete(accountId);
       }

@@ -119,6 +119,14 @@ describe("WhatsApp call tool", () => {
         throw new Error("missing audio path");
       }
       audioPath = commandAudioPath;
+      if (process.platform !== "win32") {
+        const [workspaceStat, audioStat] = await Promise.all([
+          fs.stat(path.dirname(commandAudioPath)),
+          fs.stat(commandAudioPath),
+        ]);
+        expect(workspaceStat.mode & 0o777).toBe(0o700);
+        expect(audioStat.mode & 0o777).toBe(0o600);
+      }
       const wav = await fs.readFile(commandAudioPath);
       expect(wav.toString("ascii", 0, 4)).toBe("RIFF");
       expect(wav.toString("ascii", 8, 12)).toBe("WAVE");
