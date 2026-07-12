@@ -2,9 +2,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { clearCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
 import { discoverAuthStorage, discoverModels } from "./agent-model-discovery.js";
+
+// Discovery prefers the process-global plugin metadata snapshot; a snapshot
+// leaked by a sibling worker test would override authored models.json fields.
+beforeEach(() => {
+  clearCurrentPluginMetadataSnapshot();
+});
 
 function writeModelsJson(agentDir: string, modelId: string): void {
   fs.writeFileSync(
