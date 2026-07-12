@@ -19,6 +19,8 @@ CONFIG_PATH="$(pwd)/proof-output/openclaw-proof-config.json"
 GATEWAY_PID=""
 CLAW_HUB_PID=""
 EMU_PID=""
+FAILED_COMMAND=""
+FAILED_LINE=""
 
 APK="$(find apps/android/app/build/outputs/apk/play/debug -maxdepth 1 -type f -name '*.apk' | sort | head -n 1)"
 if [ -z "${APK}" ] || [ ! -f "${APK}" ]; then
@@ -46,6 +48,8 @@ dump_debug() {
   local exit_code="$?"
   {
     echo "capture_exit_code=${exit_code}"
+    echo "failed_line=${FAILED_LINE:-unknown}"
+    echo "failed_command=${FAILED_COMMAND:-unknown}"
     echo "gateway_pid=${GATEWAY_PID:-unset}"
     [ -n "${GATEWAY_PID}" ] && ps -fp "${GATEWAY_PID}" || true
     echo "clawhub_pid=${CLAW_HUB_PID:-unset}"
@@ -61,7 +65,7 @@ dump_debug() {
   cat proof-output/capture-debug.txt >&2 || true
   exit "${exit_code}"
 }
-trap dump_debug ERR
+trap 'FAILED_COMMAND=${BASH_COMMAND}; FAILED_LINE=${LINENO}; dump_debug' ERR
 trap cleanup EXIT
 
 run_openclaw() {
@@ -562,6 +566,22 @@ reveal_text_below() {
   wait_for_text "$needle" 60
 }
 
+reveal_text_nearby() {
+  local needle="$1"
+  for _ in $(seq 1 8); do
+    if wait_for_text "$needle" 2; then
+      return 0
+    fi
+    adb shell input swipe 540 2050 540 750 500 || true
+    if wait_for_text "$needle" 2; then
+      return 0
+    fi
+    adb shell input swipe 540 750 540 2050 500 || true
+    sleep 1
+  done
+  wait_for_text "$needle" 60
+}
+
 copy_ui_xml() {
   local local_path="$1"
   timeout 20 adb shell uiautomator dump /sdcard/openclaw-ui.xml >/dev/null 2>&1 || true
@@ -955,7 +975,7 @@ wait_for_text "$MALICIOUS_SKILL_TITLE" 60
 tap_review_for_skill "$MALICIOUS_SKILL_TITLE"
 wait_for_text "$REVIEW_TITLE" 120
 tap_exact_text "Verify and install"
-reveal_text_below "install was not started"
+reveal_text_nearby "install was not started"
 capture_png /sdcard/openclaw-13-malicious-blocked.png proof-output/13-malicious-blocked.png
 copy_ui_xml proof-output/13-malicious-blocked-ui.xml
 record_screen /sdcard/openclaw-malicious-blocked.mp4 proof-output/malicious-blocked.mp4 8
