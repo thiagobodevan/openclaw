@@ -11,6 +11,7 @@ import * as bootstrapCache from "../../agents/bootstrap-cache.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import {
+  appendTranscriptEvent,
   listSessionEntries,
   loadSessionEntry,
   replaceSessionEntry,
@@ -396,7 +397,7 @@ async function writeTerminalTranscriptSessionStore(params: {
   );
   await fs.utimes(transcriptPath, params.transcriptMtimeMs / 1000, params.transcriptMtimeMs / 1000);
   const status = params.status ?? (params.omitStatus ? undefined : "done");
-  await writeSessionStoreFast(params.storePath, {
+  const sessionStore = {
     [params.sessionKey]: {
       sessionId: params.sessionId,
       sessionFile,
@@ -406,7 +407,31 @@ async function writeTerminalTranscriptSessionStore(params: {
       runtimeMs: 9_000,
       ...(status ? { status } : {}),
     },
-  });
+  };
+  const appendMutation = async () => {
+    const currentTime = Date.now();
+    vi.setSystemTime(params.transcriptMtimeMs);
+    try {
+      await appendTranscriptEvent(
+        {
+          agentId: "main",
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+          storePath: params.storePath,
+        },
+        { type: "custom", timestamp: new Date(params.transcriptMtimeMs).toISOString() },
+      );
+    } finally {
+      vi.setSystemTime(currentTime);
+    }
+  };
+  if (Math.floor(params.transcriptMtimeMs) > Math.floor(params.updatedAt)) {
+    await writeSessionStoreFast(params.storePath, sessionStore);
+    await appendMutation();
+  } else {
+    await appendMutation();
+    await writeSessionStoreFast(params.storePath, sessionStore);
+  }
 }
 
 function setMinimalCurrentConversationBindingRegistryForTests(): void {

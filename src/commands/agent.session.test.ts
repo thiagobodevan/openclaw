@@ -6,7 +6,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { resolveAgentDir, resolveSessionAgentId } from "../agents/agent-scope.js";
 import { updateSessionStoreAfterAgentRun } from "../agents/command/session-store.js";
 import { resolveSession } from "../agents/command/session.js";
-import { loadSessionEntry, replaceSessionEntry } from "../config/sessions/session-accessor.js";
+import {
+  appendTranscriptEvent,
+  loadSessionEntry,
+  replaceSessionEntry,
+} from "../config/sessions/session-accessor.js";
 import { clearSessionStoreCacheForTest } from "../config/sessions/store.js";
 import { resolveSessionTranscriptFile } from "../config/sessions/transcript.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -225,6 +229,15 @@ describe("agent session resolution", () => {
             claudeCliSessionId: "old-claude-cli-session",
           },
         });
+        await appendTranscriptEvent(
+          {
+            agentId: "main",
+            sessionId,
+            sessionKey: scenario.sessionKey,
+            storePath: store,
+          },
+          { type: "custom", timestamp: new Date(registryUpdatedAt + 5_000).toISOString() },
+        );
         const cfg = mockConfig(home, store);
         cfg.session = { ...cfg.session, mainKey: scenario.mainKey };
 

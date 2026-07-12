@@ -2166,6 +2166,12 @@ describe("gateway agent handler", () => {
           "utf8",
         );
         await fs.utimes(transcriptPath, new Date(now - 1_000), new Date(now - 1_000));
+        mocks.readTranscriptStatsSync.mockReturnValue({
+          eventCount: 1,
+          maxSeq: 1,
+          sizeBytes: 32,
+          lastMutationAtMs: now - 1_000,
+        });
         mocks.loadSessionEntry.mockReturnValue({
           cfg: {},
           storePath: `${sessionsDir}/sessions.json`,
