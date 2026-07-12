@@ -12,6 +12,7 @@ import {
   compareStringArrays,
   createControlUiLocaleSyncPlan,
   flattenTranslations,
+  resolveLocaleMetaProvenance,
   type GlossaryEntry,
   type LocaleEntry,
   type LocaleMeta,
@@ -1528,16 +1529,18 @@ async function syncLocale(
   // legitimately stay identical to English. Track fallback keys from actual
   // fallback decisions and previous fallback metadata instead.
 
-  const nextProvider = allowTranslate
-    ? resolveConfiguredProvider()
-    : (previousMeta?.provider ?? "");
-  const nextModel = allowTranslate ? resolveConfiguredModel() : (previousMeta?.model ?? "");
+  const provenance = resolveLocaleMetaProvenance({
+    didTranslate: allowTranslate && plan.pending.length > 0,
+    model: allowTranslate ? resolveConfiguredModel() : "",
+    previousMeta,
+    provider: allowTranslate ? resolveConfiguredProvider() : "",
+  });
   const artifacts = plan.render({
     defaultGlossary: DEFAULT_GLOSSARY,
     generatedAt: new Date().toISOString(),
     glossary,
-    model: nextModel,
-    provider: nextProvider,
+    model: provenance.model,
+    provider: provenance.provider,
     workflow: CONTROL_UI_I18N_WORKFLOW,
   });
   assertPlaceholderParity(sourceFlat, artifacts.nextFlat, entry.locale);
