@@ -13,7 +13,7 @@ on:
       expected_pr_head:
         description: Expected PR head SHA for latest-head verification
         required: true
-        default: '4bc5aeea54cd5cb090b2d802cda15f3ac1d9a147'
+        default: '44a66e0f500c57a0800bdb8d170d7cf0ddfd272a'
 
 concurrency:
   group: android-clawhub-skills-real-media-proof-v4-${{ github.ref }}
