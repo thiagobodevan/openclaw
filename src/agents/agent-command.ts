@@ -15,6 +15,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { getRuntimeConfig } from "../config/io.js";
 import { resolveSessionWorkStartError } from "../config/sessions/lifecycle.js";
+import { buildRestartRecoveryClaimCleanupPatch } from "../config/sessions/restart-recovery-state.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { withLocalGatewayRequestScope } from "../gateway/local-request-context.js";
@@ -1041,7 +1042,7 @@ async function agentCommandInternal(
   // the parent a human interjected on every spawn, for embedded and ACP children alike.
   const isSubagentLaneTurn = normalizeOptionalString(opts.lane) === AGENT_LANE_SUBAGENT;
   let sessionReboundDuringRun = false;
-  let trackedRestartRecoveryDeliveryContext = false;
+  let trackedRestartRecoveryDeliveryClaim = false;
   let currentRunDeliveryContext: DeliveryContext | undefined;
   const preparedSessionId = sessionEntry?.sessionId;
   const internalModelRunTargets =
@@ -1147,6 +1148,12 @@ async function agentCommandInternal(
           opts,
           sessionEntry: entry,
         });
+        // Restart recovery preclaims suppressed runs by id only. Retain that
+        // ownership until this exact run completes or another restart aborts it.
+        const adoptsTranscriptOnlyRecoveryClaim =
+          currentRunDeliveryContext === undefined &&
+          normalizeDeliveryContext(entry.restartRecoveryDeliveryContext) === undefined &&
+          entry.restartRecoveryDeliveryRunId === runId;
         assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
         const next: SessionEntry = {
           ...entry,
@@ -1155,7 +1162,11 @@ async function agentCommandInternal(
           sessionStartedAt: isSessionRollover ? now : entry.sessionStartedAt,
           lastInteractionAt: isSessionRollover ? now : entry.lastInteractionAt,
           restartRecoveryDeliveryContext: currentRunDeliveryContext,
-          restartRecoveryDeliveryRunId: currentRunDeliveryContext ? runId : undefined,
+          restartRecoveryDeliveryRunId:
+            currentRunDeliveryContext || adoptsTranscriptOnlyRecoveryClaim ? runId : undefined,
+          restartRecoveryDeliverySourceRunId: adoptsTranscriptOnlyRecoveryClaim
+            ? entry.restartRecoveryDeliverySourceRunId
+            : undefined,
         };
         const persisted = await persistSessionEntry({
           sessionStore,
@@ -1174,9 +1185,7 @@ async function agentCommandInternal(
                 ),
         });
         sessionEntry = persisted;
-        trackedRestartRecoveryDeliveryContext =
-          Boolean(persisted?.restartRecoveryDeliveryContext) &&
-          persisted?.restartRecoveryDeliveryRunId === runId;
+        trackedRestartRecoveryDeliveryClaim = persisted?.restartRecoveryDeliveryRunId === runId;
       }
 
       if (!isRawModelRun && acpResolution?.kind === "ready" && sessionKey) {
@@ -2871,17 +2880,19 @@ async function agentCommandInternal(
     }
     if (
       !sessionReboundDuringRun &&
-      trackedRestartRecoveryDeliveryContext &&
+      trackedRestartRecoveryDeliveryClaim &&
       sessionStore &&
       sessionKey
     ) {
       try {
         const entry = sessionStore[sessionKey] ?? sessionEntry;
-        if (entry?.restartRecoveryDeliveryContext && entry.restartRecoveryDeliveryRunId === runId) {
+        if (entry?.restartRecoveryDeliveryRunId === runId) {
           const next: SessionEntry = {
             ...entry,
-            restartRecoveryDeliveryContext: undefined,
-            restartRecoveryDeliveryRunId: undefined,
+            ...buildRestartRecoveryClaimCleanupPatch({
+              entry,
+              recordTerminalSource: true,
+            }),
             updatedAt: Date.now(),
           };
           const persisted = await persistSessionEntry({
