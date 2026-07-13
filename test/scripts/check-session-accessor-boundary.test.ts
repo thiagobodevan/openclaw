@@ -174,7 +174,6 @@ describe("session accessor boundary guard", () => {
       new Set([
         "src/agents/command/attempt-execution.ts",
         "src/agents/embedded-agent-runner/context-engine-maintenance.ts",
-        "src/agents/embedded-agent-runner/transcript-rewrite.ts",
         "src/auto-reply/reply/session-fork.runtime.ts",
         "src/config/sessions/transcript.ts",
         "src/gateway/server-methods/chat.ts",
