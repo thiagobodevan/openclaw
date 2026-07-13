@@ -13,6 +13,7 @@ import type {
   TranscriptRewriteResult,
 } from "../../context-engine/types.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import type { AgentMessage } from "../runtime/index.js";
 import { getRawSessionAppendMessage } from "../session-raw-append-message.js";
 import {
@@ -548,10 +549,15 @@ export async function rewriteTranscriptEntriesInRuntimeTranscript(params: {
         state,
         appendedEntries: result.appendedEntries,
       });
-      await publishTranscriptUpdate({
+      emitSessionTranscriptUpdate({
+        sessionFile: target.sessionFile,
         sessionKey: target.sessionKey,
         agentId: target.agentId,
-        sessionId: target.sessionId,
+        target: {
+          agentId: target.agentId,
+          sessionId: target.sessionId,
+          sessionKey: target.sessionKey,
+        },
       });
       log.info(
         `[transcript-rewrite] rewrote ${result.rewrittenEntries} entr` +
