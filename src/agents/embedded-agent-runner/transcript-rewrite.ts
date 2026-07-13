@@ -1,6 +1,5 @@
 import {
   loadTranscriptEvents,
-  publishTranscriptUpdate,
   replaceTranscriptEvents,
 } from "../../config/sessions/session-accessor.js";
 import { parseSqliteSessionFileMarker } from "../../config/sessions/sqlite-marker.js";
@@ -105,11 +104,15 @@ async function rewriteSqliteRuntimeTranscript(params: {
     },
     nextEvents,
   );
-  await publishTranscriptUpdate({
+  emitSessionTranscriptUpdate({
+    sessionFile: params.target.sessionFile,
     sessionKey: params.target.sessionKey,
     agentId: params.target.agentId,
-    sessionId: params.target.sessionId,
-    storePath: marker.storePath,
+    target: {
+      agentId: params.target.agentId,
+      sessionId: params.target.sessionId,
+      sessionKey: params.target.sessionKey,
+    },
   });
   return {
     changed: true,
