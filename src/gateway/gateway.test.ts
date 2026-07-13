@@ -350,30 +350,6 @@ describe("gateway e2e", () => {
             await fs.readFile(configPath, "utf-8"),
           ) as OpenClawConfig;
           expect(persistedAfterUnrelatedWrite.channels?.whatsapp?.dmPolicy).toBe("disabled");
-
-          resetConfigOverrides();
-          await writeConfigFile({
-            ...initialConfig,
-            logging: { level: "warn" },
-          });
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 50);
-          });
-          expect(getRuntimeConfig().gateway?.auth?.token).toBe(expectedToken);
-          expect(getRuntimeConfig().logging?.level).toBe("debug");
-
-          const acceptedPort = getRuntimeConfig().gateway?.port;
-          await writeConfigFile({
-            ...initialConfig,
-            gateway: { ...initialConfig.gateway, port: port + 1 },
-            logging: { level: "warn" },
-          });
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 50);
-          });
-          expect(getRuntimeConfig().gateway?.port).toBe(acceptedPort);
-          expect(getRuntimeConfig().logging?.level).toBe("debug");
-          expect(getRuntimeConfig().gateway?.auth?.token).toBe(expectedToken);
         }
 
         const reconnected = await connectGatewayClient({

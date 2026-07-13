@@ -1286,7 +1286,6 @@ describe("gateway hot reload model state", () => {
       undefined,
       undefined,
       vi.fn(),
-      false,
     );
     const nextConfig = {
       agents: { defaults: { workspace: "/tmp/next-workspace" } },
@@ -3985,6 +3984,7 @@ describe("gateway Gmail hot reload handlers", () => {
       harness.writeConfig(acceptedWithLogging, "accepted-a-plus-logging", 3);
       await vi.advanceTimersByTimeAsync(0);
       await expect(revertPromotion).resolves.toBe("accepted-a-plus-logging");
+      await vi.advanceTimersByTimeAsync(0);
       expect(harness.terminalPolicy.isEnabled()).toBe(false);
       expect(harness.activateRuntimeSecrets).toHaveBeenNthCalledWith(3, acceptedWithLogging, {
         reason: "reload",
@@ -3998,9 +3998,11 @@ describe("gateway Gmail hot reload handlers", () => {
       const deferredPlan = buildGatewayReloadPlan(
         diffConfigPaths(harness.initialConfig, harness.deferredConfig),
       );
-      expect(harness.requestRecoveryRestart.mock.calls).toEqual([
-        [`config reload: ${deferredPlan.restartReasons.join(", ")}`, undefined],
-      ]);
+      await vi.waitFor(() =>
+        expect(harness.requestRecoveryRestart.mock.calls).toEqual([
+          [`config reload: ${deferredPlan.restartReasons.join(", ")}`, undefined],
+        ]),
+      );
     } finally {
       hoisted.activeTaskBlockers.length = 0;
       await harness.reloader.stop();
@@ -4097,8 +4099,9 @@ describe("gateway Gmail hot reload handlers", () => {
         harness.writeConfig(acceptedConfig, `accepted-after-${_kind}`, 3);
         await vi.advanceTimersByTimeAsync(0);
         await acceptedPromotion;
+        await vi.advanceTimersByTimeAsync(0);
 
-        expect(harness.requestRecoveryRestart).toHaveBeenCalledOnce();
+        await vi.waitFor(() => expect(harness.requestRecoveryRestart).toHaveBeenCalledOnce());
       } finally {
         hoisted.activeTaskBlockers.length = 0;
         await harness.reloader.stop();
@@ -4236,6 +4239,7 @@ describe("gateway Gmail hot reload handlers", () => {
       harness.writeConfig(harness.deferredConfig, "accepted-revert-a", 3);
       await vi.advanceTimersByTimeAsync(0);
       await expect(revertPromotion).resolves.toBe("accepted-revert-a");
+      await vi.advanceTimersByTimeAsync(0);
 
       const deferredPlan = buildGatewayReloadPlan(
         diffConfigPaths(harness.initialConfig, harness.deferredConfig),
@@ -4244,9 +4248,11 @@ describe("gateway Gmail hot reload handlers", () => {
         reason: "restart-check",
         activate: false,
       });
-      expect(harness.requestRecoveryRestart.mock.calls).toEqual([
-        [`config reload: ${deferredPlan.restartReasons.join(", ")}`, undefined],
-      ]);
+      await vi.waitFor(() =>
+        expect(harness.requestRecoveryRestart.mock.calls).toEqual([
+          [`config reload: ${deferredPlan.restartReasons.join(", ")}`, undefined],
+        ]),
+      );
     } finally {
       releaseEmissionPreflight();
       hoisted.activeTaskBlockers.length = 0;

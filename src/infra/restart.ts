@@ -719,7 +719,7 @@ async function emitPreparedGatewayRestart(
         }
       };
       setFenceRollback?.(rollbackFence);
-      let isIdle = true;
+      let isIdle: boolean;
       try {
         isIdle = finalIdleCheck
           ? finalIdleCheck() && getActiveGatewayRootWorkCount({ excludeCurrent: true }) === 0
@@ -829,7 +829,7 @@ export function deferGatewayRestartUntilIdle(opts: {
           opts.hooks?.onReady?.();
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         attemptingEmission = false;
         cancelEmissionFence = null;
         stopPoll();

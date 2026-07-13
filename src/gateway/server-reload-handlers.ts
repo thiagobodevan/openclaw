@@ -1990,6 +1990,7 @@ export function startManagedGatewayConfigReloader(
         const sharedGatewaySessionGenerationChanged =
           previousSharedGatewaySessionGeneration !== nextSharedGatewaySessionGeneration;
         let runtimeSecretsPublished = false;
+        let runtimeCommitted = false;
         let publishedSnapshotRevision: number | null = null;
         let publishedSharedGatewaySessionGeneration: SharedGatewaySessionGenerationOwnership | null =
           null;
@@ -2043,19 +2044,16 @@ export function startManagedGatewayConfigReloader(
                   await commit();
                   // PTY and socket eviction cannot roll back. Run them only after
                   // the last fallible runtime commit step has accepted this config.
-                  try {
-                    if (!terminalConfigReconciled) {
-                      params.reconcileTerminalSessions(plan, prepared.config);
-                      terminalConfigReconciled = true;
-                    }
-                    if (sharedGatewaySessionGenerationChanged) {
-                      disconnectStaleSharedGatewayAuthClients({
-                        clients: params.clients,
-                        expectedGeneration: nextSharedGatewaySessionGeneration,
-                      });
-                    }
-                  } catch (err) {
-                    scheduleRecoveryRestart("terminal session reconciliation", err);
+                  // Failures bubble to applyHotReload's committed-state recovery path.
+                  if (!terminalConfigReconciled) {
+                    params.reconcileTerminalSessions(plan, prepared.config);
+                    terminalConfigReconciled = true;
+                  }
+                  if (sharedGatewaySessionGenerationChanged) {
+                    disconnectStaleSharedGatewayAuthClients({
+                      clients: params.clients,
+                      expectedGeneration: nextSharedGatewaySessionGeneration,
+                    });
                   }
                 } catch (err) {
                   if (!isCommitted()) {
@@ -2107,6 +2105,7 @@ export function startManagedGatewayConfigReloader(
                   throw err;
                 } finally {
                   if (isCommitted()) {
+                    runtimeCommitted = true;
                     transactionOwnership.markRuntimeCommitted(prepared.config, plan);
                   }
                 }
