@@ -497,6 +497,64 @@ describe("secrets audit", () => {
     });
   });
 
+  it("accepts a custom provider env marker declared by its config SecretRef", async () => {
+    const marker = "CUSTOM_MODEL_API_KEY"; // pragma: allowlist secret
+    await writeJsonFile(fixture.configPath, {
+      models: {
+        providers: {
+          custom: {
+            baseUrl: "https://custom.example/v1",
+            api: "openai-completions",
+            apiKey: { source: "env", provider: "default", id: marker },
+            models: [{ id: "custom-model", name: "Custom Model" }],
+          },
+        },
+      },
+    });
+    await writeJsonFile(fixture.modelsPath, {
+      providers: {
+        custom: {
+          baseUrl: "https://custom.example/v1",
+          api: "openai-completions",
+          apiKey: marker,
+          models: [{ id: "custom-model", name: "Custom Model" }],
+        },
+      },
+    });
+    fixture.env[marker] = "custom-model-secret"; // pragma: allowlist secret
+
+    const report = await runSecretsAudit({ env: fixture.env });
+    expectModelsFinding(report, {
+      code: "PLAINTEXT_FOUND",
+      jsonPath: "providers.custom.apiKey",
+      present: false,
+    });
+  });
+
+  it("does not accept a custom env marker declared for a different provider", async () => {
+    const marker = "CUSTOM_MODEL_API_KEY"; // pragma: allowlist secret
+    await writeJsonFile(fixture.configPath, {
+      models: {
+        providers: {
+          custom: {
+            baseUrl: "https://custom.example/v1",
+            api: "openai-completions",
+            apiKey: { source: "env", provider: "default", id: marker },
+            models: [{ id: "custom-model", name: "Custom Model" }],
+          },
+        },
+      },
+    });
+    await writeModelsProvider({ apiKey: marker });
+    fixture.env[marker] = "custom-model-secret"; // pragma: allowlist secret
+
+    const report = await runSecretsAudit({ env: fixture.env });
+    expectModelsFinding(report, {
+      code: "PLAINTEXT_FOUND",
+      jsonPath: "providers.openai.apiKey",
+    });
+  });
+
   it("does not flag models.json header marker values as plaintext", async () => {
     await writeModelsProvider({
       headers: {

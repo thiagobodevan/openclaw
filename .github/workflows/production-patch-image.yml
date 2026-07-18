@@ -1,0 +1,74 @@
+name: Production Patch Image
+
+on:
+  push:
+    branches:
+      - codex/secrets-audit-custom-envrefs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-patch-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Setup official Node and pnpm environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: 22.x
+          install-bun: "false"
+
+      - name: Run secrets and model-source regression tests
+        run: >-
+          pnpm exec vitest run
+          src/secrets/audit.test.ts
+          src/agents/models-config.runtime-source-snapshot.test.ts
+          src/agents/models-config.providers.auth-provenance.test.ts
+          --reporter=verbose
+
+  build-amd64:
+    needs: focused-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout tested source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable amd64 image
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ghcr.io/${{ github.repository_owner }}/openclaw:secrets-audit-${{ github.sha }}
+          cache-from: type=gha,scope=openclaw-production-patch
+          cache-to: type=gha,mode=max,scope=openclaw-production-patch
+
+      - name: Publish immutable digest summary
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "digest=${IMAGE_DIGEST}" >> "$GITHUB_STEP_SUMMARY"

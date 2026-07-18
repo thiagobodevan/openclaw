@@ -344,6 +344,7 @@ function collectAuthJsonResidue(params: { stateDir: string; collector: AuditColl
 function collectModelsJsonSecrets(params: {
   modelsJsonPath: string;
   collector: AuditCollector;
+  configuredEnvRefMarkersByProvider: ReadonlyMap<string, ReadonlySet<string>>;
 }): void {
   if (!fs.existsSync(params.modelsJsonPath)) {
     return;
@@ -372,6 +373,11 @@ function collectModelsJsonSecrets(params: {
       continue;
     }
     const apiKey = providerValue.apiKey;
+    const configuredEnvRefMarkers = params.configuredEnvRefMarkersByProvider.get(
+      normalizeProviderId(providerId),
+    );
+    const isConfiguredEnvRefMarker =
+      isNonEmptyString(apiKey) && configuredEnvRefMarkers?.has(apiKey.trim()) === true;
     if (coerceSecretRef(apiKey)) {
       addFinding(params.collector, {
         code: "REF_UNRESOLVED",
@@ -381,7 +387,11 @@ function collectModelsJsonSecrets(params: {
         message: "models.json contains an unresolved SecretRef object; regenerate models.json.",
         provider: providerId,
       });
-    } else if (isNonEmptyString(apiKey) && !isNonSecretApiKeyMarker(apiKey)) {
+    } else if (
+      isNonEmptyString(apiKey) &&
+      !isNonSecretApiKeyMarker(apiKey) &&
+      !isConfiguredEnvRefMarker
+    ) {
       addFinding(params.collector, {
         code: "PLAINTEXT_FOUND",
         severity: "warn",
@@ -429,6 +439,27 @@ function collectModelsJsonSecrets(params: {
       });
     }
   }
+}
+
+function collectConfiguredModelProviderEnvRefMarkers(
+  config: OpenClawConfig,
+): Map<string, Set<string>> {
+  const markersByProvider = new Map<string, Set<string>>();
+  for (const [providerId, providerValue] of Object.entries(config.models?.providers ?? {})) {
+    if (!isRecord(providerValue)) {
+      continue;
+    }
+    const ref = coerceSecretRef(providerValue.apiKey);
+    const marker = ref?.source === "env" ? ref.id.trim() : "";
+    if (!marker) {
+      continue;
+    }
+    const normalizedProviderId = normalizeProviderId(providerId);
+    const existing = markersByProvider.get(normalizedProviderId) ?? new Set<string>();
+    existing.add(marker);
+    markersByProvider.set(normalizedProviderId, existing);
+  }
+  return markersByProvider;
 }
 
 async function collectUnresolvedRefFindings(params: {
@@ -644,6 +675,7 @@ export async function runSecretsAudit(
   };
 
   if (snapshot.valid) {
+    const configuredEnvRefMarkersByProvider = collectConfiguredModelProviderEnvRefMarkers(config);
     collectConfigSecrets({
       config,
       configPath,
@@ -660,6 +692,7 @@ export async function runSecretsAudit(
       collectModelsJsonSecrets({
         modelsJsonPath,
         collector,
+        configuredEnvRefMarkersByProvider,
       });
     }
     const unresolvedRefResult = await collectUnresolvedRefFindings({
